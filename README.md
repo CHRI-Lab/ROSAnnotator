@@ -12,7 +12,7 @@ ROS Annotator is a standalone web application designed to facilitate the analysi
 | Yujie Zheng | yujiezheng@student.unimelb.edu.au | Backend Developer |
 | Yuchen Song | yuchsong2@student.unimelb.edu.au | Frontend Developer |
 | Yucheng Peng | yucpeng1@student.unimelb.edu.au | ROS Analyst |
-| Abhishek Tummalapalli | atummalapall@student.unimelb.edu.au | TBD |
+| Abhishek Tummalapalli | atummalapall@student.unimelb.edu.au | ROS Analyst |
 
 ## Repository Structure
 
@@ -46,6 +46,5 @@ To get started, you'll need to have the following tools installed on your system
 3. Run the backend server with <code>python manage.py runserver</code>
 
 
-
-## Previous Project
+## Related Project
 https://github.com/freeplay-sandbox/annotator/
