@@ -4,9 +4,9 @@ An annotation and visualization web application for ROS bags.
 ## Team Information
 | Name | Email | Position |
 |------|-------|----------|
-| Bowen Fan | bffa@student.unimelb.edu.au | Product Manager/Frontend Developer |
-| Tianqi Wang | tww2@student.unimelb.edu.au | Scrum Master/ROS Analyst |
-| Guanqin Wang | guanqinw@student.unimelb.edu.au | DevOps Manager/Backend Developer |
+| Bowen Fan | bffa@student.unimelb.edu.au | Product Manager |
+| Tianqi Wang | tww2@student.unimelb.edu.au | Scrum Master |
+| Guanqin Wang | guanqinw@student.unimelb.edu.au | DevOps Manager|
 | Yujie Zheng | yujiezheng@student.unimelb.edu.au | Backend Developer |
 | Yuchen Song | yuchsong2@student.unimelb.edu.au | Frontend Developer |
 | Yucheng Peng | yucpeng1@student.unimelb.edu.au | ROS Analyst |
