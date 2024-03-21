@@ -1,6 +1,6 @@
 # ROS Annotator
 
-An annotation and visualization web application for ROS bags.
+ROS Annotator is a standalone web application designed to facilitate the analysis of ROSBag data, with a special focus on Human-Robot Interaction (HRI) captured in various formats, including video streams, 3D point clouds, and custom HRI messages. The application will support loading multiple ROSBags, connecting to an auto-transcription tool for processing audio data, and providing a synchronised, interactive dashboard for data visualisation. Users will be able to manually annotate interactions with custom scales, annotating states (e.g., "child looking at the robot") and events (e.g., "child entering input on the table").
 
 ## Team Information
 
