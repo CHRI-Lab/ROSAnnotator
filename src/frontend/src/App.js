@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+
 import NavigationBar from './components/NavigationBar';
 import Home from './pages/Home';
 import About from './pages/About';
@@ -18,7 +19,7 @@ function App() {
       <NavigationBar pages={pages}/>
       <Routes>
         {pages.map((p) => {
-          return <Route path={p.path} page={p.page} />
+          return <Route path={p.path} element={p.page} />
         })}
       </Routes>
     </BrowserRouter>
