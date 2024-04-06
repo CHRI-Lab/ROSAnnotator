@@ -75,6 +75,10 @@ print_header "Installing ros-noetic-desktop..."
 mamba install -y ros-noetic-desktop
 print_success "ros-noetic-desktop installed."
 
+print_header "Installing additional packages..."
+conda install -y -n ros_env ipykernel --update-deps --force-reinstall
+print_success "Additional packages installed."
+
 mamba deactivate
 mamba activate ros_env
 print_success "ROS environment reactivated."
