@@ -17,4 +17,5 @@ RUN /env_config/forge-ros.sh
 
 
 #
-CMD ["/env_config/activate.sh"]
+ENTRYPOINT [ "/env_config/entrypoint.sh" ]
+CMD ["bash"]
