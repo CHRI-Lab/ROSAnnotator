@@ -17,7 +17,8 @@ RUN /env_config/forge-ros.sh
 # Setup the backend of ros-annotator
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY requirements.txt requirements.txt
+# COPY requirements.txt requirements.txt
+COPY . .
 RUN /env_config/backend.sh
 
 # Arugment completion for every new terminal
@@ -25,4 +26,4 @@ RUN cat /env_config/bashrc >> ${HOME}/.bashrc
 
 # Start the backend & ROS server
 ENTRYPOINT [ "/env_config/entrypoint.sh" ]
-CMD ["bash", "-c", "python manage.py runserver"]
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

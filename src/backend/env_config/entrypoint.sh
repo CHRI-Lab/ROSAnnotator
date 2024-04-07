@@ -44,11 +44,13 @@ print_success "Commands added to PATH."
 
 # Activate the correct virtual environment
 print_header "Activating ROS & Python Environment"
-print_progress "Activating ros_env from mamba..."
+print_progress "Activating ros_env from conda..."
 conda activate ros_env
 print_success "ros_env reactivated."
 
 echo -e "${GREEN}Setup completed successfully.${NC}"
+
+print_header "Starting up Django Server"
 
 # Execute the command
 exec $@
