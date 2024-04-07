@@ -14,13 +14,15 @@ RUN chmod -R +x /env_config/
 # Run the script to configure Python and ROS env
 RUN /env_config/forge-ros.sh
 
-# Run the script to setup the backend of ros-annotator
-# RUN /env_config/backend.sh
+# Setup the backend of ros-annotator
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+COPY requirements.txt requirements.txt
+RUN /env_config/backend.sh
 
 # Arugment completion for every new terminal
 RUN cat /env_config/bashrc >> ${HOME}/.bashrc
 
-
-#
-# ENTRYPOINT [ "/env_config/entrypoint.sh" ]
-CMD ["bash"]
+# Start the backend & ROS server
+ENTRYPOINT [ "/env_config/entrypoint.sh" ]
+CMD ["bash", "-c", "python manage.py runserver"]

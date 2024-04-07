@@ -37,7 +37,7 @@ trap 'error_occurred' ERR
 
 # Miniforge setup for Python env management
 print_header "Reintializing PATH Variables"
-print_progress "Adding Miniforge3 to PATH..."
+print_progress "Adding Forge and Conda to PATH..."
 source "${HOME}/conda/etc/profile.d/conda.sh"
 source "${HOME}/conda/etc/profile.d/mamba.sh"
 print_success "Commands added to PATH."
@@ -45,7 +45,7 @@ print_success "Commands added to PATH."
 # Activate the correct virtual environment
 print_header "Activating ROS & Python Environment"
 print_progress "Activating ros_env from mamba..."
-mamba activate ros_env
+conda activate ros_env
 print_success "ros_env reactivated."
 
 echo -e "${GREEN}Setup completed successfully.${NC}"
