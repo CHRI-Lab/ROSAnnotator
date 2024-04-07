@@ -1,8 +1,10 @@
-FROM ubuntu:jammy
+# ubuntu 20.04
+FROM ubuntu:focal
 
 # Install dependencies
 RUN apt-get update \
     && apt-get install -y wget \
+    && apt-get install -y ffmpeg libsm6 libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy files for env setup and set the permission

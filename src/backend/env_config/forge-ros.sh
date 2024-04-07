@@ -56,14 +56,14 @@ print_success "Conda activated."
 
 # Robostack setup
 print_header "Robostack Setup"
+print_progress "Creating ROS environment..."
+conda create -n ros_env python=3.11 -y
+conda activate ros_env
+print_success "ROS environment created and activated."
+
 print_progress "Installing Mamba from conda-forge..."
 conda install -y mamba -c conda-forge
 print_success "Mamba installed."
-
-print_progress "Creating ROS environment..."
-mamba create -n ros_env -y
-mamba activate ros_env
-print_success "ROS environment created and activated."
 
 print_progress "Configuring channels for the new environment..."
 conda config --env --add channels conda-forge
@@ -73,14 +73,18 @@ print_success "Channels configured."
 
 print_header "Installing ros-noetic-desktop..."
 mamba install -y ros-noetic-desktop
+mamba install compilers cmake pkg-config make ninja colcon-common-extensions catkin_tools rosdep
 print_success "ros-noetic-desktop installed."
 
 print_header "Installing additional packages..."
 conda install -y -n ros_env ipykernel --update-deps --force-reinstall
+rm -rf /root/conda/envs/ros_env/lib/python3.11/site-packages/cv2*
+rm -rf /root/conda/envs/ros_env/lib/python3.11/site-packages/opencv*
+pip3 install opencv-python-headless
 print_success "Additional packages installed."
 
-mamba deactivate
-mamba activate ros_env
+conda deactivate
+conda activate ros_env
 print_success "ROS environment reactivated."
 
 echo -e "${GREEN}Setup completed successfully.${NC}"
