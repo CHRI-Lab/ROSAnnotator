@@ -48,7 +48,7 @@ To start the backend server, follow these steps:
 
 3. **Access the Backend Server**
 
-   Once the server is up and running, you can access the backend server at `http://localhost:8000/`. You should see the Django REST framework interface.
+   Once the server is up and running, you can access the [backend server](http://localhost:8000/) at `http://localhost:8000/`. You should see the Django REST framework interface.
 
    > _Note: The backend server is running in development mode, and the backend code base has been map to the container through Docker volume, so it will automatically reload whenever you make changes to the code._
 
@@ -56,11 +56,14 @@ To start the backend server, follow these steps:
 
 ## Development Setup Guide & Workflow
 
-To develop on the backend, proceed with the following steps (or see the gif below for a visual guide):
+To develop on the backend, proceed with the following steps (or follow the gif below for a visual guide):
 
 1. **VSCode Extensions**: Ensure you have the Dev Container extension installed in your VSCode. The Dev Container extension allows you to develop inside a Docker container.
 2. **Attach to the Running Container**: In VSCode, use the Dev Container extension to attach to the running Docker container. This can typically be done through the command palette (Ctrl+Shift+P or Cmd+Shift+P) and selecting "Attach to Running Container."
 3. **Install Necessary Extensions in Dev Container**: Within the dev container environment in VSCode, install the Python (and Jupyter extensions if you are going to run Jupyter Notebook) to facilitate development. (_Note: This only need to be done once when you attach the container for the first time._)
+
+<!-- ![Dev Setup](./public/dev.gif) -->
+<img src="./public/dev.gif" alt="Dev Setup GIF" style="width: 100%; height: auto;">
 
 ## Using Rosbag Datas
 
