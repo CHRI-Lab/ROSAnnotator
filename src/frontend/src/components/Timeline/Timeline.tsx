@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Dialog, DialogTitle, DialogActions } from '@mui/material';
+import { Button} from '@mui/material';
 import Box from '@mui/material/Box';
 import Slider from '@mui/material/Slider';
 import { styled } from '@mui/system';
@@ -59,18 +59,19 @@ const NewBlock = styled('div')(({ theme }) => ({
   backgroundColor: theme.palette.action.selected,
 }));
 
+
 const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInterval }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [selectedRange, setSelectedRange] = useState<number[]>([0, 1]);
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
 
   useEffect(() => {
     setSeekTime(played);
   }, [played]);
 
+  
   const handleSliderChange = (event: Event, newValue: number | number[]) => {
     setSeekTime(newValue as number);
     onSeek(newValue as number);
@@ -81,24 +82,14 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInter
   };
 
   const handleCreateBlock = () => {
-    const isOverlap = blocks.some(block =>
-      selectedRange[0] < block.end && selectedRange[1] > block.start
-    );
-    if (isOverlap) {
-      setDialogOpen(true);
-    } else {
-      const newBlock = { start: selectedRange[0], end: selectedRange[1] };
-      setBlocks(prevBlocks => [...prevBlocks, newBlock]);
-      setSnackbarOpen(true);
-    }
+    const newBlock = { start: selectedRange[0], end: selectedRange[1] };
+    setBlocks(prevBlocks => [...prevBlocks, newBlock]);
+    setSnackbarOpen(true);
+
   };
 
   const handleSnackbarClose = () => {
     setSnackbarOpen(false);
-  };
-
-  const handleCloseDialog = () => {
-    setDialogOpen(false);
   };
 
   const selectBlock = (index: number) => {
@@ -129,12 +120,6 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInter
         message="Block created"
         handleClose={handleSnackbarClose}
       />
-      <Dialog open={dialogOpen} onClose={handleCloseDialog}>
-        <DialogTitle>Duplicate Annotations</DialogTitle>
-        <DialogActions>
-          <Button onClick={handleCloseDialog}>OK</Button>
-        </DialogActions>
-      </Dialog>
       <ScrollableTimelineContainer>
         <Slider
           value={seekTime}
@@ -192,28 +177,30 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInter
               onClick={() => selectBlock(index)}
               style={{
                 left: `${(block.start / duration) * 100}%`,
-                width: `${((block.end - block.start) / duration) * 100}%`,
+                width: `max(${5}px,${((block.end - block.start) / duration) * 100}%)`,
                 backgroundColor: selectedBlockIndex === index ? 'red' : 'grey',
               }}
             />
           ))}
         </NewAxisArea>
-        {selectedBlockIndex !== null && (
-          <Button onClick={deleteSelectedBlock} variant="contained" color="secondary">
-            Delete Block
-          </Button>
-        )}
-        {selectedBlockIndex === null && (
-         <Button onClick={handleCreateBlock} variant="contained" color="primary" >
-           Create Block
-         </Button>
-        )}
-        {selectedBlockIndex !== null && (
-          <Button onClick={() => setSelectedBlockIndex(null)} variant="outlined" color="inherit">
-           Cancel
-          </Button>
-        )}
       </ScrollableTimelineContainer>
+      <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 2 }}>
+          {selectedBlockIndex === null && (
+            <Button onClick={handleCreateBlock} variant="contained" color="primary">
+              Create Anotation Block
+           </Button>
+         )}
+         {selectedBlockIndex !== null && (
+            <>
+             <Button onClick={deleteSelectedBlock} variant="contained" color="secondary">
+                Delete
+             </Button>
+             <Button onClick={() => setSelectedBlockIndex(null)} variant="outlined">
+                Cancel
+              </Button>
+            </> 
+         )}
+    </Box>
     </Box>
   );
 };
