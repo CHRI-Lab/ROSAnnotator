@@ -50,7 +50,7 @@ const NewAxisArea = styled('div')({
   height: '50px',
   marginTop: '10px',
   marginBottom: '10px',
-  backgroundColor: '#ddd', // 新轴的背景颜色
+  backgroundColor: '#ddd', 
 });
 
 const NewBlock = styled('div')(({ theme }) => ({
@@ -85,10 +85,8 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInter
       selectedRange[0] < block.end && selectedRange[1] > block.start
     );
     if (isOverlap) {
-      // 如果有重叠，打开警告弹窗
       setDialogOpen(true);
     } else {
-      // 否则，添加新的block
       const newBlock = { start: selectedRange[0], end: selectedRange[1] };
       setBlocks(prevBlocks => [...prevBlocks, newBlock]);
       setSnackbarOpen(true);
@@ -96,7 +94,7 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInter
   };
 
   const handleSnackbarClose = () => {
-    setSnackbarOpen(false); // 关闭 Snackbar
+    setSnackbarOpen(false);
   };
 
   const handleCloseDialog = () => {
@@ -104,13 +102,13 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInter
   };
 
   const selectBlock = (index: number) => {
-    setSelectedBlockIndex(index); // 设置选中的block的索引
+    setSelectedBlockIndex(index); 
   };
 
   const deleteSelectedBlock = () => {
     if (selectedBlockIndex !== null) {
       setBlocks(blocks => blocks.filter((_, index) => index !== selectedBlockIndex));
-      setSelectedBlockIndex(null); // 删除后清除选中状态
+      setSelectedBlockIndex(null); 
     }
   };
 
@@ -177,9 +175,9 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInter
             max={duration}
             step={1}
             sx={{
-              position: 'absolute', // 与时间轴对齐
-              left: 0, // 确保从容器的最左侧开始
-              right: 0, // 确保延伸到容器的最右侧
+              position: 'absolute', 
+              left: 0, 
+              right: 0, 
               '& .MuiSlider-thumb': {
                 backgroundColor: 'primary.main',
               },
