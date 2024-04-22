@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import ReactPlayer from 'react-player';
-import Timeline from './Timeline';
+import Timeline from './components/Timeline';
 import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
@@ -42,7 +42,7 @@ const App: React.FC = () => {
   return (
     <ThemeProvider theme={theme}>
       <Box display="flex" justifyContent="center" alignItems="center" height="100vh" flexDirection="column">
-        <Box width="100%" maxWidth={300} marginBottom={2}> 
+        <Box width="100%" maxWidth={600} marginBottom={-3}> 
           <ReactPlayer
             ref={ref}
             width="100%"
@@ -54,7 +54,7 @@ const App: React.FC = () => {
             playing
           />
         </Box>
-        <Box width="100%" maxWidth={720}> 
+        <Box width="100%" maxWidth={800}> 
           <Timeline
             duration={duration}
             played={played}
@@ -62,7 +62,7 @@ const App: React.FC = () => {
             onSeek={handleSeek}
           />
         </Box>
-        <Box width="100%" maxWidth={720}>
+        <Box width="100%" maxWidth={200}>
           <TextField
             label="Mark interval (seconds)"
             type="number"
