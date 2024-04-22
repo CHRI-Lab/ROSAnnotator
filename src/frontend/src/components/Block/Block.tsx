@@ -9,14 +9,12 @@ interface BlockProps {
   onSelect: () => void;
 }
 
-// 组件样式
 const NewBlock = styled('div')(({ theme }) => ({
   position: 'absolute',
   height: '100%',
   backgroundColor: theme.palette.action.selected,
 }));
 
-// Block 组件
 const Block: React.FC<BlockProps> = ({ block, duration, isSelected, onSelect }) => {
   return (
     <NewBlock
