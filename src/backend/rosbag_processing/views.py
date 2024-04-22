@@ -22,19 +22,27 @@ def extract_images_from_rosbag(bag_filename, output_folder):
         cv2.imwrite(f'{output_folder}/images/frame{i:04d}.jpg', cv2_image)
 
 def extract_video(output_folder):
-    # subprocess.run(['ffmpeg', '-r', str(get_fps()), '-i', r'images/frame%04d.jpg', 'video.avi'])
-    subprocess.run(['ffmpeg', '-i', f'{output_folder}/video.avi', '-i', f'{output_folder}/audio.mp3', '-c:v', 'copy', '-map', '0:v', '-map', '1:a', '-y', f'{output_folder}/output.mp4'])
+
+    def get_fps():
+        for topic in bag_info['topics']:
+            if topic['type'] == 'sensor_msgs/Image':
+                return topic['frequency']
+        return None
+    subprocess.run(['ffmpeg', '-r', str(get_fps()), '-i', r'images/frame%04d.jpg', 'video.avi'])
+    # subprocess.run(['ffmpeg', '-i', f'{output_folder}/video.avi', '-i', f'{output_folder}/audio.mp3', '-c:v', 'copy', '-map', '0:v', '-map', '1:a', '-y', f'{output_folder}/output.mp4'])
 
 def extract_audio(bag_filename, output_folder):
     bag = Bag(bag_filename, 'r')
     with open(f'{output_folder}/audio.mp3', 'wb') as f:
         for i, (_, message, t) in enumerate(bag.read_messages(topics='/audio')):
             for byte in message.data:
-                f.write(int.to_bytes(byte))
+                # f.write(int.to_bytes(byte))
+                f.write(byte.to_bytes(1, 'big'))
+
 
 def combine_video_audio(output_folder):
     # subprocess.run(['ffmpeg', '-i', 'video.avi', '-i', 'audio.mp3', '-c:v', 'copy', '-map', '0:v', '-map', '1:a', '-y', 'output.mp4'])
-    subprocess.run([ffmpeg, '-i', f'{output_folder}/video.avi', '-i', f'{output_folder}/audio.mp3', '-c:v', 'copy', '-map', '0:v', '-map', '1:a', '-y', f'{output_folder}/output.mp4'])
+    subprocess.run(['ffmpeg', '-i', f'{output_folder}/video.avi', '-i', f'{output_folder}/audio.mp3', '-c:v', 'copy', '-map', '0:v', '-map', '1:a', '-y', f'{output_folder}/output.mp4'])
 
 def generate_srt(uri, output_folder):
     # Create a Speech client
@@ -92,7 +100,7 @@ def format_time(duration):
 @api_view(['POST'])
 def process_rosbag(request):
     if request.method == 'POST':
-        bag_filename = request.data.get('bag_filename')
+        bag_filename = "/app/rosbag-data/" + request.data.get('bag_filename')
         if not bag_filename:
             return Response({'error': 'No bag_filename provided'}, status=400)
 
@@ -100,10 +108,11 @@ def process_rosbag(request):
         finish_time = datetime.now()
         finish_time_str = finish_time.strftime('%Y-%m-%d-%H:%M:%S')
 
-        output_folder = f'processed_data/{os.path.basename(bag_filename)}_{finish_time_str}/'
+        output_folder = f'/app/processed_data/{os.path.basename(bag_filename)}_{finish_time_str}/'
         os.makedirs(output_folder, exist_ok=True)
+        os.makedirs(f'{output_folder}/images', exist_ok=True)
 
-        extract_images_from_rosbag(bag_filename, output_folder)
+        # extract_images_from_rosbag(bag_filename, output_folder)
         # TODO debug ffmpeg no module found
         # extract_video(output_folder)
         extract_audio(bag_filename, output_folder)

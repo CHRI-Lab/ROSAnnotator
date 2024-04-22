@@ -30,7 +30,7 @@ To start the backend server, follow these steps:
    Use Docker Compose to start the backend services:
 
    ```bash
-   docker-compose up
+   docker-compose up --build
    ```
 
    This command will build the image using `Dockerfile` from ground up and start all the required backend services as defined in the `docker-compose.yml` file. It also installs all the `ROS` dependencies.
