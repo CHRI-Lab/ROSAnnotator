@@ -5,3 +5,4 @@ typing_extensions==4.11.0
 debugpy==1.8.1
 djangorestframework
 google-cloud-speech
+pydub
