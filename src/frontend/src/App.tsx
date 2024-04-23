@@ -1,9 +1,11 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback } from 'react';
 import ReactPlayer from 'react-player';
-import Timeline from './components/Timeline';
 import Box from '@mui/material/Box';
 import TextField from '@mui/material/TextField';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
+
+import Timeline from './components/Timeline';
+import Transcript from './components/Transcript';
 
 const theme = createTheme();
 
@@ -35,26 +37,31 @@ const App: React.FC = () => {
     setMarkInterval(interval);
   };
 
-  const ref = useCallback((playerInstance: ReactPlayer) => {
+  const playerRef = useCallback((playerInstance: ReactPlayer) => {
     setPlayer(playerInstance);
   }, []);
 
   return (
     <ThemeProvider theme={theme}>
-      <Box display="flex" justifyContent="center" alignItems="center" height="100vh" flexDirection="column">
-        <Box width="100%" maxWidth={600} marginBottom={-3}> 
-          <ReactPlayer
-            ref={ref}
-            width="100%"
-            height="auto" 
-            url="test2.mp4"
-            onDuration={handleDuration}
-            onProgress={handleProgress}
-            controls
-            playing
-          />
+      <Box display="flex" justifyContent="center" alignItems="center" flexDirection="column">
+        <Box display="flex" justifyContent="center" alignItems="center" flexDirection="row">
+          <Box width={600} height={452}>
+            <Transcript played={played}/>
+          </Box>
+          <Box width="100%" height={452} maxWidth={602}> 
+            <ReactPlayer
+              ref={playerRef}
+              width="100%"
+              height="auto" 
+              url="sample.mp4"
+              onDuration={handleDuration}
+              onProgress={handleProgress}
+              controls
+              playing
+            />
+          </Box>
         </Box>
-        <Box width="100%" maxWidth={800}> 
+        <Box width="100%" maxWidth={1200}> 
           <Timeline
             duration={duration}
             played={played}
