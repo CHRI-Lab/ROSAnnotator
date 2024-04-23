@@ -71,12 +71,12 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInter
     setSeekTime(played);
   }, [played]);
 
-  const handleSliderChange = (event: Event, newValue: number | number[]) => {
+  const handleSliderChange = (_event: Event, newValue: number | number[]) => {
     setSeekTime(newValue as number);
     onSeek(newValue as number);
   };
 
-  const handleRangeChange = (event: Event, newValue: number | number[]) => {
+  const handleRangeChange = (_event: Event, newValue: number | number[]) => {
     setSelectedRange(newValue as number[]);
   };
 
