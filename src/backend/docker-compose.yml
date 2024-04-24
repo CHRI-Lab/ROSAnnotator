@@ -1,0 +1,13 @@
+version: "3.11"
+services:
+  backend:
+    build: .
+    volumes:
+      - .:/app
+      - ./rosbag-data:/app/rosbag-data
+    ports:
+      - 8000:8000 # port mapping for server
+      - 5678:5678 # port mapping for debugger
+    image: backend:ros-annotator
+    container_name: ros-annotator
+    command: python manage.py runserver 0.0.0.0:8000
