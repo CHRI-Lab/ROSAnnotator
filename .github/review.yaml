@@ -1,2 +1,0 @@
-- name: PR ChatGPT Review
-  uses: agogear/chatgpt-pr-review@0.0.2
