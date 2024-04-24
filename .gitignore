@@ -3,3 +3,5 @@ __pycache__
 db.sqlite3
 .vscode
 .DS_Store
+rosbag-data*/
+processed*/

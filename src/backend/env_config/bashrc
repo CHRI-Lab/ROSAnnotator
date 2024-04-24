@@ -1,0 +1,3 @@
+source "${HOME}/conda/etc/profile.d/conda.sh"
+source "${HOME}/conda/etc/profile.d/mamba.sh"
+mamba activate ros_env
