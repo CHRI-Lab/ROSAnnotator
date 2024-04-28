@@ -3,7 +3,7 @@ import { Button} from '@mui/material';
 import Box from '@mui/material/Box';
 import Slider from '@mui/material/Slider';
 import { styled } from '@mui/system';
-import CustomSnackbar from '../CustomSnackbar'; // 引入新的 Snackbar 组件
+import CustomSnackbar from '../CustomSnackbar';
 
 interface TimelineProps {
   duration: number;
