@@ -13,6 +13,10 @@ from rest_framework.response import Response
 import matplotlib.pyplot as plt
 from pydub import AudioSegment
 
+####################################################################################
+# Marked for automatic chatgpt review process (Remove this line in the next commit)#
+####################################################################################
+
 def extract_images_from_rosbag(bag_filename, output_folder):
     bag = Bag(bag_filename, 'r')
     bridge = CvBridge()
