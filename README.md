@@ -18,33 +18,23 @@ ROS Annotator is a standalone web application designed to facilitate the analysi
 
 ```
 ├── docs/          # Documentation files
+├── data-samples/  # Data samples
 └── src/           # Source code for the project
     ├── backend/   # Backend application code
     └── frontend/  # Frontend application code
+├── tests/         # Test files
 ```
 
 ## Setup Guide
 
-### Prerequisites
-
-To get started, you'll need to have the following tools installed on your system:
-
-- **Node.js 20.11.1**
-- **npm 10.5.0**
-- **Python 3.12.2**
-
 ### Frontend
 
-1. Navigate to the Frontend Directory: <code>cd src/frontend</code>
-2. Install Node.js dependencies: <code>npm install</code>
-3. Run the frontend server with <code>npm start</code>
+See README.md at <code>src/frontend</code>
 
 ### Backend
 
-1. Navigate to the Backend Directory: <code>cd src/backend</code>
-2. Install dependencies: <code>pip install -r requirements.txt</code>
-3. Run the backend server with <code>python manage.py runserver</code>
+See README.md at <code>src/backend</code>
 
+## Product Demo (Sprint 2)
 
-## Related Project
-https://github.com/freeplay-sandbox/annotator/
+https://drive.google.com/file/d/19A8k8uDG5NgB5xpRQiOwexR_nYtFT-9I/view?pli=1
