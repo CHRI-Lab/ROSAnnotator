@@ -1,7 +1,6 @@
 import React from 'react';
 import { styled } from '@mui/system';
 
-// Props 类型定义
 interface BlockProps {
   block: { start: number; end: number };
   duration: number;
