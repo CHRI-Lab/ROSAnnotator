@@ -1,10 +1,8 @@
 # Documents
 
-A checklist of documentations can be viewed on the first page in <code>Confluence.pdf</code>.
-
 ```
-├── Confluence.pdf           # Sprint 1 Confluence export
-├── Sprint2 confluence.pdf   # Sprint 2 Confluence export
+├── ConfluenceSprint1.pdf    # Sprint 1 Confluence export
+├── ConfluenceSprint2.pdf    # Sprint 2 Confluence export
 ├── trello.png               # Trello screenshot. 
 └── trello backlog.png       # Trello backlog screenshot. 
 ```
