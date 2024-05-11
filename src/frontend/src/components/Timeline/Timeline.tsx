@@ -1,28 +1,64 @@
 import React, { useState, useEffect } from 'react';
-import { Button} from '@mui/material';
-import Box from '@mui/material/Box';
-import Slider from '@mui/material/Slider';
+import { Button, Slider, Tooltip, Paper } from '@mui/material';
 import { styled } from '@mui/system';
-import CustomSnackbar from '../CustomSnackbar';
+import Axis from '../Axis'; 
+import AxisManager from '../AxisManager';  
+
+
+
+interface BlockProps {
+  start: number;
+  end: number;
+  text?: string;
+}
+
+interface AxisData {
+  id: number;
+  type: string;
+  typeName?: string; 
+  blocks: BlockProps[];
+}
 
 interface TimelineProps {
   duration: number;
   played: number;
   onSeek: (time: number) => void;
-  markInterval: number;
+  annotations: any; 
 }
-interface Block {
-  start: number;
-  end: number;
-}
+
+const MainContainer = styled(Paper)(({ theme }) => ({
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  background: theme.palette.background.paper,
+  boxShadow: '0px 1px 5px rgba(0,0,0,0.2)',
+  padding: '20px',
+  margin: '20px',
+  width: 'auto'
+}));
+
+const ControlsContainer = styled('div')({
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: '20px',
+  width: '100%'
+});
+
 const ScrollableTimelineContainer = styled('div')({
   overflowX: 'scroll',
   overflowY: 'hidden',
   width: '100%',
-  cursor: 'pointer',
   padding: '10px 0',
+  position: 'relative',
 });
 
+const ButtonsContainer = styled('div')({
+  display: 'flex',
+  flexDirection: 'column',
+  padding: '10px',
+  alignItems: 'flex-start' 
+});
 const TimelineMarks = styled('div')({
   position: 'relative',
   display: 'flex',
@@ -38,34 +74,13 @@ const TimelineMarkLabel = styled('div')(({ theme }) => ({
   userSelect: 'none',
 }));
 
-const SelectionArea = styled('div')(({ theme }) => ({
-  position: 'relative',
-  height: '20px',
-  marginTop: '5px',
-  backgroundColor: theme.palette.action.selected,
-}));
-
-const NewAxisArea = styled('div')({
-  position: 'relative',
-  height: '50px',
-  marginTop: '10px',
-  marginBottom: '10px',
-  backgroundColor: '#ddd', 
-});
-
-const NewBlock = styled('div')(({ theme }) => ({
-  position: 'absolute',
-  height: '100%',
-  backgroundColor: theme.palette.action.selected,
-}));
-
-
-const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInterval }) => {
+const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotations }) => {
   const [seekTime, setSeekTime] = useState(played);
-  const [selectedRange, setSelectedRange] = useState<number[]>([0, 1]);
-  const [blocks, setBlocks] = useState<Block[]>([]);
-  const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
-  const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [markInterval, setMarkInterval] = useState(5);
+  const [selectedRange, setSelectedRange] = useState<number[]>([0, 0.1 * duration]); 
+  const [axes, setAxes] = useState<AxisData[]>([]);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);  
+
 
   useEffect(() => {
     setSeekTime(played);
@@ -80,128 +95,166 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, markInter
     setSelectedRange(newValue as number[]);
   };
 
-  const handleCreateBlock = () => {
+  const handleAddAxis = () => {
+    setAxes(prev => [...prev, { id: axes.length, type: 'type-in', blocks: [] }]);  
+  };
+  
+
+  const handleCreateBlock = (axisId: number) => {
     const newBlock = { start: selectedRange[0], end: selectedRange[1] };
-    setBlocks(prevBlocks => [...prevBlocks, newBlock]);
-    setSnackbarOpen(true);
-
+    setAxes(prevAxes => prevAxes.map(axis => {
+      if (axis.id === axisId) {
+        const updatedBlocks = [...axis.blocks, newBlock]; 
+        return { ...axis, blocks: updatedBlocks };
+      }
+      return axis;
+    }));
   };
-
-  const handleSnackbarClose = () => {
-    setSnackbarOpen(false);
+  
+  const handleDeleteBlock = (axisId: number, blockIndex: number) => {
+    setAxes(axes.map(axis => {
+      if (axis.id === axisId) {
+        const newBlocks = axis.blocks.filter((_, index) => index !== blockIndex);
+        return { ...axis, blocks: newBlocks };
+      }
+      return axis;
+    }));
   };
+  
+const handleDeleteAxis = (axisId:number) => {
+  setAxes(axes => axes.filter(axis => axis.id !== axisId));
+};
 
-  const selectBlock = (index: number) => {
-    setSelectedBlockIndex(index); 
-  };
-
-  const deleteSelectedBlock = () => {
-    if (selectedBlockIndex !== null) {
-      setBlocks(blocks => blocks.filter((_, index) => index !== selectedBlockIndex));
-      setSelectedBlockIndex(null); 
+const handleTypeChange = (axisId: number, type: string, typeName?: string) => {
+  setAxes(axes => axes.map(axis => {
+    if (axis.id === axisId) {
+      return { ...axis, type, typeName }; 
     }
-  };
+    return axis;
+  }));
+};
 
-  const marks = Array.from(
-    { length: Math.ceil(duration / markInterval) },
-    (_, index) => ({
-      value: markInterval * index,
-      label: `${markInterval * index}s`,
-    })
-  );
+
+const handleSave = (axisId:number, blockIndex:number, newText:string) => {
+  setAxes(axes.map(axis => {
+    if (axis.id === axisId) {
+      const newBlocks = axis.blocks.map((block, index) => {
+        if (index === blockIndex) {
+          return { ...block, text: newText };
+        }
+        return block;
+      });
+      return { ...axis, blocks: newBlocks };
+    }
+    return axis;
+  }));
+};
+  const marks = Array.from({ length: Math.ceil(duration / markInterval) }, (_, index) => ({
+    value: markInterval * index,
+    label: `${markInterval * index}s`,
+  }));
 
   const totalWidth = duration / markInterval * 50;
 
   return (
-    <Box  sx={{ margin: '20px 0' }}>
-      <CustomSnackbar
-        open={snackbarOpen}
-        message="Block created"
-        handleClose={handleSnackbarClose}
-      />
-      <ScrollableTimelineContainer>
-        <Slider
-          value={seekTime}
-          min={0}
-          max={duration}
-          step={0.01}
-          onChange={handleSliderChange}
-          valueLabelDisplay="off"
-          marks={marks.map(mark => ({ value: mark.value, label: '' }))}
-          sx={{
-            width: `${totalWidth}px`,
-            '& .MuiSlider-track': { backgroundColor: 'transparent' },
-            '& .MuiSlider-thumb': {
-              width: '20px',
-              height: '20px',
-              marginTop: '0px',
-              '&:before': { boxShadow: '0 4px 8px rgba(0,0,0,0.4)' },
-            },
-            '& .MuiSlider-rail': { height: '8px', opacity: 0.5 },
-          }}
-        />
-        <TimelineMarks style={{ width: `${totalWidth}px` }}>
-          {marks.map((mark, index) => (
-            <TimelineMarkLabel
-              key={index}
-              style={{ left: `${(mark.value / duration) * 100}%` }}
-            >
-              {mark.label}
-            </TimelineMarkLabel>
-          ))}
-        </TimelineMarks>
-        <SelectionArea style={{ width: `${totalWidth}px` }}>
-          <Slider
-            value={selectedRange}
-            onChange={handleRangeChange}
-            valueLabelDisplay="auto"
-            min={0}
-            max={duration}
-            step={1}
-            sx={{
-              position: 'absolute', 
-              left: 0, 
-              right: 0, 
-              '& .MuiSlider-thumb': {
-                backgroundColor: 'primary.main',
-              },
-            }}
-            disableSwap
+    <MainContainer>
+      <ControlsContainer>
+        <Tooltip title="Mark interval (seconds)" placement="top">
+          <input
+            type="number"
+            value={markInterval}
+            onChange={(e) => setMarkInterval(Number(e.target.value))}
+            style={{ width: '100px', marginRight: '20px' }}
           />
-        </SelectionArea>
-        <NewAxisArea style={{ width: `${totalWidth}px` }}>
-          {blocks.map((block, index) => (
-            <NewBlock
+        </Tooltip>
+        <Button onClick={handleAddAxis} variant="contained">
+          Add New Axis
+        </Button>
+        <Button onClick={() => setIsDialogOpen(true)} variant="contained">Manage Axes</Button>
+      </ControlsContainer>
+      <div style={{ display: 'flex', width: '100%' }}>
+        <ButtonsContainer>
+          {axes.map((axis, index) => (
+            <Button
               key={index}
-              onClick={() => selectBlock(index)}
-              style={{
-                left: `${(block.start / duration) * 100}%`,
-                width: `max(${5}px,${((block.end - block.start) / duration) * 100}%)`,
-                backgroundColor: selectedBlockIndex === index ? 'red' : 'grey',
+              onClick={() => handleCreateBlock(axis.id)}
+              variant="contained"
+              sx={{
+                mb: 2.45, // margin bottom for spacing between buttons
+                top:'130px',
+                width: '150px', // Set the width of the button
+                height: '42px', // Set the height of the button
+              }} // margin bottom for spacing
+            >
+              Create on Axis {axis.id}
+            </Button>
+          ))}
+        </ButtonsContainer>
+        <ScrollableTimelineContainer>
+          <div style={{ width: `${totalWidth}px` }}>
+            <Slider
+              value={seekTime}
+              min={0}
+              max={duration}
+              step={0.01}
+              onChange={handleSliderChange}
+              valueLabelDisplay="off"
+              marks={marks.map(mark => ({ value: mark.value, label: '' }))}
+              sx={{
+                '& .MuiSlider-track': { backgroundColor: 'transparent' },
+                '& .MuiSlider-thumb': {
+                  width: '20px',
+                  height: '20px',
+                  '&:before': { boxShadow: '0 4px 8px rgba(0,0,0,0.4)' },
+                },
+                '& .MuiSlider-rail': { height: '8px', opacity: 0.5 },
               }}
             />
-          ))}
-        </NewAxisArea>
-      </ScrollableTimelineContainer>
-      <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mt: 2 }}>
-          {selectedBlockIndex === null && (
-            <Button onClick={handleCreateBlock} variant="contained" color="primary">
-              Create Anotation Block
-           </Button>
-         )}
-         {selectedBlockIndex !== null && (
-            <>
-             <Button onClick={deleteSelectedBlock} variant="contained" color="secondary">
-                Delete
-             </Button>
-             <Button onClick={() => setSelectedBlockIndex(null)} variant="outlined">
-                Cancel
-              </Button>
-            </> 
-         )}
-    </Box>
-    </Box>
+            <Slider
+              value={selectedRange}
+              min={0}
+              max={duration}
+              onChange={handleRangeChange}
+              valueLabelDisplay="auto"
+              sx={{ marginTop: '20px', marginBottom: '20px' }}
+              marks={marks.map(mark => ({ value: mark.value, label: '' }))}
+            />
+            <TimelineMarks>
+              {marks.map((mark, index) => (
+                <TimelineMarkLabel key={index} style={{ left: `${(mark.value / duration) * 100}%` }}>
+                  {mark.label}
+                </TimelineMarkLabel>
+              ))}
+            </TimelineMarks>
+            {axes.map((axis, index) => (
+          <Axis
+            key={`${axis.id}-${axis.blocks.length}`}
+            duration={duration}
+            selectedRange={selectedRange}
+            blocks={axis.blocks}
+            axisType={axis.type}
+            typeName={axis.typeName}
+            onSave={(blockIndex, text) => handleSave(axis.id, blockIndex, text)}
+            onDeleteBlock={(blockIndex) => handleDeleteBlock(axis.id, blockIndex)}
+          />
+        ))}
+
+          </div>
+        </ScrollableTimelineContainer>
+      </div>
+      <AxisManager
+        open={isDialogOpen}
+        onClose={() => setIsDialogOpen(false)}
+        axes={axes}  
+        annotations={annotations}
+        onDeleteAxis={handleDeleteAxis}
+        onTypeChange={handleTypeChange}
+/>
+
+    </MainContainer>
   );
+  
+  
 };
 
 export default Timeline;

@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import ReactPlayer from 'react-player';
 import Box from '@mui/material/Box';
-import TextField from '@mui/material/TextField';
+import annotationsData from '../public/predefined_booklist.json';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
 
 import Timeline from './components/Timeline';
@@ -65,19 +65,8 @@ const App: React.FC = () => {
           <Timeline
             duration={duration}
             played={played}
-            markInterval={markInterval}
+            annotations={annotationsData} 
             onSeek={handleSeek}
-          />
-        </Box>
-        <Box width="100%" maxWidth={200}>
-          <TextField
-            label="Mark interval (seconds)"
-            type="number"
-            value={markInterval}
-            onChange={handleChangeMarkInterval}
-            InputProps={{ inputProps: { min: 1 } }}
-            variant="outlined"
-            fullWidth
           />
         </Box>
       </Box>
