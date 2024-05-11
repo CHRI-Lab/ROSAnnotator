@@ -53,8 +53,7 @@ const Transcript: React.FC<TranscriptProps> = ({ played }) => {
   const lineRenderer = useCallback(
     ({ active, line: { content } }: { active: boolean; line: LrcLine }) => (
       <Line active={active}>{content}</Line>
-    ),
-    []
+    ), []
   );
 
   return (
