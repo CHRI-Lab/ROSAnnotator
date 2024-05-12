@@ -13,7 +13,6 @@ const App: React.FC = () => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
-  const [markInterval, setMarkInterval] = useState(5);
 
   const handleDuration = (duration: number) => {
     setDuration(duration);
@@ -32,10 +31,7 @@ const App: React.FC = () => {
     }
   }, [player]);
 
-  const handleChangeMarkInterval = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const interval = Math.max(1, Number(event.target.value));
-    setMarkInterval(interval);
-  };
+
 
   const playerRef = useCallback((playerInstance: ReactPlayer) => {
     setPlayer(playerInstance);
