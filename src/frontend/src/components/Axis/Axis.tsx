@@ -14,6 +14,7 @@ interface AxisProps {
   blocks: BlockData[];
   axisType: string;
   typeName?: string; 
+  annotations:any,
   onSave: (index: number, text: string) => void;
   onDeleteBlock: (index: number) => void;
 }
@@ -28,7 +29,7 @@ const AxisContainer = styled(Paper)(({ theme }) => ({
   minHeight: '30px',
 }));
 
-const Axis: React.FC<AxisProps> = ({ duration, selectedRange, blocks, axisType, typeName, onSave, onDeleteBlock }) => {
+const Axis: React.FC<AxisProps> = ({ duration, selectedRange, blocks, axisType, typeName,annotations, onSave, onDeleteBlock }) => {
   return (
     <AxisContainer>
       {blocks.map((block, index) => (
@@ -38,6 +39,7 @@ const Axis: React.FC<AxisProps> = ({ duration, selectedRange, blocks, axisType, 
               block={block}
               duration={duration}
               axisType={axisType}
+              annotations={annotations}
               onSave={(text) => onSave(index, text)}
               onDelete={() => onDeleteBlock(index)}
             />

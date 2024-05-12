@@ -81,6 +81,19 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
   const [axes, setAxes] = useState<AxisData[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);  
 
+  const collectData = () => {
+    const data = axes.map(axis => ({
+      id: axis.id,
+      type: axis.type,
+      typeName: axis.typeName,
+      blocks: axis.blocks.map(block => ({
+        start: block.start,
+        end: block.end,
+        text: block.text
+      }))
+    }));
+    console.log(data);
+  };
 
   useEffect(() => {
     setSeekTime(played);
@@ -167,6 +180,9 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
             style={{ width: '100px', marginRight: '20px' }}
           />
         </Tooltip>
+        <Button onClick={collectData} variant="contained">
+          Save and Send Data
+        </Button>
         <Button onClick={handleAddAxis} variant="contained">
           Add New Axis
         </Button>
@@ -180,11 +196,11 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
               onClick={() => handleCreateBlock(axis.id)}
               variant="contained"
               sx={{
-                mb: 2.45, // margin bottom for spacing between buttons
+                mb: 2.45, 
                 top:'130px',
-                width: '150px', // Set the width of the button
-                height: '42px', // Set the height of the button
-              }} // margin bottom for spacing
+                width: '150px', 
+                height: '42px',
+              }} 
             >
               Create on Axis {axis.id}
             </Button>
@@ -234,6 +250,7 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
             blocks={axis.blocks}
             axisType={axis.type}
             typeName={axis.typeName}
+            annotations={axis.typeName ? annotations[axis.typeName] || [] : []}
             onSave={(blockIndex, text) => handleSave(axis.id, blockIndex, text)}
             onDeleteBlock={(blockIndex) => handleDeleteBlock(axis.id, blockIndex)}
           />
