@@ -1,13 +1,18 @@
-
 import React from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, List, ListItem, ListItemText, MenuItem, Select } from '@mui/material';
+import { Dialog, DialogTitle, DialogContent, DialogActions, Button, List, ListItem, ListItemText, MenuItem, Select, TextField, Tooltip } from '@mui/material';
 
+interface BlockProps {
+  start: number;
+  end: number;
+  text?: string;
+}
 
 interface AxisData {
   id: number;
   type: string;
-  typeName?: string;  
-  blocks: any[];
+  typeName?: string;
+  shortcutKey?: string;  
+  blocks: BlockProps[];
 }
 
 interface AxisManagerProps {
@@ -17,23 +22,32 @@ interface AxisManagerProps {
   annotations: any;
   onDeleteAxis: (axisId: number) => void;
   onTypeChange: (axisId: number, type: string, typeName?: string) => void;
+  onShortcutChange: (axisId: number, shortcutKey: string) => void;
 }
 
-const AxisManager: React.FC<AxisManagerProps> = ({ open, onClose, axes, annotations, onDeleteAxis, onTypeChange }) => {
+const AxisManager: React.FC<AxisManagerProps> = ({
+  open,
+  onClose,
+  axes,
+  annotations,
+  onDeleteAxis,
+  onTypeChange,
+  onShortcutChange
+}) => {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>Manage Axes</DialogTitle>
       <DialogContent>
         <List>
-          {axes.map((axis, index) => (
+          {axes.map((axis, ) => (
             <ListItem key={axis.id} divider>
-              <ListItemText 
-                primary={`Axis ID: ${axis.id}`} 
-                secondary={`Type: ${axis.type} ${axis.typeName ? `- ${axis.typeName}` : ''}`} 
+              <ListItemText
+                primary={`Axis ID: ${axis.id}`}
+                secondary={`Type: ${axis.type}${axis.typeName ? ` - ${axis.typeName}` : ''}`}
               />
               <Select
                 value={axis.type}
-                onChange={(event) => onTypeChange(axis.id, event.target.value as string)}
+                onChange={(event) => onTypeChange(axis.id, event.target.value as string, axis.typeName)}
                 style={{ marginRight: '10px' }}
               >
                 <MenuItem value="type-in">Type-in</MenuItem>
@@ -41,7 +55,7 @@ const AxisManager: React.FC<AxisManagerProps> = ({ open, onClose, axes, annotati
               </Select>
               {axis.type === 'selected' && (
                 <Select
-                  value={axis.typeName || ''} 
+                  value={axis.typeName || ''}
                   onChange={(event) => onTypeChange(axis.id, axis.type, event.target.value as string)}
                   style={{ marginRight: '10px', width: '150px' }}
                 >
@@ -50,6 +64,15 @@ const AxisManager: React.FC<AxisManagerProps> = ({ open, onClose, axes, annotati
                   ))}
                 </Select>
               )}
+              <Tooltip title="Set a shortcut key to quickly create an annotation block on this axis">
+                <TextField
+                  label="Shortcut Key"
+                  value={axis.shortcutKey || ''}
+                  onChange={(event) => onShortcutChange(axis.id, event.target.value)}
+                  style={{ width: '200px', marginLeft: '0px',marginRight:'10px' }}
+                  inputProps={{ maxLength: 1 }}
+                />
+              </Tooltip>
               <Button variant="outlined" color="secondary" onClick={() => onDeleteAxis(axis.id)}>
                 Delete
               </Button>
@@ -63,6 +86,5 @@ const AxisManager: React.FC<AxisManagerProps> = ({ open, onClose, axes, annotati
     </Dialog>
   );
 };
-
 
 export default AxisManager;

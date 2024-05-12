@@ -5,6 +5,7 @@ import Axis from '../Axis';
 import AxisManager from '../AxisManager';  
 
 
+let globalAxisId = 0;  
 
 interface BlockProps {
   start: number;
@@ -15,9 +16,11 @@ interface BlockProps {
 interface AxisData {
   id: number;
   type: string;
-  typeName?: string; 
+  typeName?: string;
+  shortcutKey?: string;  
   blocks: BlockProps[];
 }
+
 
 interface TimelineProps {
   duration: number;
@@ -25,6 +28,8 @@ interface TimelineProps {
   onSeek: (time: number) => void;
   annotations: any; 
 }
+
+
 
 const MainContainer = styled(Paper)(({ theme }) => ({
   display: 'flex',
@@ -81,6 +86,25 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
   const [axes, setAxes] = useState<AxisData[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);  
 
+  useEffect(() => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement && event.target.tagName === 'INPUT') {
+        return; 
+      }
+      
+      const pressedKey = event.key;
+      const targetedAxes = axes.filter(axis => axis.shortcutKey === pressedKey);
+      targetedAxes.forEach(axis => {
+        handleCreateBlock(axis.id);
+      });
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [axes, selectedRange]);
+
   const collectData = () => {
     const data = axes.map(axis => ({
       id: axis.id,
@@ -109,7 +133,7 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
   };
 
   const handleAddAxis = () => {
-    setAxes(prev => [...prev, { id: axes.length, type: 'type-in', blocks: [] }]);  
+    setAxes(prev => [...prev, { id: globalAxisId++, type: 'type-in', blocks: [] }]);  
   };
   
 
@@ -166,7 +190,15 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
     value: markInterval * index,
     label: `${markInterval * index}s`,
   }));
-
+  const handleShortcutChange = (axisId: number, shortcutKey: string) => {
+    setAxes(axes => axes.map(axis => {
+      if (axis.id === axisId) {
+        return { ...axis, shortcutKey };  
+      }
+      return axis;
+    }));
+  };
+  
   const totalWidth = duration / markInterval * 50;
 
   return (
@@ -202,7 +234,7 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
                 height: '42px',
               }} 
             >
-              Create on Axis {axis.id}
+              Create
             </Button>
           ))}
         </ButtonsContainer>
@@ -242,7 +274,7 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
                 </TimelineMarkLabel>
               ))}
             </TimelineMarks>
-            {axes.map((axis, index) => (
+            {axes.map((axis, ) => (
           <Axis
             key={`${axis.id}-${axis.blocks.length}`}
             duration={duration}
@@ -262,11 +294,12 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
       <AxisManager
         open={isDialogOpen}
         onClose={() => setIsDialogOpen(false)}
-        axes={axes}  
+        axes={axes}
         annotations={annotations}
         onDeleteAxis={handleDeleteAxis}
         onTypeChange={handleTypeChange}
-/>
+        onShortcutChange={handleShortcutChange} 
+      />
 
     </MainContainer>
   );
