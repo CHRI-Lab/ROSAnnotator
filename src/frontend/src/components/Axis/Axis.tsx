@@ -1,5 +1,5 @@
 import React from 'react';
-import { Paper, styled, Tooltip } from '@mui/material';
+import { Paper, styled } from '@mui/material';
 import Block from '../Block'; 
 
 interface BlockData {
@@ -26,25 +26,35 @@ const AxisContainer = styled(Paper)(({ theme }) => ({
   marginTop: '10px',
   position: 'relative',
   width: '100%',
-  minHeight: '30px',
+  minHeight: '50px',  
 }));
 
-const Axis: React.FC<AxisProps> = ({ duration, selectedRange, blocks, axisType, typeName,annotations, onSave, onDeleteBlock }) => {
+const TypeName = styled('div')(() => ({
+  position: 'absolute',
+  width: '100%',
+  top: 0,  
+  left: 0,
+  color: '#999',
+  fontStyle: 'italic',
+  padding: '0 10px',
+  fontSize: '0.8rem',
+  zIndex: 1  
+}));
+
+const Axis: React.FC<AxisProps> = ({ duration, blocks, axisType, typeName, annotations, onSave, onDeleteBlock }) => {
   return (
     <AxisContainer>
+      <TypeName>{typeName || 'No Type Name'}</TypeName>
       {blocks.map((block, index) => (
-        <Tooltip title={typeName || ''} key={index} placement="top" arrow>
-          <div>
-            <Block
-              block={block}
-              duration={duration}
-              axisType={axisType}
-              annotations={annotations}
-              onSave={(text) => onSave(index, text)}
-              onDelete={() => onDeleteBlock(index)}
-            />
-          </div>
-        </Tooltip>
+        <Block
+          key={index}
+          block={block}
+          duration={duration}
+          axisType={axisType}
+          annotations={annotations}
+          onSave={(text) => onSave(index, text)}
+          onDelete={() => onDeleteBlock(index)}
+        />
       ))}
     </AxisContainer>
   );
