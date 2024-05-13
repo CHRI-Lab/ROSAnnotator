@@ -81,7 +81,7 @@ const TimelineMarkLabel = styled('div')(({ theme }) => ({
 
 const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotations }) => {
   const [seekTime, setSeekTime] = useState(played);
-  const [markInterval, setMarkInterval] = useState(5);
+  const [markInterval, setMarkInterval] = useState(1);
   const [selectedRange, setSelectedRange] = useState<number[]>([0, 0.1 * duration]); 
   const [axes, setAxes] = useState<AxisData[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);  
@@ -198,6 +198,11 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
       return axis;
     }));
   };
+  const handleMarkIntervalChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = Number(event.target.value);
+    // 如果新的间隔值小于1或非数字，设置为默认值5秒
+    setMarkInterval(newValue >= 1 ? newValue : 1);
+  };
   
   const totalWidth = duration / markInterval * 50;
 
@@ -208,7 +213,8 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
           <input
             type="number"
             value={markInterval}
-            onChange={(e) => setMarkInterval(Number(e.target.value))}
+            onChange={handleMarkIntervalChange}
+            min="1" //TODO: 暂时设置为 1 最小值
             style={{ width: '100px', marginRight: '20px' }}
           />
         </Tooltip>

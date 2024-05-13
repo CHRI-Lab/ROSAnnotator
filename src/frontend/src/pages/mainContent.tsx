@@ -10,6 +10,7 @@ import Timeline from '../components/Timeline';
 import Transcript from '../components/Transcript';
 import annotationsData from '../../public/predefined_booklist.json';
 import Booklist from '../components/Predefined_booklist/Booklist';
+import EditBooklistForm from '../components/EditBooklistForm/EditBooklistForm';
 
 const theme = createTheme();
 
@@ -18,6 +19,28 @@ const MainContent: React.FC = () => {
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
   const [open, setOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+
+  const handleSaveBooklist = (jsonData) => {
+    // 假设后端接口为 '/api/saveBooklist'
+    console.log(jsonData)
+    fetch('/api/saveBooklist', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(jsonData)
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log('Success:', data);
+      alert('Data saved successfully!');
+    })
+    .catch((error) => {
+      console.error('Error:', error);
+      alert('Failed to save data.');
+    });
+  };
 
   const handleDuration = (duration: number) => {
     setDuration(duration);
@@ -25,6 +48,7 @@ const MainContent: React.FC = () => {
 
     const handleClickOpen = () => {
       setOpen(true);
+      setEditMode(false);
   };
 
   const handleClose = () => {
@@ -47,6 +71,10 @@ const MainContent: React.FC = () => {
   const playerRef = useCallback((playerInstance: ReactPlayer) => {
     setPlayer(playerInstance);
   }, []);
+
+  const handleEdit = () => {
+    setEditMode(true);
+};
 
   return (
     <ThemeProvider theme={theme}>
@@ -76,11 +104,14 @@ const MainContent: React.FC = () => {
               <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
                   <DialogContent>
                     <Grid container spacing={2}>
-                          <Booklist />
+                        {editMode ? <EditBooklistForm onSave={handleSaveBooklist} /> : <Booklist />}
                     </Grid>
                   </DialogContent>
-                  <DialogActions>
-                      <Button onClick={handleClose}>Close</Button>
+              <DialogActions>
+              {!editMode && <Button onClick={handleEdit}>Edit</Button>}
+                <Button onClick={handleClose}>Close</Button>
+                
+                    
                   </DialogActions>
               </Dialog>
           </Box>
