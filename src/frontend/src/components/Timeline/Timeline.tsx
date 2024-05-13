@@ -199,9 +199,23 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
     }));
   };
   const handleMarkIntervalChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = Number(event.target.value);
-    // 如果新的间隔值小于1或非数字，设置为默认值5秒
-    setMarkInterval(newValue >= 1 ? newValue : 1);
+    // 先转换为数字
+    let newValue = parseFloat(event.target.value);
+  
+    // 如果newValue是非数字，设置为默认值1
+    if (isNaN(newValue)) {
+      newValue = 1;
+    } else {
+      // 限制至最多一位小数：乘以10，四舍五入，再除以10
+      newValue = Math.round(newValue * 10) / 10;
+  
+      // 确保值不小于0.1
+      if (newValue < 0.1) {
+        newValue = 0.1;
+      }
+    }
+  
+    setMarkInterval(newValue);
   };
   
   const totalWidth = duration / markInterval * 50;
@@ -214,7 +228,6 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
             type="number"
             value={markInterval}
             onChange={handleMarkIntervalChange}
-            min="1" //TODO: 暂时设置为 1 最小值
             style={{ width: '100px', marginRight: '20px' }}
           />
         </Tooltip>
@@ -268,6 +281,7 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
               value={selectedRange}
               min={0}
               max={duration}
+              step={0.1}  //最小滑动单位
               onChange={handleRangeChange}
               valueLabelDisplay="auto"
               sx={{ marginTop: '20px', marginBottom: '20px' }}
@@ -276,7 +290,7 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
             <TimelineMarks>
               {marks.map((mark, index) => (
                 <TimelineMarkLabel key={index} style={{ left: `${(mark.value / duration) * 100}%` }}>
-                  {mark.label}
+                  {mark.value.toFixed(1)}s
                 </TimelineMarkLabel>
               ))}
             </TimelineMarks>
