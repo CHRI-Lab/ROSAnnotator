@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Slider, Tooltip, Paper } from '@mui/material';
+import { Button, Slider, Tooltip, Paper, Dialog, DialogTitle, DialogActions, DialogContent, DialogContentText } from '@mui/material';
 import { styled } from '@mui/system';
-import Axis from '../Axis'; 
-import AxisManager from '../AxisManager';  
+import Axis from '../Axis';
+import AxisManager from '../AxisManager';
 
-
-let globalAxisId = 0;  
+let globalAxisId = 0;
 
 interface BlockProps {
   start: number;
@@ -17,19 +16,16 @@ interface AxisData {
   id: number;
   type: string;
   typeName?: string;
-  shortcutKey?: string;  
+  shortcutKey?: string;
   blocks: BlockProps[];
 }
-
 
 interface TimelineProps {
   duration: number;
   played: number;
   onSeek: (time: number) => void;
-  annotations: any; 
+  annotations: any;
 }
-
-
 
 const MainContainer = styled(Paper)(({ theme }) => ({
   display: 'flex',
@@ -62,8 +58,9 @@ const ButtonsContainer = styled('div')({
   display: 'flex',
   flexDirection: 'column',
   padding: '10px',
-  alignItems: 'flex-start' 
+  alignItems: 'flex-start'
 });
+
 const TimelineMarks = styled('div')({
   position: 'relative',
   display: 'flex',
@@ -82,16 +79,18 @@ const TimelineMarkLabel = styled('div')(({ theme }) => ({
 const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotations }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
-  const [selectedRange, setSelectedRange] = useState<number[]>([0, 0.1 * duration]); 
+  const [selectedRange, setSelectedRange] = useState<number[]>([0, 0.1 * duration]);
   const [axes, setAxes] = useState<AxisData[]>([]);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);  
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLElement && event.target.tagName === 'INPUT') {
-        return; 
+        return;
       }
-      
+
       const pressedKey = event.key;
       const targetedAxes = axes.filter(axis => axis.shortcutKey === pressedKey);
       targetedAxes.forEach(axis => {
@@ -133,21 +132,37 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
   };
 
   const handleAddAxis = () => {
-    setAxes(prev => [...prev, { id: globalAxisId++, type: 'type-in', blocks: [] }]);  
+    setAxes(prev => [...prev, { id: globalAxisId++, type: 'type-in', blocks: [] }]);
   };
-  
 
   const handleCreateBlock = (axisId: number) => {
-    const newBlock = { start: selectedRange[0], end: selectedRange[1] };
+    const newBlock = { start: selectedRange[0], end: selectedRange[1], text: "" };
+
+    // 检查是否有重叠
+    const axis = axes.find(axis => axis.id === axisId);
+    if (axis) {
+      const overlap = axis.blocks.some(block =>
+        (newBlock.start < block.end && newBlock.end > block.start)
+      );
+
+      if (overlap) {
+        setError("Error: Block overlaps with an existing block. Create a new axis or adjust the range.");
+        setIsErrorDialogOpen(true);
+        return;
+      }
+    }
+
+    setError("");
+    setIsErrorDialogOpen(false);
     setAxes(prevAxes => prevAxes.map(axis => {
       if (axis.id === axisId) {
-        const updatedBlocks = [...axis.blocks, newBlock]; 
+        const updatedBlocks = [...axis.blocks, newBlock];
         return { ...axis, blocks: updatedBlocks };
       }
       return axis;
     }));
   };
-  
+
   const handleDeleteBlock = (axisId: number, blockIndex: number) => {
     setAxes(axes.map(axis => {
       if (axis.id === axisId) {
@@ -157,39 +172,40 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
       return axis;
     }));
   };
-  
-const handleDeleteAxis = (axisId:number) => {
-  setAxes(axes => axes.filter(axis => axis.id !== axisId));
-};
 
-const handleTypeChange = (axisId: number, type: string, typeName?: string) => {
-  setAxes(axes => axes.map(axis => {
-    if (axis.id === axisId) {
-      return { ...axis, type, typeName }; 
-    }
-    return axis;
-  }));
-};
+  const handleDeleteAxis = (axisId: number) => {
+    setAxes(axes => axes.filter(axis => axis.id !== axisId));
+  };
 
+  const handleTypeChange = (axisId: number, type: string, typeName?: string) => {
+    setAxes(axes => axes.map(axis => {
+      if (axis.id === axisId) {
+        return { ...axis, type, typeName };
+      }
+      return axis;
+    }));
+  };
 
-const handleSave = (axisId:number, blockIndex:number, newText:string) => {
-  setAxes(axes.map(axis => {
-    if (axis.id === axisId) {
-      const newBlocks = axis.blocks.map((block, index) => {
-        if (index === blockIndex) {
-          return { ...block, text: newText };
-        }
-        return block;
-      });
-      return { ...axis, blocks: newBlocks };
-    }
-    return axis;
-  }));
-};
+  const handleSave = (axisId: number, blockIndex: number, newText: string) => {
+    setAxes(axes.map(axis => {
+      if (axis.id === axisId) {
+        const newBlocks = axis.blocks.map((block, index) => {
+          if (index === blockIndex) {
+            return { ...block, text: newText };
+          }
+          return block;
+        });
+        return { ...axis, blocks: newBlocks };
+      }
+      return axis;
+    }));
+  };
+
   const marks = Array.from({ length: Math.ceil(duration / markInterval) }, (_, index) => ({
     value: markInterval * index,
     label: `${markInterval * index}s`,
   }));
+
   const handleShortcutChange = (axisId: number, shortcutKey: string) => {
     setAxes(axes => axes.map(axis => {
       if (axis.id === axisId) {
@@ -198,30 +214,36 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
       return axis;
     }));
   };
+
   const handleMarkIntervalChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    // 先转换为数字
     let newValue = parseFloat(event.target.value);
-  
-    // 如果newValue是非数字，设置为默认值1
+
     if (isNaN(newValue)) {
       newValue = 1;
     } else {
-      // 限制至最多一位小数：乘以10，四舍五入，再除以10
       newValue = Math.round(newValue * 10) / 10;
-  
-      // 确保值不小于0.1
+
       if (newValue < 0.1) {
         newValue = 0.1;
       }
     }
-  
+
     setMarkInterval(newValue);
   };
-  
+
   const totalWidth = duration / markInterval * 50;
 
   return (
     <MainContainer>
+      <Dialog open={isErrorDialogOpen} onClose={() => setIsErrorDialogOpen(false)}>
+        <DialogTitle>Error</DialogTitle>
+        <DialogContent>
+          <DialogContentText>{error}</DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setIsErrorDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
       <ControlsContainer>
         <Tooltip title="Mark interval (seconds)" placement="top">
           <input
@@ -263,7 +285,7 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
               value={seekTime}
               min={0}
               max={duration}
-              step={0.01}
+              step={markInterval}
               onChange={handleSliderChange}
               valueLabelDisplay="off"
               marks={marks.map(mark => ({ value: mark.value, label: '' }))}
@@ -281,7 +303,7 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
               value={selectedRange}
               min={0}
               max={duration}
-              step={0.1}  //最小滑动单位
+              step={markInterval}  // Ensure the step is the same as markInterval
               onChange={handleRangeChange}
               valueLabelDisplay="auto"
               sx={{ marginTop: '20px', marginBottom: '20px' }}
@@ -290,24 +312,23 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
             <TimelineMarks>
               {marks.map((mark, index) => (
                 <TimelineMarkLabel key={index} style={{ left: `${(mark.value / duration) * 100}%` }}>
-                  {mark.value.toFixed(1)}s
+                  {mark.label}
                 </TimelineMarkLabel>
               ))}
             </TimelineMarks>
-            {axes.map((axis, ) => (
-          <Axis
-            key={`${axis.id}-${axis.blocks.length}`}
-            duration={duration}
-            selectedRange={selectedRange}
-            blocks={axis.blocks}
-            axisType={axis.type}
-            typeName={axis.typeName}
-            annotations={axis.typeName ? annotations[axis.typeName] || [] : []}
-            onSave={(blockIndex, text) => handleSave(axis.id, blockIndex, text)}
-            onDeleteBlock={(blockIndex) => handleDeleteBlock(axis.id, blockIndex)}
-          />
-        ))}
-
+            {axes.map((axis) => (
+              <Axis
+                key={`${axis.id}-${axis.blocks.length}`}
+                duration={duration}
+                selectedRange={selectedRange}
+                blocks={axis.blocks}
+                axisType={axis.type}
+                typeName={axis.typeName}
+                annotations={axis.typeName ? annotations[axis.typeName] || [] : []}
+                onSave={(blockIndex, text) => handleSave(axis.id, blockIndex, text)}
+                onDeleteBlock={(blockIndex) => handleDeleteBlock(axis.id, blockIndex)}
+              />
+            ))}
           </div>
         </ScrollableTimelineContainer>
       </div>
@@ -320,11 +341,8 @@ const handleSave = (axisId:number, blockIndex:number, newText:string) => {
         onTypeChange={handleTypeChange}
         onShortcutChange={handleShortcutChange} 
       />
-
     </MainContainer>
   );
-  
-  
 };
 
 export default Timeline;
