@@ -6,23 +6,23 @@ import { createTheme, ThemeProvider } from '@mui/material/styles';
 import Button from '@mui/material/Button';
 import { Dialog, DialogActions, DialogContent, Grid } from '@mui/material';
 
-import Timeline from '../components/Timeline';
-import Transcript from '../components/Transcript';
-import annotationsData from '../../public/predefined_booklist.json';
-import Booklist from '../components/Predefined_booklist/Booklist';
-import EditBooklistForm from '../components/EditBooklistForm/EditBooklistForm';
+import Timeline from '../../components/Timeline';
+import Transcript from '../../components/Transcript';
+import Booklist from '../../components/Booklist/Booklist';
+import EditBooklistForm from '../../components/EditBooklistForm/EditBooklistForm';
+
+import annotationsData from '../../../public/predefined_booklist.json';
 
 const theme = createTheme();
 
-const MainContent: React.FC = () => {
+const Annotator: React.FC = () => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
   const [open, setOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
 
-  const handleSaveBooklist = (jsonData) => {
-    // 假设后端接口为 '/api/saveBooklist'
+  const handleSaveBooklist = (jsonData: any) => {
     console.log(jsonData)
     fetch('/api/saveBooklist', {
       method: 'POST',
@@ -130,4 +130,4 @@ const MainContent: React.FC = () => {
   );
 };
 
-export default MainContent;
+export default Annotator;
