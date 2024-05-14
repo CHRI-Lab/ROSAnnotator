@@ -1,4 +1,3 @@
-// Booklist.tsx
 import React from 'react';
 import jsonData from '../../../public/predefined_booklist.json';
 import { Grid } from '@mui/material';
@@ -21,4 +20,3 @@ const Booklist: React.FC = () => {
 };
 
 export default Booklist;
-

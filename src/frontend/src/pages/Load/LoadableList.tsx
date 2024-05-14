@@ -1,4 +1,3 @@
-import React from 'react';
 import { List, ListItem, ListItemText, Paper, Typography, Button } from '@mui/material';
 
 function LoadableList() {
