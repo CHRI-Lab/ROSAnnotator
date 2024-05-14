@@ -284,8 +284,8 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
               onClick={() => handleCreateBlock(axis.id)}
               variant="contained"
               sx={{
-                mb: 2.45, 
-                top:'130px',
+                mb: 5, // 增加这个属性让按钮之间有间距，从而产生对齐的效果
+                top:'150px',
                 width: '150px', 
                 height: '42px',
               }} 
