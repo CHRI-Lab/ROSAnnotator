@@ -38,6 +38,7 @@ const MainContainer = styled(Paper)(({ theme }) => ({
   width: 'auto'
 }));
 
+
 const ControlsContainer = styled('div')({
   display: 'flex',
   justifyContent: 'space-between',
@@ -118,6 +119,15 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
     console.log(data);
   };
 
+  const handleRenameAxis = (axisId: number, newName: string) => {
+    setAxes(axes => axes.map(axis => {
+      if (axis.id === axisId) {
+        return { ...axis, typeName: newName };
+      }
+      return axis;
+    }));
+  };
+
   useEffect(() => {
     setSeekTime(played);
   }, [played]);
@@ -142,7 +152,7 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
     const axis = axes.find(axis => axis.id === axisId);
     if (axis) {
       const overlap = axis.blocks.some(block =>
-        (newBlock.start < block.end && newBlock.end > block.start)
+        (newBlock.start <= block.end && newBlock.end >= block.start)
       );
 
       if (overlap) {
@@ -299,6 +309,16 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
                 '& .MuiSlider-rail': { height: '8px', opacity: 0.5 },
               }}
             />
+            <AxisManager
+              open={isDialogOpen}
+              onClose={() => setIsDialogOpen(false)}
+              axes={axes}
+              annotations={annotations}
+              onDeleteAxis={handleDeleteAxis}
+              onTypeChange={handleTypeChange}
+              onShortcutChange={handleShortcutChange} 
+              onRenameAxis={handleRenameAxis}
+            />
             <Slider
               value={selectedRange}
               min={0}
@@ -332,15 +352,7 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
           </div>
         </ScrollableTimelineContainer>
       </div>
-      <AxisManager
-        open={isDialogOpen}
-        onClose={() => setIsDialogOpen(false)}
-        axes={axes}
-        annotations={annotations}
-        onDeleteAxis={handleDeleteAxis}
-        onTypeChange={handleTypeChange}
-        onShortcutChange={handleShortcutChange} 
-      />
+      
     </MainContainer>
   );
 };
