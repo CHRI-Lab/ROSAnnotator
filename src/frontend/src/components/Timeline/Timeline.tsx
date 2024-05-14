@@ -211,10 +211,15 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
     }));
   };
 
-  const marks = Array.from({ length: Math.ceil(duration / markInterval) }, (_, index) => ({
-    value: markInterval * index,
-    label: `${markInterval * index}s`,
-  }));
+  
+
+  const marks = Array.from({ length: Math.ceil(duration / markInterval) }, (_, index) => {
+    const value = Math.round((markInterval * index) * 10) / 10; // 四舍五入到小数点后一位
+    return {
+      value: value,
+      label: `${value}s`,
+    };
+  });
 
   const handleShortcutChange = (axisId: number, shortcutKey: string) => {
     setAxes(axes => axes.map(axis => {
