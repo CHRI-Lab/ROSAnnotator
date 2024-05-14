@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Slider, Tooltip, Paper, Dialog, DialogTitle, DialogActions, DialogContent, DialogContentText } from '@mui/material';
+import {Box, Button, Slider, Paper, Dialog, DialogTitle, DialogActions, DialogContent, DialogContentText, Typography } from '@mui/material';
 import { styled } from '@mui/system';
 import Axis from '../Axis';
 import AxisManager from '../AxisManager';
@@ -246,6 +246,8 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
     setMarkInterval(newValue);
   };
 
+  const Label = styled(Typography)({});
+
   const totalWidth = duration / markInterval * 50;
 
   return (
@@ -260,14 +262,17 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
         </DialogActions>
       </Dialog>
       <ControlsContainer>
-        <Tooltip title="Mark interval (seconds)" placement="top">
+        <Box>
+          <Label variant="body2">
+            Mark Interval (s):
+          </Label>
           <input
             type="number"
             value={markInterval}
             onChange={handleMarkIntervalChange}
             style={{ width: '100px', marginRight: '20px' }}
           />
-        </Tooltip>
+        </Box>
         <Button onClick={collectData} variant="contained">
           Save and Send Data
         </Button>
