@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import {Box, Button, Slider, Paper, Dialog, DialogTitle, DialogActions, DialogContent, DialogContentText, Typography } from '@mui/material';
+import { Box, Button, Slider, Paper, Dialog, DialogTitle, DialogActions, DialogContent, DialogContentText, Typography } from '@mui/material';
 import { styled } from '@mui/system';
 import Axis from '../Axis';
 import AxisManager from '../AxisManager';
@@ -51,7 +51,7 @@ const ScrollableTimelineContainer = styled('div')({
   overflowX: 'scroll',
   overflowY: 'hidden',
   width: '100%',
-  padding: '10px 0',
+  padding: '10px',
   position: 'relative',
 });
 
