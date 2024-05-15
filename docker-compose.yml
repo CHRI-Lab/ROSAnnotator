@@ -1,0 +1,30 @@
+version: "2.0"
+
+services:
+  backend:
+    build:
+      context: ./src/backend # Path backend Dockerfile
+    volumes:
+      - ./src/backend:/app
+      - ./datas/rosbag-data:/app/datas/rosbag-data
+      - ./datas/booklist:/app/datas/booklist
+      - ./datas/annotation:/app/datas/annotation
+    ports:
+      - 8000:8000 # port mapping for server
+      - 5678:5678 # port mapping for debugger
+    image: backend:ros-annotator
+    container_name: annotator-back
+    command: python manage.py runserver 0.0.0.0:8000
+
+  frontend:
+    build:
+      context: ./src/frontend # Path frontend Dockerfile
+    # volumes:
+    #   - ./src/frontend:/app
+    ports:
+      - 5173:5173 # port mapping for frontend
+    image: frontend:ros-annotator
+    container_name: annotator-front
+    command: npm start
+    depends_on:
+      - backend
