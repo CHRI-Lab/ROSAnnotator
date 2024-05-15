@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useContext, createContext, ReactNode } from 'react';
 import ReactPlayer from 'react-player';
 import Box from '@mui/material/Box';
 import { createTheme, ThemeProvider } from '@mui/material/styles';
@@ -11,6 +11,9 @@ import Booklist from '../../components/Booklist/Booklist';
 import EditBooklistForm from '../../components/EditBooklistForm/EditBooklistForm';
 
 import annotationsData from '../../../public/predefined_booklist.json';
+import AnnotationTable from '../../components/AnnotationTable';
+
+import { AxesProvider } from '../../components/AxesProvider/AxesContext';
 
 const theme = createTheme();
 
@@ -77,54 +80,57 @@ const Annotator: React.FC = () => {
 
   return (
     <ThemeProvider theme={theme}>
-      <Box display="flex" justifyContent="center" alignItems="center" flexDirection="column">
-        <Box display="flex" justifyContent="center" alignItems="center" flexDirection="row">
-          <Box width={600} height={452}>
-            <Transcript played={played} setPlayed={handleSeek}/>
+      <AxesProvider>
+        <Box display="flex" justifyContent="center" alignItems="center" flexDirection="column">
+          <Box display="flex" justifyContent="center" alignItems="center" flexDirection="row">
+            <Box width="100%" height={452} maxWidth={602}>
+              <ReactPlayer
+                ref={playerRef}
+                width="100%"
+                height="auto" 
+                url="sample.mp4"
+                onDuration={handleDuration}
+                onProgress={handleProgress}
+                controls
+                playing
+              />
+            </Box>
+            <Box width={600} height={452}>
+              {/* <Transcript played={played} setPlayed={handleSeek}/> */}
+              <AnnotationTable />
+            </Box>
           </Box>
-          <Box width="100%" height={452} maxWidth={602}>
-            <ReactPlayer
-              ref={playerRef}
-              width="100%"
-              height="auto" 
-              url="sample.mp4"
-              onDuration={handleDuration}
-              onProgress={handleProgress}
-              controls
-              playing
+          <div>
+            <Box sx={{ position: 'absolute', top: 0, left: 0, padding: 2 }}>
+                <Button variant="outlined" onClick={handleClickOpen}>
+                    Booklist
+                </Button>
+                <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
+                    <DialogContent>
+                      <Grid container spacing={2}>
+                          {editMode ? <EditBooklistForm onSave={handleSaveBooklist} /> : <Booklist />}
+                      </Grid>
+                    </DialogContent>
+                <DialogActions>
+                {!editMode && <Button onClick={handleEdit}>Edit</Button>}
+                  <Button onClick={handleClose}>Close</Button>
+                  
+                      
+                    </DialogActions>
+                </Dialog>
+            </Box>
+          </div>
+          
+          <Box width="100%" maxWidth={1200}>
+            <Timeline
+              duration={duration}
+              played={played}
+              annotations={annotationsData} 
+              onSeek={handleSeek}
             />
           </Box>
         </Box>
-        <div>
-          <Box sx={{ position: 'absolute', top: 0, left: 0, padding: 2 }}>
-              <Button variant="outlined" onClick={handleClickOpen}>
-                  Booklist
-              </Button>
-              <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
-                  <DialogContent>
-                    <Grid container spacing={2}>
-                        {editMode ? <EditBooklistForm onSave={handleSaveBooklist} /> : <Booklist />}
-                    </Grid>
-                  </DialogContent>
-              <DialogActions>
-              {!editMode && <Button onClick={handleEdit}>Edit</Button>}
-                <Button onClick={handleClose}>Close</Button>
-                
-                    
-                  </DialogActions>
-              </Dialog>
-          </Box>
-        </div>
-        
-        <Box width="100%" maxWidth={1200}>
-          <Timeline
-            duration={duration}
-            played={played}
-            annotations={annotationsData} 
-            onSeek={handleSeek}
-          />
-        </Box>
-      </Box>
+      </AxesProvider>
     </ThemeProvider>
   );
 };
