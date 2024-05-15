@@ -1,4 +1,3 @@
-// MainContent.tsx
 import React, { useState, useCallback } from 'react';
 import ReactPlayer from 'react-player';
 import Box from '@mui/material/Box';
@@ -81,7 +80,7 @@ const Annotator: React.FC = () => {
       <Box display="flex" justifyContent="center" alignItems="center" flexDirection="column">
         <Box display="flex" justifyContent="center" alignItems="center" flexDirection="row">
           <Box width={600} height={452}>
-            <Transcript played={played}/>
+            <Transcript played={played} setPlayed={handleSeek}/>
           </Box>
           <Box width="100%" height={452} maxWidth={602}>
             <ReactPlayer
