@@ -1,24 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { Box, Button, Slider, Paper, Dialog, DialogTitle, DialogActions, DialogContent, DialogContentText, Typography } from '@mui/material';
 import { styled } from '@mui/system';
 import Axis from '../Axis';
 import AxisManager from '../AxisManager';
+import AxesContext from '../AxesProvider';
 
 let globalAxisId = 0;
-
-interface BlockProps {
-  start: number;
-  end: number;
-  text?: string;
-}
-
-interface AxisData {
-  id: number;
-  type: string;
-  typeName?: string;
-  shortcutKey?: string;
-  blocks: BlockProps[];
-}
 
 interface TimelineProps {
   duration: number;
@@ -81,10 +68,11 @@ const Timeline: React.FC<TimelineProps> = ({ duration, played, onSeek, annotatio
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
   const [selectedRange, setSelectedRange] = useState<number[]>([0, 0.1 * duration]);
-  const [axes, setAxes] = useState<AxisData[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState("");
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
+
+  const {axes, setAxes} = useContext(AxesContext)!;
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
