@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, TextField } from '@mui/material';
+import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper } from '@mui/material';
 import AxesContext from '../AxesProvider';
 
 interface TableData {
@@ -8,20 +8,6 @@ interface TableData {
     duration: number; // in seconds
     tierName: string;
     annotation: string;
-}
-
-interface BlockProps {
-    start: number;
-    end: number;
-    text?: string;
-}
-
-interface AxisData {
-    id: number;
-    type: string;
-    typeName?: string;
-    shortcutKey?: string;
-    blocks: BlockProps[];
 }
 
 const AnnotationTable: React.FC = () => {
@@ -49,20 +35,6 @@ const AnnotationTable: React.FC = () => {
         });
         setRows(newRows);
     }, [axes]);
-
-    const handleChange = (index: number, field: keyof TableData, value: string) => {
-        const newRows = [...rows];
-        const row = newRows[index];
-        row[field as 'beginTime' | 'endTime'] = parseFloat(value);
-    
-        if (field === 'beginTime' || field === 'endTime') {
-            if (row.beginTime && row.endTime) {
-                row.duration = calculateDuration(row.beginTime, row.endTime);
-            }
-        }
-    
-        setRows(newRows);
-    };
     
     const formatTime = (seconds: number) => {
         return (seconds).toFixed(1); // Converts to hours and rounds to 0.1
