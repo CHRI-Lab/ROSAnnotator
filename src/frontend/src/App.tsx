@@ -1,7 +1,7 @@
 import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { LandingPage } from "./pages/Landing";
 import Annotator from "./pages/Annotator";
-import LoadableList from "./pages/Load";
 import LoadingPage from "./pages/Loading";
 
 const App: React.FC = () => {
@@ -9,7 +9,7 @@ const App: React.FC = () => {
     <Router>
       <Routes>
         <Route path="/" element={<Annotator />} />
-        <Route path="/load" element={<LoadableList />} />
+        <Route path="/load" element={<LandingPage />} />
         <Route path="/loading" element={<LoadingPage />} />
       </Routes>
     </Router>

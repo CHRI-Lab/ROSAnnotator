@@ -1,2 +1,2 @@
 import LoadableList from "./LoadableList";
-export default LoadableList;
+export { LoadableList as LandingPage };
