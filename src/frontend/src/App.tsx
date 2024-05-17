@@ -1,8 +1,9 @@
 import React from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+
 import { LandingPage } from "./pages/Landing";
 import Annotator from "./pages/Annotator";
-import LoadingPage from "./pages/Loading";
+import MainPage from "./pages/Main";
 
 const App: React.FC = () => {
   return (
@@ -10,7 +11,7 @@ const App: React.FC = () => {
       <Routes>
         <Route path="/" element={<Annotator />} />
         <Route path="/load" element={<LandingPage />} />
-        <Route path="/loading" element={<LoadingPage />} />
+        <Route path="/main" element={<MainPage />} />
       </Routes>
     </Router>
   );
