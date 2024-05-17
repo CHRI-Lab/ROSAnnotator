@@ -6,6 +6,7 @@ import {
   Typography,
   Button,
 } from "@mui/material";
+import Snackbar from "@mui/material/Snackbar";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -20,6 +21,10 @@ function LoadableList() {
   const [rosBagFile, setRosBagFile] = useState("");
   const [bookListFile, setBookListFile] = useState("");
   const [annotationFile, setAnnotationFile] = useState("");
+  const [rosSelectedIndex, setRosSelectedIndex] = useState(null);
+  const [bookSelectedIndex, setBookSelectedIndex] = useState(null);
+  const [annotSelectedIndex, setAnnotSelectedIndex] = useState(null);
+  const [open, setOpen] = useState(false);
 
   const navigate = useNavigate();
 
@@ -29,10 +34,24 @@ function LoadableList() {
     //   .then((data) => {
     //     setFileNameList(data);
     //   });
+    setFileNameList(fileNameListTest);
   }, []);
 
   const handleLoadData = () => {
-    navigate("/main/" + rosBagFile + "+" + bookListFile + "+" + annotationFile);
+    if (rosBagFile === "") {
+      setOpen(true);
+    } else {
+      navigate(
+        "/main/" + rosBagFile + "+" + bookListFile + "+" + annotationFile
+      );
+    }
+  };
+
+  const handleClose = (event?: React.SyntheticEvent, reason?: string) => {
+    if (reason === "clickaway") {
+      return;
+    }
+    setOpen(false);
   };
 
   return (
@@ -56,17 +75,15 @@ function LoadableList() {
             ROSBAG DATA FILE *
           </Typography>
           <List component="nav" aria-label="ROSbag data file">
-            {/* <ListItem button>
-              <ListItemText primary="Item 1" />
-            </ListItem>
-            <ListItem button>
-              <ListItemText primary="Item 2" />
-            </ListItem> */}
             {fileNameList.rosBagList.map((fileName, index) => (
               <ListItem
                 button
                 key={index}
-                onClick={() => setRosBagFile(fileName)}
+                onClick={() => {
+                  setRosBagFile(fileName);
+                  setRosSelectedIndex(index);
+                }}
+                selected={rosSelectedIndex === index}
               >
                 <ListItemText primary={fileName} />
               </ListItem>
@@ -87,7 +104,11 @@ function LoadableList() {
               <ListItem
                 button
                 key={index}
-                onClick={() => setBookListFile(fileName)}
+                onClick={() => {
+                  setBookListFile(fileName);
+                  setBookSelectedIndex(index);
+                }}
+                selected={bookSelectedIndex === index}
               >
                 <ListItemText primary={fileName} />
               </ListItem>
@@ -108,7 +129,11 @@ function LoadableList() {
               <ListItem
                 button
                 key={index}
-                onClick={() => setAnnotationFile(fileName)}
+                onClick={() => {
+                  setAnnotationFile(fileName);
+                  setAnnotSelectedIndex(index);
+                }}
+                selected={annotSelectedIndex === index}
               >
                 <ListItemText primary={fileName} />
               </ListItem>
@@ -124,6 +149,14 @@ function LoadableList() {
           Load Me
         </Button>
       </div>
+
+      <Snackbar
+        anchorOrigin={{ vertical: "top", horizontal: "center" }}
+        open={open}
+        autoHideDuration={6000}
+        onClose={handleClose}
+        message="ROSBag Data File cannot be empty!"
+      />
     </div>
   );
 }
