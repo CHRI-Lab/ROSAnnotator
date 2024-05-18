@@ -29,9 +29,12 @@ function LoadableList() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch(
-          "http://localhost:8000/api/list_filenames"
-        );
+        const response = await fetch("http://0.0.0.0:8000/api/list_filenames", {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
         const data = await response.json();
         console.log(data);
         setFileNameList({
@@ -98,7 +101,17 @@ function LoadableList() {
                   }}
                   selected={rosSelectedIndex === index}
                 >
-                  <ListItemText primary={fileName} />
+                  <ListItemText
+                    primary={fileName}
+                    primaryTypographyProps={{
+                      style: {
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        width: "100%",
+                      },
+                    }}
+                  />
                 </ListItem>
               ))
             )}
@@ -129,7 +142,17 @@ function LoadableList() {
                   }}
                   selected={bookSelectedIndex === index}
                 >
-                  <ListItemText primary={fileName} />
+                  <ListItemText
+                    primary={fileName}
+                    primaryTypographyProps={{
+                      style: {
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        width: "100%",
+                      },
+                    }}
+                  />
                 </ListItem>
               ))
             )}
@@ -178,7 +201,7 @@ function LoadableList() {
         open={open}
         autoHideDuration={6000}
         onClose={handleClose}
-        message="ROSBag Data File cannot be empty!"
+        message="ROSBag data file must be selected!"
       />
     </div>
   );
