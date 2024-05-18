@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 from .serializers import TranscriptionRequestSerializer
 from pydub import AudioSegment
 import whisper
+import json
 
 ####################################################################################
 # Marked for automatic chatgpt review process (Remove this line in the next commit)#
@@ -126,44 +127,56 @@ def encode_file_base64(file_path):
 def process_rosbag(request):
     if request.method == 'POST':
         bag_filename = "/app/datas/rosbag-data/" + request.data.get('bag_filename')
-        if not bag_filename:
-            return Response({'error': 'No bag_filename provided'}, status=400)
+        if not os.path.exists(bag_filename):
+            return Response({'error': 'Invalid bag filename'}, status=400)
 
-        # add timestamp to the processed file folder
-        finish_time = datetime.now()
-        finish_time_str = finish_time.strftime('%Y-%m-%d-%H:%M:%S')
+        # # add timestamp to the processed file folder
+        # finish_time = datetime.now()
+        # finish_time_str = finish_time.strftime('%Y-%m-%d-%H:%M:%S')
 
-        output_folder = f'/app/processed_data/{os.path.basename(bag_filename)}_{finish_time_str}/'
-        os.makedirs(output_folder, exist_ok=True)
-        os.makedirs(f'{output_folder}/images', exist_ok=True)
+        # output_folder = f'/app/processed_data/{os.path.basename(bag_filename)}_{finish_time_str}/'
+        # os.makedirs(output_folder, exist_ok=True)
+        # os.makedirs(f'{output_folder}/images', exist_ok=True)
 
-        extract_images_from_rosbag(bag_filename, output_folder)
-        extract_video(bag_filename, output_folder)
-        extract_audio(bag_filename, output_folder)
-        combine_video_audio(output_folder)
+        # extract_images_from_rosbag(bag_filename, output_folder)
+        # extract_video(bag_filename, output_folder)
+        # extract_audio(bag_filename, output_folder)
+        # combine_video_audio(output_folder)
 
-        # Construct paths to the processed files
-        video_path = os.path.join(output_folder, 'output.mp4')
-        audio_path = os.path.join(output_folder, 'audio.mp3')
-        output_waveform_path = os.path.join(output_folder, 'output_waveform.png')
+        # # Construct paths to the processed files
+        # video_path = os.path.join(output_folder, 'output.mp4')
+        # audio_path = os.path.join(output_folder, 'audio.mp3')
+        # output_waveform_path = os.path.join(output_folder, 'output_waveform.png')
 
-        # plot audio wave graph
-        plot_waveform(audio_path, output_waveform_path)
+        # # plot audio wave graph
+        # plot_waveform(audio_path, output_waveform_path)
 
-        # speech transcript from audio file
-        srt_file_path = transcribe_audio_to_srt(audio_path, output_folder)
+        # # speech transcript from audio file
+        # srt_file_path = transcribe_audio_to_srt(audio_path, output_folder)
 
-        # encode the processed files as base64 strings
-        video_data = encode_file_base64(video_path)
-        audio_data = encode_file_base64(audio_path)
-        waveform_image_data = encode_file_base64(output_waveform_path)
-        srt_transcript_data = encode_file_base64(srt_file_path)
+        # # encode the processed files as base64 strings
+        # video_data = encode_file_base64(video_path)
+        # audio_data = encode_file_base64(audio_path)
+        # waveform_image_data = encode_file_base64(output_waveform_path)
+        # srt_transcript_data = encode_file_base64(srt_file_path)
+
+        booklist_filename = request.data.get('booklist_filename')
+        if booklist_filename:
+            booklist_path = "/app/datas/booklist/" + booklist_filename
+            if not os.path.exists(booklist_path):
+                return Response({'error': 'Invalid booklist filename'}, status=400)
+            with open(booklist_path, 'r') as booklist_file:
+                booklist_data = json.load(booklist_file)
+        else:
+            # create an empty json object
+            booklist_data = {}
 
         return Response({
-            'video_data': video_data,
-            'audio_data': audio_data,
-            'waveform_image_data': waveform_image_data,
-            'srt_transcript_data': srt_transcript_data,
+            # 'video_data': video_data,
+            # 'audio_data': audio_data,
+            # 'waveform_image_data': waveform_image_data,
+            # 'srt_transcript_data': srt_transcript_data,
+            'booklist_data': booklist_data,
             'message': 'Processing complete'
         })
     
