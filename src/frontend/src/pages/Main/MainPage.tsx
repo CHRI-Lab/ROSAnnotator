@@ -16,7 +16,16 @@ const MainPage = () => {
     // Define the async function to fetch data
     const fetchData = async () => {
       try {
-        const response = await fetch(`/api/${rosBagFile}/${bookListFile}`);
+        const response = await fetch("http://0.0.0.0:8000/api/process_rosbag", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            bag_filename: rosBagFile,
+            booklist_file: bookListFile,
+          }),
+        });
         const data = await response.json();
         setData(data);
         setLoading(false);
