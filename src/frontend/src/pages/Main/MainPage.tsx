@@ -10,6 +10,7 @@ const MainPage = () => {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [error, setError] = useState<unknown>(null);
+  const [errorDisplay, setErrorDisplay] = useState(false);
 
   useEffect(() => {
     // Define the async function to fetch data
@@ -21,6 +22,7 @@ const MainPage = () => {
         setLoading(false);
       } catch (error) {
         setError(error);
+        setErrorDisplay(true);
         setLoading(false);
       }
     };
@@ -34,7 +36,7 @@ const MainPage = () => {
 
   if (error) {
     return (
-      <Dialog open={true}>
+      <Dialog open={errorDisplay}>
         <DialogTitle>
           <Typography variant="h6" color="error">
             Error
