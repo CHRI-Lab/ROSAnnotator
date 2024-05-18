@@ -51,6 +51,7 @@ ROS Annotator is a standalone web application designed to facilitate the analysi
        ├── rosbag-data/   # place your rosbag data here
        ├── booklist/   # place your predefined booklist here
        └── annotation/  # retrieve your annotation output here
+       └── processed/  # store all processed data of a rosbag with timestamps
    ```
 
    To use the desired data or files, place them into the corresponding folders. This location is set up to be accessible within the backend environment using attached docker volumes.
