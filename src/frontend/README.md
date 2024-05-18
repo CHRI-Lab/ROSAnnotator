@@ -1,30 +1,38 @@
-# React + TypeScript + Vite
+# Frontend Setup and Development Guide
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This document provides a comprehensive guide for setting up and running the development environment and workflow for the frontend of the project.
 
-Currently, two official plugins are available:
+## Prerequisites
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Install Node.js (**20.11.1**)
+- Switch to the frontend directory with <code>cd src/frontend</code>
+- Run <code>npm install</code> to install packages (npm **10.5.0**)
+## Starting the Backend Server
 
-## Expanding the ESLint configuration
+To start the frontend server, follow these steps:
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+1. **Navigate to the Frontend Directory**
 
-- Configure the top-level `parserOptions` property like this:
+   Change to the frontend folder by running:
 
-```js
-export default {
-  // other rules...
-  parserOptions: {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    project: ['./tsconfig.json', './tsconfig.node.json'],
-    tsconfigRootDir: __dirname,
-  },
-}
-```
+   ```bash
+   cd src/frontend
+   ```
 
-- Replace `plugin:@typescript-eslint/recommended` to `plugin:@typescript-eslint/recommended-type-checked` or `plugin:@typescript-eslint/strict-type-checked`
-- Optionally add `plugin:@typescript-eslint/stylistic-type-checked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and add `plugin:react/recommended` & `plugin:react/jsx-runtime` to the `extends` list
+2. **Start the Server**
+
+   Start frontend server:
+
+   ```bash
+   npm start
+   ```
+
+   Alternatively, to start the development server:
+
+   ```bash
+   npm run dev
+   ```
+
+3. **Access the Frontend Server**
+
+   Once the server is up and running, you can access the [frontend server](http://localhost:5173/) at `http://localhost:5173/`.
