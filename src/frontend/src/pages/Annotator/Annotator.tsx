@@ -1,60 +1,79 @@
-import React, { useState, useCallback, useContext, createContext, ReactNode } from 'react';
-import ReactPlayer from 'react-player';
-import Box from '@mui/material/Box';
-import { createTheme, ThemeProvider } from '@mui/material/styles';
-import Button from '@mui/material/Button';
-import { Dialog, DialogActions, DialogContent, Grid } from '@mui/material';
+import React, {
+  useState,
+  useCallback,
+  useContext,
+  createContext,
+  ReactNode,
+} from "react";
+import ReactPlayer from "react-player";
+import Box from "@mui/material/Box";
+import { createTheme, ThemeProvider } from "@mui/material/styles";
+import Button from "@mui/material/Button";
+import { Dialog, DialogActions, DialogContent, Grid } from "@mui/material";
 
-import Timeline from '../../components/Timeline';
-import Transcript from '../../components/Transcript';
-import Booklist from '../../components/Booklist/Booklist';
-import EditBooklistForm from '../../components/EditBooklistForm/EditBooklistForm';
+import Timeline from "../../components/Timeline";
+import Transcript from "../../components/Transcript";
+import Booklist from "../../components/Booklist/Booklist";
+import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
+import AnnotationTable from "../../components/AnnotationTable";
+import { AxesProvider } from "../../components/AxesProvider/AxesContext";
 
-import annotationsData from '../../../public/predefined_booklist.json';
-import AnnotationTable from '../../components/AnnotationTable';
-
-import { AxesProvider } from '../../components/AxesProvider/AxesContext';
+import bookListDataTest from "../../../public/predefined_booklist.json";
 
 const theme = createTheme();
 
-const Annotator: React.FC = () => {
+interface AnnotatorProps {
+  bookListFileName: string;
+  bookListData: Record<string, string[]>;
+}
+
+const Annotator: React.FC<AnnotatorProps> = ({
+  bookListFileName,
+  bookListData,
+}) => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
   const [open, setOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [bookList, setBookList] = useState(bookListDataTest); //TODO Replace with bookListData
 
+  // TODO Method API Call
   const handleSaveBooklist = (jsonData: any) => {
-    console.log(jsonData)
-    fetch('/api/saveBooklist', {
-      method: 'POST',
+    setBookList(jsonData);
+    console.log(jsonData);
+    fetch("/api/.../saveBooklist", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json'
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(jsonData)
+      body: JSON.stringify({
+        booklist_filename: bookListFileName,
+        booklist_data: jsonData,
+      }),
     })
-    .then(response => response.json())
-    .then(data => {
-      console.log('Success:', data);
-      alert('Data saved successfully!');
-    })
-    .catch((error) => {
-      console.error('Error:', error);
-      alert('Failed to save data.');
-    });
+      .then((response) => response.json())
+      .then((data) => {
+        console.log("Success:", data);
+        alert("Data saved successfully!");
+      })
+      .catch((error) => {
+        console.error("Error:", error);
+        alert("Failed to save data.");
+      });
   };
 
   const handleDuration = (duration: number) => {
     setDuration(duration);
   };
 
-    const handleClickOpen = () => {
-      setOpen(true);
-      setEditMode(false);
+  const handleClickOpen = () => {
+    setOpen(true);
+    setEditMode(false);
   };
 
   const handleClose = () => {
-      setOpen(false);
+    setOpen(false);
   };
 
   const handleProgress = (progress: { playedSeconds: number }) => {
@@ -63,31 +82,44 @@ const Annotator: React.FC = () => {
     }
   };
 
-  const handleSeek = useCallback((time: number) => {
-    setPlayed(time);
-    if (player) {
-      player.seekTo(time);
-    }
-  }, [player]);
+  const handleSeek = useCallback(
+    (time: number) => {
+      setPlayed(time);
+      if (player) {
+        player.seekTo(time);
+      }
+    },
+    [player]
+  );
 
   const playerRef = useCallback((playerInstance: ReactPlayer) => {
     setPlayer(playerInstance);
   }, []);
 
-  const handleEdit = () => {
+  const handleOnEdit = () => {
     setEditMode(true);
-};
+  };
 
   return (
     <ThemeProvider theme={theme}>
       <AxesProvider>
-        <Box display="flex" justifyContent="center" alignItems="center" flexDirection="column">
-          <Box display="flex" justifyContent="center" alignItems="center" flexDirection="row">
+        <Box
+          display="flex"
+          justifyContent="center"
+          alignItems="center"
+          flexDirection="column"
+        >
+          <Box
+            display="flex"
+            justifyContent="center"
+            alignItems="center"
+            flexDirection="row"
+          >
             <Box width="100%" height={452} maxWidth={602}>
               <ReactPlayer
                 ref={playerRef}
                 width="100%"
-                height="auto" 
+                height="auto"
                 url="sample.mp4"
                 onDuration={handleDuration}
                 onProgress={handleProgress}
@@ -101,31 +133,36 @@ const Annotator: React.FC = () => {
             </Box>
           </Box>
           <div>
-            <Box sx={{ position: 'absolute', top: 0, left: 0, padding: 2 }}>
-                <Button variant="outlined" onClick={handleClickOpen}>
-                    Booklist
-                </Button>
-                <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
-                    <DialogContent>
-                      <Grid container spacing={2}>
-                          {editMode ? <EditBooklistForm onSave={handleSaveBooklist} /> : <Booklist />}
-                      </Grid>
-                    </DialogContent>
+            <Box sx={{ position: "absolute", top: 0, left: 0, padding: 2 }}>
+              <Button variant="outlined" onClick={handleClickOpen}>
+                Booklist
+              </Button>
+              <Dialog open={open} onClose={handleClose} maxWidth="md" fullWidth>
+                <DialogContent>
+                  <Grid container spacing={2}>
+                    {editMode ? (
+                      <EditBooklistForm
+                        bookListData={bookList}
+                        onSave={handleSaveBooklist}
+                      />
+                    ) : (
+                      <Booklist bookListData={bookList} />
+                    )}
+                  </Grid>
+                </DialogContent>
                 <DialogActions>
-                {!editMode && <Button onClick={handleEdit}>Edit</Button>}
+                  {!editMode && <Button onClick={handleOnEdit}>Edit</Button>}
                   <Button onClick={handleClose}>Close</Button>
-                  
-                      
-                    </DialogActions>
-                </Dialog>
+                </DialogActions>
+              </Dialog>
             </Box>
           </div>
-          
+
           <Box width="100%" maxWidth={1200}>
             <Timeline
               duration={duration}
               played={played}
-              annotations={annotationsData} 
+              annotations={bookList}
               onSeek={handleSeek}
             />
           </Box>
