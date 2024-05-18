@@ -2,16 +2,20 @@ import base64
 import os
 import subprocess
 import cv2
+from django.http import JsonResponse
 import yaml
 import numpy as np
 from rosbag.bag import Bag
 from cv_bridge import CvBridge
 from google.cloud import speech_v1p1beta1 as speech
-from datetime import datetime
+from datetime import datetime, timedelta
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+from rest_framework import status
 import matplotlib.pyplot as plt
+from .serializers import TranscriptionRequestSerializer
 from pydub import AudioSegment
+import whisper
 
 def extract_images_from_rosbag(bag_filename, output_folder):
     bag = Bag(bag_filename, 'r')
@@ -70,47 +74,33 @@ def combine_video_audio(output_folder):
 
     subprocess.run(['ffmpeg', '-i', video_path, '-i', audio_path, '-c:v', 'copy', '-map', '0:v', '-map', '1:a', '-y', output_path])
 
-def generate_srt(uri, output_folder):
-    # Create a Speech client
-    client = speech.SpeechClient()
 
-    # Configure the audio source
-    audio = speech.RecognitionAudio(uri=uri)
+def transcribe_audio_to_srt(audio_file_path, output_folder_path):
+    model = whisper.load_model("base")
+    
+    def seconds_to_srt_time(seconds):
+        return str(timedelta(seconds=seconds))
 
-    # Configure the speech recognition request
-    config = speech.RecognitionConfig(
-        encoding=speech.RecognitionConfig.AudioEncoding.MP3,
-        sample_rate_hertz=16000,
-        language_code='en-US',
-        enable_automatic_punctuation=True,
-        enable_word_time_offsets=True,
-        enable_speaker_diarization=True,
-        diarization_speaker_count=2,
-    )
+    # Transcribe the audio file
+    result = model.transcribe(audio_file_path)
+    
+    # Generate SRT content
+    srt_content = ""
+    for i, segment in enumerate(result["segments"]):
+        start = seconds_to_srt_time(segment["start"])
+        end = seconds_to_srt_time(segment["end"])
+        text = segment["text"]
+        srt_content += f"{i+1}\n{start} --> {end}\n{text}\n\n"
 
-    # Perform the long-running speech recognition
-    operation = client.long_running_recognize(config=config, audio=audio)
-    print("Waiting for operation to complete...")
-    response = operation.result(timeout=90)
+    # Create the SRT file name based on the audio file name
+    audio_file_name = os.path.basename(audio_file_path)
+    srt_file_name = os.path.splitext(audio_file_name)[0] + ".srt"
+    srt_file_path = os.path.join(output_folder_path, srt_file_name)
 
-    # Generate the name for the SRT file
-    srt_file_name = os.path.basename(uri).rsplit(".", 1)[0] + ".srt"
-    srt_file_path = os.path.join(output_folder, srt_file_name)
+    # Save the SRT file
+    with open(srt_file_path, "w") as srt_file:
+        srt_file.write(srt_content)
 
-    # Write the transcription to the SRT file
-    with open(srt_file_path, 'w') as srt_file:
-        counter = 1
-        for result in response.results:
-            if result.alternatives[0].words:
-                start_time = result.alternatives[0].words[0].start_time
-                end_time = result.alternatives[0].words[-1].end_time
-                speaker_tag = result.alternatives[0].words[0].speaker_tag
-
-                srt_file.write(f"{counter}\n")
-                srt_file.write(f"{format_time(start_time)} --> {format_time(end_time)}\n")
-                srt_file.write(f"Speaker {speaker_tag}: {result.alternatives[0].transcript}\n\n")
-                counter += 1
-    print(f"SRT file created: {srt_file_path}")
     return srt_file_path
 
 def format_time(duration):
@@ -156,8 +146,8 @@ def process_rosbag(request):
         # plot audio wave graph
         plot_waveform(audio_path, output_waveform_path)
 
-        #TODO debug the google cloud speech credential issue
-        srt_file_path = generate_srt(audio_path, output_folder)
+        # speech transcript from audio file
+        srt_file_path = transcribe_audio_to_srt(audio_path, output_folder)
 
         # encode the processed files as base64 strings
         video_data = encode_file_base64(video_path)
@@ -169,8 +159,42 @@ def process_rosbag(request):
             'video_data': video_data,
             'audio_data': audio_data,
             'waveform_image_data': waveform_image_data,
+            'srt_transcript_data': srt_transcript_data,
             'message': 'Processing complete'
         })
     
     else:
         return Response({'error': 'Invalid request method'}, status=405)
+
+@api_view(['GET'])
+def list_filenames(request):
+    # Define folder paths
+    rosbag_file_folder_path = '/app/rosbag-data/rosbag_file/'
+    booklist_folder_path = '/app/rosbag-data/booklist/'
+    annotation_folder_path = '/app/rosbag-data/annotation/'
+
+    # Validate folder paths
+    if not all(map(os.path.isdir, [rosbag_file_folder_path, booklist_folder_path, annotation_folder_path])):
+        return JsonResponse({'error': 'Invalid folder paths'}, status=500)
+
+    # List files in the directories
+    rosbag_files = [file for file in os.listdir(rosbag_file_folder_path) if file.endswith('.bag')]
+    booklist_files = [file for file in os.listdir(booklist_folder_path) if file.endswith('.json')]
+    annotation_files = [file for file in os.listdir(annotation_folder_path) if file.endswith('.csv')]
+
+    # Return the list of files as JSON response
+    return JsonResponse({'rosbag_files': rosbag_files, 'booklist_files': booklist_files, 'annotation_files': annotation_files})
+
+# For testing if the transcibe_audio is working 
+@api_view(['POST'])
+def transcribe_audio(request):
+    serializer = TranscriptionRequestSerializer(data=request.data)
+    if serializer.is_valid():
+        audio_file_path = serializer.validated_data['audio_file_path']
+        output_folder_path = serializer.validated_data['output_folder_path']
+        try:
+            srt_file_path = transcribe_audio_to_srt(audio_file_path, output_folder_path)
+            return Response({"srt_file_path": srt_file_path}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

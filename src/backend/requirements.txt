@@ -6,3 +6,4 @@ debugpy==1.8.1
 djangorestframework
 google-cloud-speech
 pydub
+openai-whisper
