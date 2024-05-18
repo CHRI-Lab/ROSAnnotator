@@ -20,10 +20,10 @@ function LoadableList() {
   const [fileNameList, setFileNameList] = useState(fileNameListTest);
   const [rosBagFile, setRosBagFile] = useState("");
   const [bookListFile, setBookListFile] = useState("");
-  const [annotationFile, setAnnotationFile] = useState("");
+  // const [annotationFile, setAnnotationFile] = useState("");
   const [rosSelectedIndex, setRosSelectedIndex] = useState(null);
   const [bookSelectedIndex, setBookSelectedIndex] = useState(null);
-  const [annotSelectedIndex, setAnnotSelectedIndex] = useState(null);
+  // const [annotSelectedIndex, setAnnotSelectedIndex] = useState(null);
   const [open, setOpen] = useState(false);
 
   const navigate = useNavigate();
@@ -41,9 +41,7 @@ function LoadableList() {
     if (rosBagFile === "") {
       setOpen(true);
     } else {
-      navigate(
-        "/main/" + rosBagFile + "+" + bookListFile + "+" + annotationFile
-      );
+      navigate("/main/" + rosBagFile + "/" + bookListFile);
     }
   };
 
@@ -75,19 +73,25 @@ function LoadableList() {
             ROSBAG DATA FILE *
           </Typography>
           <List component="nav" aria-label="ROSbag data file">
-            {fileNameList.rosBagList.map((fileName, index) => (
-              <ListItem
-                button
-                key={index}
-                onClick={() => {
-                  setRosBagFile(fileName);
-                  setRosSelectedIndex(index);
-                }}
-                selected={rosSelectedIndex === index}
-              >
-                <ListItemText primary={fileName} />
+            {fileNameList.rosBagList.length === 0 ? (
+              <ListItem button>
+                <ListItemText primary="No file found. Please place your files in the prescribed location." />
               </ListItem>
-            ))}
+            ) : (
+              fileNameList.rosBagList.map((fileName, index) => (
+                <ListItem
+                  button
+                  key={index}
+                  onClick={() => {
+                    setRosBagFile(fileName);
+                    setRosSelectedIndex(index);
+                  }}
+                  selected={rosSelectedIndex === index}
+                >
+                  <ListItemText primary={fileName} />
+                </ListItem>
+              ))
+            )}
           </List>
         </Paper>
 
@@ -100,19 +104,25 @@ function LoadableList() {
             Predefined Booklist
           </Typography>
           <List component="nav" aria-label="Predefined Booklist">
-            {fileNameList.bookList.map((fileName, index) => (
-              <ListItem
-                button
-                key={index}
-                onClick={() => {
-                  setBookListFile(fileName);
-                  setBookSelectedIndex(index);
-                }}
-                selected={bookSelectedIndex === index}
-              >
-                <ListItemText primary={fileName} />
+            {fileNameList.bookList.length === 0 ? (
+              <ListItem button>
+                <ListItemText primary="No file found. Please place your files in the prescribed location." />
               </ListItem>
-            ))}
+            ) : (
+              fileNameList.bookList.map((fileName, index) => (
+                <ListItem
+                  button
+                  key={index}
+                  onClick={() => {
+                    setBookListFile(fileName);
+                    setBookSelectedIndex(index);
+                  }}
+                  selected={bookSelectedIndex === index}
+                >
+                  <ListItemText primary={fileName} />
+                </ListItem>
+              ))
+            )}
           </List>
         </Paper>
 
@@ -125,7 +135,7 @@ function LoadableList() {
             Annotation File
           </Typography>
           <List component="nav" aria-label="Annotation File">
-            {fileNameList.annotationList.map((fileName, index) => (
+            {/* {fileNameList.annotationList.map((fileName, index) => (
               <ListItem
                 button
                 key={index}
@@ -137,7 +147,10 @@ function LoadableList() {
               >
                 <ListItemText primary={fileName} />
               </ListItem>
-            ))}
+            ))} */}
+            <ListItem button>
+              <ListItemText primary="Not Supported for Now" />
+            </ListItem>
           </List>
         </Paper>
       </div>
