@@ -1,33 +1,42 @@
 // EditBooklistForm.tsx
-import React, { useState } from 'react';
-import { Button, TextareaAutosize } from '@mui/material';
-import jsonData from '../../../public/predefined_booklist.json';  // 确保路径正确
+import React, { useState } from "react";
+import { Button, TextareaAutosize } from "@mui/material";
 
-const EditBooklistForm = ({ onSave }) => {
-    const [jsonDataText, setJsonDataText] = useState(JSON.stringify(jsonData, null, 2));
+interface EditBooklistFormProps {
+  bookListData: Record<string, string[]>;
+  onSave: (data: any) => void;
+}
 
-    const handleSave = () => {
-        try {
-            const data = JSON.parse(jsonDataText);
-            onSave(data);
-        } catch (error) {
-            alert('Invalid JSON data.');
-        }
-    };
+const EditBooklistForm: React.FC<EditBooklistFormProps> = ({
+  bookListData,
+  onSave,
+}) => {
+  const [bookListDataText, setBookListDataText] = useState(
+    JSON.stringify(bookListData, null, 2)
+  );
 
-    return (
-        <div>
-            <TextareaAutosize
-                minRows={10}
-                style={{ width: '100%' }}
-                value={jsonDataText}
-                onChange={(e) => setJsonDataText(e.target.value)}
-            />
-            <Button onClick={handleSave} variant="contained" color="primary">
-                Save
-            </Button>
-        </div>
-    );
+  const handleSave = () => {
+    try {
+      const data = JSON.parse(bookListDataText);
+      onSave(data);
+    } catch (error) {
+      alert("Invalid JSON data.");
+    }
+  };
+
+  return (
+    <div>
+      <TextareaAutosize
+        minRows={10}
+        style={{ width: "100%" }}
+        value={bookListDataText}
+        onChange={(e) => setBookListDataText(e.target.value)}
+      />
+      <Button onClick={handleSave} variant="contained" color="primary">
+        Save
+      </Button>
+    </div>
+  );
 };
 
 export default EditBooklistForm;

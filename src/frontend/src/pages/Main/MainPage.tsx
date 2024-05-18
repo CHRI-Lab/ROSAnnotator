@@ -5,6 +5,8 @@ import { useParams } from "react-router-dom";
 
 import { Dialog, DialogTitle, DialogContent, Typography } from "@mui/material";
 
+import bookListData from "../../../public/predefined_booklist.json";
+
 const MainPage = () => {
   const { rosBagFile, bookListFile } = useParams();
   const [loading, setLoading] = useState(true);
@@ -83,7 +85,7 @@ const MainPage = () => {
 
   return (
     <div>
-      <Annotator />
+      <Annotator bookListFileName={bookListFile} bookListData={bookListData} />
     </div>
   );
 };
