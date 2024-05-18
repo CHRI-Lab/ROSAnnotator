@@ -2,8 +2,8 @@ import React, { useEffect, useState } from "react";
 import LoadingPage from "../Loading";
 import Annotator from "../Annotator";
 import { useParams } from "react-router-dom";
-import { Paper } from "@mui/material";
-// import axios from "axios";
+
+import { Dialog, DialogTitle, DialogContent, Typography } from "@mui/material";
 
 const MainPage = () => {
   const { rosBagFile, bookListFile } = useParams();
@@ -34,11 +34,22 @@ const MainPage = () => {
 
   if (error) {
     return (
-      <Paper elevation={3}>
-        <h1>Error</h1>
-        <p>Error loading your files, Please try again.</p>
-        <p>Error: {String(error)}</p>
-      </Paper>
+      <Dialog open={true}>
+        <DialogTitle>
+          <Typography variant="h6" color="error">
+            Error
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1">
+            Error loading your files, Please try again.
+          </Typography>
+          <br />
+          <Typography variant="body2" color="error">
+            Error Message: {String(error)}
+          </Typography>
+        </DialogContent>
+      </Dialog>
     );
   }
 
