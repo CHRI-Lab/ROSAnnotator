@@ -17,6 +17,10 @@ from .serializers import TranscriptionRequestSerializer
 from pydub import AudioSegment
 import whisper
 
+####################################################################################
+# Marked for automatic chatgpt review process (Remove this line in the next commit)#
+####################################################################################
+
 def extract_images_from_rosbag(bag_filename, output_folder):
     bag = Bag(bag_filename, 'r')
     bridge = CvBridge()
