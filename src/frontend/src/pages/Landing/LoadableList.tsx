@@ -10,14 +10,12 @@ import Snackbar from "@mui/material/Snackbar";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const fileNameListTest = {
-  rosBagList: ["rosbag1", "rosbag2", "rosbag3"],
-  bookList: ["book1", "book2", "book3"],
-  annotationList: ["annotation1", "annotation2", "annotation3"],
-};
-
 function LoadableList() {
-  const [fileNameList, setFileNameList] = useState(fileNameListTest);
+  const [fileNameList, setFileNameList] = useState({
+    rosbag_files: [],
+    booklist_files: [],
+    annotation_files: [],
+  });
   const [rosBagFile, setRosBagFile] = useState("");
   const [bookListFile, setBookListFile] = useState("");
   // const [annotationFile, setAnnotationFile] = useState("");
@@ -29,12 +27,24 @@ function LoadableList() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // fetch("/api/getFileList")
-    //   .then((response) => response.json())
-    //   .then((data) => {
-    //     setFileNameList(data);
-    //   });
-    setFileNameList(fileNameListTest);
+    const fetchData = async () => {
+      try {
+        const response = await fetch(
+          "http://localhost:8000/api/list_filenames"
+        );
+        const data = await response.json();
+        console.log(data);
+        setFileNameList({
+          rosbag_files: data.rosbag_files,
+          booklist_files: data.booklist_files,
+          annotation_files: data.annotation_files,
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    fetchData();
   }, []);
 
   const handleLoadData = () => {
@@ -73,12 +83,12 @@ function LoadableList() {
             ROSBAG DATA FILE *
           </Typography>
           <List component="nav" aria-label="ROSbag data file">
-            {fileNameList.rosBagList.length === 0 ? (
+            {fileNameList.rosbag_files.length === 0 ? (
               <ListItem button>
                 <ListItemText primary="No file found. Please place your files in the prescribed location." />
               </ListItem>
             ) : (
-              fileNameList.rosBagList.map((fileName, index) => (
+              fileNameList.rosbag_files.map((fileName, index) => (
                 <ListItem
                   button
                   key={index}
@@ -104,12 +114,12 @@ function LoadableList() {
             Predefined Booklist
           </Typography>
           <List component="nav" aria-label="Predefined Booklist">
-            {fileNameList.bookList.length === 0 ? (
+            {fileNameList.booklist_files.length === 0 ? (
               <ListItem button>
                 <ListItemText primary="No file found. Please place your files in the prescribed location." />
               </ListItem>
             ) : (
-              fileNameList.bookList.map((fileName, index) => (
+              fileNameList.booklist_files.map((fileName, index) => (
                 <ListItem
                   button
                   key={index}
@@ -135,7 +145,7 @@ function LoadableList() {
             Annotation File
           </Typography>
           <List component="nav" aria-label="Annotation File">
-            {/* {fileNameList.annotationList.map((fileName, index) => (
+            {/* {fileNameList.annotation_files.map((fileName, index) => (
               <ListItem
                 button
                 key={index}
