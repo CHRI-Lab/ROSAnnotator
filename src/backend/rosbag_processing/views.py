@@ -125,7 +125,7 @@ def encode_file_base64(file_path):
 @api_view(['POST'])
 def process_rosbag(request):
     if request.method == 'POST':
-        bag_filename = "/app/rosbag-data/" + request.data.get('bag_filename')
+        bag_filename = "/app/datas/rosbag-data/" + request.data.get('bag_filename')
         if not bag_filename:
             return Response({'error': 'No bag_filename provided'}, status=400)
 
@@ -173,9 +173,9 @@ def process_rosbag(request):
 @api_view(['GET'])
 def list_filenames(request):
     # Define folder paths
-    rosbag_file_folder_path = '/app/rosbag-data/rosbag_file/'
-    booklist_folder_path = '/app/rosbag-data/booklist/'
-    annotation_folder_path = '/app/rosbag-data/annotation/'
+    rosbag_file_folder_path = '/app/datas/rosbag-data/'
+    booklist_folder_path = '/app/datas/booklist/'
+    annotation_folder_path = '/app/datas/annotation/'
 
     # Validate folder paths
     if not all(map(os.path.isdir, [rosbag_file_folder_path, booklist_folder_path, annotation_folder_path])):
