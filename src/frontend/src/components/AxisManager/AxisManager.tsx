@@ -11,6 +11,7 @@ interface AxisData {
   id: number;
   type: string;
   typeName?: string;
+  axisName?:string;
   shortcutKey?: string;  
   blocks: BlockProps[];
 }
@@ -23,7 +24,7 @@ interface AxisManagerProps {
   onDeleteAxis: (axisId: number) => void;
   onTypeChange: (axisId: number, type: string, typeName?: string) => void;
   onShortcutChange: (axisId: number, shortcutKey: string) => void;
-  onRenameAxis: (axisId: number, typeName: string) => void;
+  onNameChange: (axisId: number, axisName: string) => void;
 }
 
 const AxisManager: React.FC<AxisManagerProps> = ({
@@ -34,7 +35,7 @@ const AxisManager: React.FC<AxisManagerProps> = ({
   onDeleteAxis,
   onTypeChange,
   onShortcutChange,
-  onRenameAxis
+  onNameChange
 }) => {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
@@ -49,8 +50,8 @@ const AxisManager: React.FC<AxisManagerProps> = ({
               />
               <TextField
                 label="Rename Axis"
-                value={axis.typeName || ''}
-                onChange={(event) => onRenameAxis(axis.id, event.target.value)}
+                value={axis.axisName || ''}
+                onChange={(event) => onNameChange(axis.id, event.target.value)}
                 style={{ marginRight: '10px' }}
               />
               <Select
