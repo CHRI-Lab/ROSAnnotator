@@ -26,15 +26,20 @@ const EditBooklistForm: React.FC<EditBooklistFormProps> = ({
 
   return (
     <div>
+      <Button
+        onClick={handleSave}
+        variant="contained"
+        color="primary"
+        sx={{ marginTop: 2, marginBottom: 2 }}
+      >
+        Save
+      </Button>
       <TextareaAutosize
         minRows={10}
         style={{ width: "100%" }}
         value={bookListDataText}
         onChange={(e) => setBookListDataText(e.target.value)}
       />
-      <Button onClick={handleSave} variant="contained" color="primary">
-        Save
-      </Button>
     </div>
   );
 };
