@@ -369,7 +369,7 @@ const Timeline: React.FC<TimelineProps> = ({
           ))}
         </ButtonsContainer>
         <ScrollableTimelineContainer>
-          <div style={{ width: `${totalWidth}px` }}>
+          <div style={{ width: `${totalWidth}px`, padding: "10px" }}>
             <Slider
               value={seekTime}
               min={0}
