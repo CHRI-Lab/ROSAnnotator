@@ -44,7 +44,7 @@ const Line = styled('div')<{ active: boolean }>`
   padding: 5px 20px;
   font-size: 16px;
   text-align: center;
-  color: ${({ active }) => (active ? "dodgerblue" : "black")};
+  color: ${({ active }) => (active ? "dodgerblue" : "lightgrey")};
   cursor: pointer;  // Add cursor pointer to indicate clickability
 `;
 
@@ -64,9 +64,6 @@ const Transcript: React.FC<TranscriptProps> = ({ played, setPlayed }) => {
       height="100%"
       display="flex"
       flexDirection="column"
-      sx={{
-        bgcolor: 'lightgray',
-      }}
     >
       <Lrc
         lrc={LRC}
