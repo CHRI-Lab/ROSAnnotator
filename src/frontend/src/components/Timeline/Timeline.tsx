@@ -109,8 +109,9 @@
     const collectData = () => {
       const data = axes.map(axis => ({
         id: axis.id,
+        axis_name:axis.axisName,
         type: axis.type,
-        typeName: axis.typeName,
+        anotation_list_name: axis.typeName,
         blocks: axis.blocks.map(block => ({
           start: block.start,
           end: block.end,
