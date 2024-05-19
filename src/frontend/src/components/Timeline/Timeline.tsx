@@ -48,7 +48,7 @@ const ScrollableTimelineContainer = styled("div")({
   overflowX: "scroll",
   overflowY: "hidden",
   width: "100%",
-  padding: "10px",
+  padding: "10px 0",
   position: "relative",
 });
 
@@ -142,8 +142,9 @@ const Timeline: React.FC<TimelineProps> = ({
   const collectData = () => {
     const data = axes.map((axis) => ({
       id: axis.id,
-      type: axis.type,
-      axisName: axis.typeName,
+      axisType: axis.type,
+      axisName: axis.axisName,
+      axisBooklisteName: axis.typeName,
       annotationBlocks: axis.blocks.map((block) => ({
         start: block.start,
         end: block.end,
@@ -152,17 +153,6 @@ const Timeline: React.FC<TimelineProps> = ({
     }));
     console.log(data);
     return data;
-  };
-
-  const handleRenameAxis = (axisId: number, newName: string) => {
-    setAxes((axes) =>
-      axes.map((axis) => {
-        if (axis.id === axisId) {
-          return { ...axis, typeName: newName };
-        }
-        return axis;
-      })
-    );
   };
 
   useEffect(() => {
@@ -248,6 +238,17 @@ const Timeline: React.FC<TimelineProps> = ({
       axes.map((axis) => {
         if (axis.id === axisId) {
           return { ...axis, type, typeName };
+        }
+        return axis;
+      })
+    );
+  };
+
+  const handleNameChange = (axisId: number, axisName: string) => {
+    setAxes((axes) =>
+      axes.map((axis) => {
+        if (axis.id === axisId) {
+          return { ...axis, axisName: axisName };
         }
         return axis;
       })
@@ -395,7 +396,7 @@ const Timeline: React.FC<TimelineProps> = ({
               onDeleteAxis={handleDeleteAxis}
               onTypeChange={handleTypeChange}
               onShortcutChange={handleShortcutChange}
-              onRenameAxis={handleRenameAxis}
+              onNameChange={handleNameChange}
             />
             <Slider
               value={selectedRange}
@@ -424,6 +425,7 @@ const Timeline: React.FC<TimelineProps> = ({
                 selectedRange={selectedRange}
                 blocks={axis.blocks}
                 axisType={axis.type}
+                axisName={axis.axisName || "No Axis Name"}
                 typeName={axis.typeName}
                 annotations={
                   axis.typeName ? annotations[axis.typeName] || [] : []
