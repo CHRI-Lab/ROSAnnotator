@@ -1,15 +1,9 @@
-import React, {
-  useState,
-  useCallback,
-  useContext,
-  createContext,
-  ReactNode,
-} from "react";
+import React, { useState, useCallback } from "react";
 import ReactPlayer from "react-player";
 import Box from "@mui/material/Box";
 import { createTheme, ThemeProvider } from "@mui/material/styles";
 import Button from "@mui/material/Button";
-import { Dialog, DialogActions, DialogContent, Grid } from "@mui/material";
+import { Dialog, DialogActions, DialogContent, Grid, Tabs, Tab } from "@mui/material";
 
 import Timeline from "../../components/Timeline";
 import Transcript from "../../components/Transcript";
@@ -37,6 +31,11 @@ const Annotator: React.FC<AnnotatorProps> = ({
   const [open, setOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [bookList, setBookList] = useState(bookListDataTest); //TODO Replace with bookListData
+  const [selectedTab, setSelectedTab] = useState(0);
+
+  const handleTabChange = (event, newValue) => {
+    setSelectedTab(newValue);
+  };
 
   // TODO Method API Call
   const handleSaveBooklist = (jsonData: any) => {
@@ -127,9 +126,15 @@ const Annotator: React.FC<AnnotatorProps> = ({
                 playing
               />
             </Box>
-            <Box width={600} height={452}>
-              {/* <Transcript played={played} setPlayed={handleSeek}/> */}
-              <AnnotationTable />
+            <Box width={600} height={452} overflow="auto">
+              <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
+                <Tabs value={selectedTab} onChange={handleTabChange} aria-label="annotation tabs">
+                  <Tab label="Annotations" />
+                  <Tab label="Transcript" />
+                </Tabs>
+              </Box>
+              {selectedTab === 0 && <AnnotationTable />}
+              {selectedTab === 1 && <Transcript played={played} setPlayed={handleSeek}/>}
             </Box>
           </Box>
           <div>
