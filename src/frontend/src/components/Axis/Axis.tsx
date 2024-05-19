@@ -13,6 +13,7 @@ interface AxisProps {
   selectedRange: number[];
   blocks: BlockData[];
   axisType: string;
+  axisName?: string;
   typeName?: string; 
   annotations:any,
   onSave: (index: number, text: string) => void;
@@ -41,10 +42,10 @@ const TypeName = styled('div')(() => ({
   zIndex: 1  
 }));
 
-const Axis: React.FC<AxisProps> = ({ duration, blocks, axisType, typeName, annotations, onSave, onDeleteBlock }) => {
+const Axis: React.FC<AxisProps> = ({ duration, blocks, axisType, typeName, axisName, annotations, onSave, onDeleteBlock }) => {
   return (
     <AxisContainer>
-      <TypeName>{typeName || 'No Type Name'}</TypeName>
+      <TypeName>{axisName || 'No axis Name'}</TypeName>
       {blocks.map((block, index) => (
         <Block
           key={index}

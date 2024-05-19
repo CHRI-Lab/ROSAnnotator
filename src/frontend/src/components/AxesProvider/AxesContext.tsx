@@ -1,4 +1,4 @@
-import React, { useState, createContext, ReactNode } from 'react';
+import React, { useState, createContext, ReactNode } from "react";
 
 interface BlockProps {
   start: number;
@@ -10,6 +10,7 @@ interface AxisData {
   id: number;
   type: string;
   typeName?: string;
+  axisName?: string;
   shortcutKey?: string;
   blocks: BlockProps[];
 }
