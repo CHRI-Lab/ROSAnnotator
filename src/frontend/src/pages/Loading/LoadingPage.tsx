@@ -9,7 +9,6 @@ const LoadingPage = () => {
         justifyContent: "center",
         alignItems: "center",
         height: "100vh",
-        backgroundColor: "#f0f0f0",
       }}
     >
       <CircularProgress />
