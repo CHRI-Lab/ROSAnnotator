@@ -10,6 +10,8 @@ import Booklist from "../../components/Booklist/Booklist";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
 import AnnotationTable from "../../components/AnnotationTable";
 import { AxesProvider } from "../../components/AxesProvider/AxesContext";
+import StatisticsAnnotation from "../../components/StatisticsAnnotation";
+import StatisticsTier from "../../components/StatisticsTier";
 
 const Annotator = ({
   rosBagFileName,
@@ -98,6 +100,8 @@ const Annotator = ({
                 <Tab label="Annotations" />
                 <Tab label="Transcript" />
                 <Tab label="Booklist" />
+                <Tab label="Statistics (Annotations)" />
+                <Tab label="Statistics (Tiers)" />
               </Tabs>
             </Box>
             {selectedTab === 0 && <AnnotationTable />}
@@ -126,6 +130,8 @@ const Annotator = ({
                   <Booklist bookListData={bookList} />
                 </Box>
               ))}
+              {selectedTab === 3 && <StatisticsAnnotation />}
+              {selectedTab === 4 && <StatisticsTier />}
           </Box>
         </Box>
 
