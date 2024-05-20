@@ -5,12 +5,11 @@ import { useParams } from "react-router-dom";
 
 import { Dialog, DialogTitle, DialogContent, Typography } from "@mui/material";
 
-import bookListData from "../../../public/predefined_booklist.json";
-
 const MainPage = () => {
   const { rosBagFile, bookListFile } = useParams();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
+  const [bookListData, setBookListData] = useState(null);
   const [error, setError] = useState<unknown>(null);
   const [errorDisplay, setErrorDisplay] = useState(false);
 
@@ -47,6 +46,7 @@ const MainPage = () => {
 
         const data = await response.json();
         setData(data);
+        setBookListData(data.booklist_data);
         setLoading(false);
       } catch (error) {
         setError(error);
@@ -85,7 +85,12 @@ const MainPage = () => {
 
   return (
     <div>
-      <Annotator rosBagFileName={rosBagFile} bookListFileName={bookListFile} bookListData={bookListData} />
+      <Annotator
+        rosBagFileName={rosBagFile}
+        bookListFileName={bookListFile}
+        pathData={data}
+        bookListData={bookListData}
+      />
     </div>
   );
 };

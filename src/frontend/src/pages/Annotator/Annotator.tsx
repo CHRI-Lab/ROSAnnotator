@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import ReactPlayer from "react-player";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
@@ -11,15 +11,24 @@ import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm
 import AnnotationTable from "../../components/AnnotationTable";
 import { AxesProvider } from "../../components/AxesProvider/AxesContext";
 
-import bookListDataTest from "../../../public/predefined_booklist.json";
-
-const Annotator = ({ rosBagFileName, bookListFileName, bookListData }) => {
+const Annotator = ({
+  rosBagFileName,
+  bookListFileName,
+  pathData,
+  bookListData,
+}) => {
   const [_, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
   const [editMode, setEditMode] = useState(false);
-  const [bookList, setBookList] = useState(bookListDataTest);
+  const [bookList, setBookList] = useState(bookListData);
   const [selectedTab, setSelectedTab] = useState(0);
+
+  useEffect(() => {
+    if (bookListData) {
+      setBookList(bookListData);
+    }
+  }, []);
 
   const handleTabChange = (_event, newValue) => {
     setSelectedTab(newValue);
@@ -71,7 +80,8 @@ const Annotator = ({ rosBagFileName, bookListFileName, bookListData }) => {
               ref={playerRef}
               width="100%"
               height="auto"
-              url="/processed/record_2024_03_27_10_51_34.bag_2024-05-19-13:12:29/output.mp4"
+              // url="/processed/record_2024_03_27_10_51_34.bag_2024-05-19-13:12:29/output.mp4"
+              url={`/processed/${pathData.video_path}`}
               onDuration={setDuration}
               onProgress={({ playedSeconds }) => setPlayed(playedSeconds)}
               controls
@@ -93,6 +103,7 @@ const Annotator = ({ rosBagFileName, bookListFileName, bookListData }) => {
             {selectedTab === 0 && <AnnotationTable />}
             {selectedTab === 1 && (
               <Transcript
+                lrcPath={`/processed/${pathData.srt_transcript_path}`}
                 played={played}
                 setPlayed={(time) => setPlayed(time)}
               />

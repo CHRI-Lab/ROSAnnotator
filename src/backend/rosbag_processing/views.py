@@ -45,10 +45,10 @@ def process_rosbag(request):
     # Check if the bag file has already been processed
     if all(os.path.exists(path) for path in [video_path, audio_path, waveform_image_path, srt_file_path]):
         return Response({
-            'video_path': video_path,
-            'audio_path': audio_path,
-            'waveform_image_path': waveform_image_path,
-            'srt_transcript_path': srt_file_path,
+            'video_path': get_relative_path(video_path),
+            'audio_path': get_relative_path(audio_path),
+            'waveform_image_path': get_relative_path(waveform_image_path),
+            'srt_transcript_path': get_relative_path(srt_file_path),
             'booklist_data': booklist_data,
             'message': 'File already processed'
         })
@@ -68,10 +68,10 @@ def process_rosbag(request):
         srt_file_path = transcribe_audio_to_srt(audio_path, output_folder)
 
         return Response({
-            'video_path': video_path,
-            'audio_path': audio_path,
-            'waveform_image_path': waveform_image_path,
-            'srt_transcript_path': srt_file_path,
+            'video_path': get_relative_path(video_path),
+            'audio_path': get_relative_path(audio_path),
+            'waveform_image_path': get_relative_path(waveform_image_path),
+            'srt_transcript_path': get_relative_path(srt_file_path),
             'booklist_data': booklist_data,
             'message': 'Processing complete'
         })
