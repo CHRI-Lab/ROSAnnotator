@@ -80,7 +80,6 @@ const Annotator = ({
               ref={playerRef}
               width="100%"
               height="auto"
-              // url="/processed/record_2024_03_27_10_51_34.bag_2024-05-19-13:12:29/output.mp4"
               url={`/processed/${pathData.video_path}`}
               onDuration={setDuration}
               onProgress={({ playedSeconds }) => setPlayed(playedSeconds)}
@@ -103,7 +102,7 @@ const Annotator = ({
             {selectedTab === 0 && <AnnotationTable />}
             {selectedTab === 1 && (
               <Transcript
-                lrcPath={`/processed/${pathData.srt_transcript_path}`}
+                LRC={pathData.audio_transcript}
                 played={played}
                 setPlayed={(time) => setPlayed(time)}
               />

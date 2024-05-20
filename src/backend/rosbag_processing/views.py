@@ -44,11 +44,13 @@ def process_rosbag(request):
 
     # Check if the bag file has already been processed
     if all(os.path.exists(path) for path in [video_path, audio_path, waveform_image_path, srt_file_path]):
+        with open(srt_file_path, 'r') as transcript_file:
+            transcript = transcript_file.read()
         return Response({
             'video_path': get_relative_path(video_path),
             'audio_path': get_relative_path(audio_path),
             'waveform_image_path': get_relative_path(waveform_image_path),
-            'srt_transcript_path': get_relative_path(srt_file_path),
+            'audio_transcript': transcript,
             'booklist_data': booklist_data,
             'message': 'File already processed'
         })
@@ -56,22 +58,24 @@ def process_rosbag(request):
     os.makedirs(images_folder, exist_ok=True)
 
     try:
+        # Extract images, video, and audio from the rosbag file
         extract_images_from_rosbag(bag_filepath, output_folder)
-        extract_video(bag_filepath, output_folder)
         extract_audio(bag_filepath, output_folder)
-        combine_video_audio(output_folder)
-
         # Plot the audio waveform
         plot_waveform(audio_path, waveform_image_path)
+        extract_video(bag_filepath, output_folder)
 
         # Transcribe the audio to an SRT file
-        srt_file_path = transcribe_audio_to_srt(audio_path, output_folder)
+        srt_file_path, transcript = transcribe_audio_to_srt(audio_path, output_folder)
+
+        # Combine the video and audio files
+        combine_video_audio(output_folder)
 
         return Response({
             'video_path': get_relative_path(video_path),
             'audio_path': get_relative_path(audio_path),
             'waveform_image_path': get_relative_path(waveform_image_path),
-            'srt_transcript_path': get_relative_path(srt_file_path),
+            'audio_transcript': transcript,
             'booklist_data': booklist_data,
             'message': 'Processing complete'
         })

@@ -74,7 +74,19 @@ def combine_video_audio(output_folder):
     audio_path = os.path.join(output_folder, 'audio.mp3')
     output_path = os.path.join(output_folder, 'output.mp4')
 
-    subprocess.run(['ffmpeg', '-i', video_path, '-i', audio_path, '-c:v', 'copy', '-map', '0:v', '-map', '1:a', '-y', output_path])
+    command = [
+    'ffmpeg',
+    '-i', video_path,
+    '-i', audio_path,
+    '-c:v', 'libx264',
+    '-preset', 'fast',
+    '-c:a', 'aac',
+    '-map', '0:v',
+    '-map', '1:a',
+    '-y', output_path
+    ]
+
+    subprocess.run(command)
 
 
 def transcribe_audio_to_srt(audio_file_path, output_folder_path):
@@ -82,7 +94,10 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
     
     def seconds_to_srt_time(seconds):
         # Format time as [hh:mm:ss]
-        return f"[{str(timedelta(seconds=seconds))[:-4].replace('.', ',')}]"
+        td = str(timedelta(seconds=seconds))
+        minutes, seconds = td.split(":")[1], td.split(":")[2]
+        seconds = seconds[:-4] if len(seconds) > 5 else seconds
+        return f"[{minutes}:{seconds.replace(',', '.')}]"
 
     # Transcribe the audio file
     result = model.transcribe(audio_file_path)
@@ -92,7 +107,7 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
     for segment in result["segments"]:
         start_time = seconds_to_srt_time(segment["start"])
         text = segment["text"]
-        srt_content += f"{start_time} {text}\n"
+        srt_content += f"{start_time}{text}\n"
 
     # Create the SRT file
     srt_file_name = "transcript.srt"
@@ -102,7 +117,7 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
     with open(srt_file_path, "w") as srt_file:
         srt_file.write(srt_content)
 
-    return srt_file_path
+    return srt_file_path, srt_content
 
 def format_time(duration):
     total_seconds = int(duration.total_seconds())
