@@ -129,8 +129,8 @@ const Annotator = ({
                   <Booklist bookListData={bookList} />
                 </Box>
               ))}
-              {selectedTab === 3 && <StatisticsAnnotation />}
-              {selectedTab === 4 && <StatisticsTier />}
+            {selectedTab === 3 && <StatisticsAnnotation />}
+            {selectedTab === 4 && <StatisticsTier />}
           </Box>
         </Box>
 
@@ -140,8 +140,8 @@ const Annotator = ({
             bookListFileName={bookListFileName}
             duration={duration}
             played={played}
-            annotations={bookList}
             onSeek={(time) => setPlayed(time)}
+            booklist={bookList}
           />
         </Box>
       </Box>

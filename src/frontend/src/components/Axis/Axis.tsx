@@ -15,7 +15,7 @@ interface AxisProps {
   axisType: string;
   axisName?: string;
   typeName?: string; 
-  annotations:any,
+  booklist:any,
   onSave: (index: number, text: string) => void;
   onDeleteBlock: (index: number) => void;
 }
@@ -42,7 +42,7 @@ const TypeName = styled('div')(() => ({
   zIndex: 1  
 }));
 
-const Axis: React.FC<AxisProps> = ({ duration, blocks, axisType, typeName, axisName, annotations, onSave, onDeleteBlock }) => {
+const Axis: React.FC<AxisProps> = ({ duration, blocks, axisType, typeName, axisName, booklist, onSave, onDeleteBlock }) => {
   return (
     <AxisContainer>
       <TypeName>{axisName || 'No axis Name'}</TypeName>
@@ -52,7 +52,7 @@ const Axis: React.FC<AxisProps> = ({ duration, blocks, axisType, typeName, axisN
           block={block}
           duration={duration}
           axisType={axisType}
-          annotations={annotations}
+          booklist={booklist}
           onSave={(text) => onSave(index, text)}
           onDelete={() => onDeleteBlock(index)}
         />

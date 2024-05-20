@@ -22,6 +22,7 @@ services:
       context: ./src/frontend # Path frontend Dockerfile
     volumes:
       - ./datas/processed:/app/public/processed
+      - ./src/frontend/src:/app/src
     ports:
       - 5173:5173 # port mapping for frontend
     image: frontend:ros-annotator
