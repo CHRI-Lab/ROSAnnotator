@@ -118,3 +118,9 @@ def encode_file_base64(file_path):
     with open(file_path, 'rb') as file:
         encoded_string = base64.b64encode(file.read()).decode('utf-8')
     return encoded_string
+
+
+def get_relative_path(path):
+    base_path = "/app/processed_data/"
+    relative_path = os.path.relpath(path, base_path)
+    return relative_path

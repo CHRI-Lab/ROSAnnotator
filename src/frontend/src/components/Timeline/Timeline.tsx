@@ -24,7 +24,8 @@ interface TimelineProps {
   duration: number;
   played: number;
   onSeek: (time: number) => void;
-  annotations: any;
+  booklist: any;
+  annotationData: any;
 }
 
 const MainContainer = styled(Paper)(({ theme }) => ({
@@ -82,7 +83,8 @@ const Timeline: React.FC<TimelineProps> = ({
   duration,
   played,
   onSeek,
-  annotations,
+  booklist,
+  annotationData,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
@@ -95,6 +97,20 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
 
   const { axes, setAxes } = useContext(AxesContext)!;
+
+  useEffect(() => {
+    if (annotationData) {
+      //TODO check this code
+      const newAxes = annotationData.map((axisData: any) => ({
+        id: globalAxisId++,
+        type: axisData.axisType,
+        axisName: axisData.axisName,
+        typeName: axisData.axisBooklisteName,
+        blocks: axisData.annotationBlocks,
+      }));
+      setAxes(newAxes);
+    }
+  }, []);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
@@ -119,6 +135,10 @@ const Timeline: React.FC<TimelineProps> = ({
       window.removeEventListener("keydown", handleKeyPress);
     };
   }, [axes, selectedRange]);
+
+  useEffect(() => {
+    setSeekTime(played);
+  }, [played]);
 
   const handleSaveData = async () => {
     const data = collectData();
@@ -168,10 +188,6 @@ const Timeline: React.FC<TimelineProps> = ({
     console.log(data);
     return data;
   };
-
-  useEffect(() => {
-    setSeekTime(played);
-  }, [played]);
 
   const handleSliderChange = (_event: Event, newValue: number | number[]) => {
     setSeekTime(newValue as number);
@@ -406,7 +422,7 @@ const Timeline: React.FC<TimelineProps> = ({
               open={isDialogOpen}
               onClose={() => setIsDialogOpen(false)}
               axes={axes}
-              annotations={annotations}
+              booklist={booklist}
               onDeleteAxis={handleDeleteAxis}
               onTypeChange={handleTypeChange}
               onShortcutChange={handleShortcutChange}
@@ -441,9 +457,7 @@ const Timeline: React.FC<TimelineProps> = ({
                 axisType={axis.type}
                 axisName={axis.axisName || "No Axis Name"}
                 typeName={axis.typeName}
-                annotations={
-                  axis.typeName ? annotations[axis.typeName] || [] : []
-                }
+                booklist={axis.typeName ? booklist[axis.typeName] || [] : []}
                 onSave={(blockIndex, text) =>
                   handleSave(axis.id, blockIndex, text)
                 }
