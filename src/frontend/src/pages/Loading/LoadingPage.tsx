@@ -21,6 +21,16 @@ const LoadingPage = () => {
       >
         We are processing your data ...
       </Typography>
+      <Typography
+        sx={{
+          fontSize: 16,
+          fontStyle: "italic",
+        }}
+        variant="h6"
+        color="textSecondary"
+      >
+        Audio transcription can take a few minutes.
+      </Typography>
     </Box>
   );
 };

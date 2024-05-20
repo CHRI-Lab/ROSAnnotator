@@ -29,7 +29,7 @@ interface BlockProps {
   };
   duration: number;
   axisType: string;
-  annotations: string[];
+  booklist: string[];
   onSave: (text: string) => void;
   onDelete: () => void;
 }
@@ -51,7 +51,7 @@ const BlockDisplay = styled('div')<{ start: number; end: number; duration: numbe
   })
 );
 
-const Block: React.FC<BlockProps> = ({ block, duration, axisType, annotations, onSave, onDelete }) => {
+const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSave, onDelete }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedAnnotation, setSelectedAnnotation] = useState(block.text || '');
 
@@ -98,7 +98,7 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, annotations, o
             displayEmpty
             fullWidth
           >
-            {annotations.map(annotation => (
+            {booklist.map(annotation => (
               <MenuItem key={annotation} value={annotation}>{annotation}</MenuItem>
             ))}
           </CustomSelect>
