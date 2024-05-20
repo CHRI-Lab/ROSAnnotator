@@ -18,10 +18,10 @@ function LoadableList() {
   });
   const [rosBagFile, setRosBagFile] = useState("");
   const [bookListFile, setBookListFile] = useState("");
-  // const [annotationFile, setAnnotationFile] = useState("");
+  const [annotationFile, setAnnotationFile] = useState("");
   const [rosSelectedIndex, setRosSelectedIndex] = useState(null);
   const [bookSelectedIndex, setBookSelectedIndex] = useState(null);
-  // const [annotSelectedIndex, setAnnotSelectedIndex] = useState(null);
+  const [annotSelectedIndex, setAnnotSelectedIndex] = useState(null);
   const [open, setOpen] = useState(false);
 
   const navigate = useNavigate();
@@ -54,7 +54,9 @@ function LoadableList() {
     if (rosBagFile === "") {
       setOpen(true);
     } else {
-      navigate("/main/" + rosBagFile + "/" + bookListFile);
+      const booklistPath = bookListFile ? "/" + bookListFile : "";
+      const annotationPath = annotationFile ? "/" + annotationFile : "";
+      navigate("/main/" + rosBagFile + booklistPath + annotationPath);
     }
   };
 
@@ -168,7 +170,7 @@ function LoadableList() {
             Annotation File
           </Typography>
           <List component="nav" aria-label="Annotation File">
-            {/* {fileNameList.annotation_files.map((fileName, index) => (
+            {fileNameList.annotation_files.map((fileName, index) => (
               <ListItem
                 button
                 key={index}
@@ -178,12 +180,22 @@ function LoadableList() {
                 }}
                 selected={annotSelectedIndex === index}
               >
-                <ListItemText primary={fileName} />
+                <ListItemText
+                  primary={fileName}
+                  primaryTypographyProps={{
+                    style: {
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      width: "100%",
+                    },
+                  }}
+                />
               </ListItem>
-            ))} */}
-            <ListItem button>
+            ))}
+            {/* <ListItem button>
               <ListItemText primary="Not Supported for Now" />
-            </ListItem>
+            </ListItem> */}
           </List>
         </Paper>
       </div>
