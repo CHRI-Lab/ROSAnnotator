@@ -11,12 +11,12 @@ const App: React.FC = () => {
     <Router>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-
-        <Route path="/loading" element={<LoadingPage />} />
-        <Route path="/maintest" element={<Annotator />} />
-        {/* <Route path="/main" element={<MainPage />} /> */}
         <Route path="/main/:rosBagFile" element={<MainPage />} />
         <Route path="/main/:rosBagFile/:bookListFile" element={<MainPage />} />
+        <Route path="/main/:rosBagFile/:bookListFile/:annotationFile" element={<MainPage />} />
+        {/* Testing Routes */}
+        <Route path="/loading" element={<LoadingPage />} />
+        <Route path="/maintest" element={<Annotator />} />
       </Routes>
     </Router>
   );

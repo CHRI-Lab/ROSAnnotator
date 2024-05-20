@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import ReactPlayer from "react-player";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import { Grid, Tabs, Tab } from "@mui/material";
+import { Tabs, Tab } from "@mui/material";
 
 import Timeline from "../../components/Timeline";
 import Transcript from "../../components/Transcript";
@@ -16,7 +16,7 @@ import StatisticsTier from "../../components/StatisticsTier";
 const Annotator = ({
   rosBagFileName,
   bookListFileName,
-  pathData,
+  data,
   bookListData,
 }) => {
   const [_, setPlayer] = useState<ReactPlayer | null>(null);
@@ -82,7 +82,7 @@ const Annotator = ({
               ref={playerRef}
               width="100%"
               height="auto"
-              url={`/processed/${pathData.video_path}`}
+              url={`/public/processed/${data.video_path}`}
               onDuration={setDuration}
               onProgress={({ playedSeconds }) => setPlayed(playedSeconds)}
               controls
@@ -106,7 +106,7 @@ const Annotator = ({
             {selectedTab === 0 && <AnnotationTable />}
             {selectedTab === 1 && (
               <Transcript
-                LRC={pathData.audio_transcript}
+                LRC={data.audio_transcript}
                 played={played}
                 setPlayed={(time) => setPlayed(time)}
               />
@@ -142,6 +142,7 @@ const Annotator = ({
             played={played}
             onSeek={(time) => setPlayed(time)}
             booklist={bookList}
+            annotationData={data.annotation_data}
           />
         </Box>
       </Box>

@@ -6,7 +6,7 @@ import { useParams } from "react-router-dom";
 import { Dialog, DialogTitle, DialogContent, Typography } from "@mui/material";
 
 const MainPage = () => {
-  const { rosBagFile, bookListFile } = useParams();
+  const { rosBagFile, bookListFile, annotationFile } = useParams();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [bookListData, setBookListData] = useState(null);
@@ -27,6 +27,7 @@ const MainPage = () => {
             body: JSON.stringify({
               bag_filename: rosBagFile,
               booklist_filename: bookListFile,
+              annotation_filename: annotationFile,
             }),
           }
         );
@@ -88,7 +89,7 @@ const MainPage = () => {
       <Annotator
         rosBagFileName={rosBagFile}
         bookListFileName={bookListFile}
-        pathData={data}
+        data={data}
         bookListData={bookListData}
       />
     </div>
