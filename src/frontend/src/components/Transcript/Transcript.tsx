@@ -1,11 +1,10 @@
-import fs from "fs";
 import { CSSProperties, useCallback, useEffect, useState } from "react";
 import { styled } from "@mui/system";
 import { Lrc, LrcLine } from "react-lrc";
 import { Box } from "@mui/material";
 
 interface TranscriptProps {
-  lrcPath: string; // LRC string to be displayed
+  LRC: string; // LRC string to be displayed
   played: number;
   setPlayed: (time: number) => void; // Function to update the played state
 }
@@ -51,16 +50,12 @@ const Line = styled("div")<{ active: boolean }>`
 `;
 
 // The main Transcript component
-const Transcript: React.FC<TranscriptProps> = ({
-  lrcPath,
-  played,
-  setPlayed,
-}) => {
-  const [LRC, setLRC] = useState<string>("");
+const Transcript: React.FC<TranscriptProps> = ({ LRC, played, setPlayed }) => {
+  // const [LRC, setLRC] = useState<string>("");
 
   useEffect(() => {
-    const srtContent = fs.readFileSync(lrcPath, "utf-8");
-    setLRC(srtContent);
+    // const srtContent = fs.readFileSync(lrcPath, "utf-8");
+    // setLRC(srtContent);
   }, []);
 
   // Function to render each line of the LRC
