@@ -4,7 +4,10 @@ services:
     build: .
     volumes:
       - .:/app
-      - ./rosbag-data:/app/rosbag-data
+      - ../../datas/rosbag-data:/app/datas/rosbag-data
+      - ../../datas/booklist:/app/datas/booklist
+      - ../../datas/annotation:/app/datas/annotation
+      - ../../datas/processed:/app/processed_data
     ports:
       - 8000:8000 # port mapping for server
       - 5678:5678 # port mapping for debugger

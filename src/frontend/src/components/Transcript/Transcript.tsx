@@ -5,6 +5,7 @@ import { Box } from "@mui/material";
 
 interface TranscriptProps {
   played: number;
+  setPlayed: (time: number) => void;  // Function to update the played state
 }
 
 const LRC = `[00:00]Okay, since we already published the second and the third one, I'm going to post the first one
@@ -24,37 +25,37 @@ const LRC = `[00:00]Okay, since we already published the second and the third on
 [02:28.56]I was going to do six times. Yeah, but I mean, I guess since you've already polished like the
 [02:34.64]other size, just polish like your remaining ones. Yeah. Yeah. Okay. Okay, the remaining one is the
 [02:41.92]fours one and the fifth one. Can you? Hi, Tio. Can you help me turn turning again? Sure.
-[03:42.32]Okay. Thank you. Okay, I finished the fourth one and we have the last one to finish, which is
+[03:42.32]Okay. Thank you. Okay. I finished the fourth one and we have the last one to finish, which is
 [03:49.44]some surface five. Can you turn it again? Yes, I can. Okay. Please.
 [04:11.92]Okay. Okay. Thank you. Okay. I finished. I think we can't leave the task. Thank you.
 [04:35.84]Oh, you're great. All right. Yeah. Nice job. We're going to serve it. Yeah. Thank you, Thiago. Okay, response.
 [04:49.60]I'm happy to hear that. Oh, yeah.
 [05:05.84]Yeah.`;
 
+// Styles for the LRC component
 const lrcStyle: CSSProperties = {
   flex: 1,
   minHeight: 0
 };
 
+// Styled component for each line of the transcript
 const Line = styled('div')<{ active: boolean }>`
   min-height: 10px;
   padding: 5px 20px;
-
   font-size: 16px;
   text-align: center;
-
-  ${({ active }) => `
-    color: ${active ? "dodgerblue" : "black"};
-  `}
+  color: ${({ active }) => (active ? "dodgerblue" : "black")};
+  cursor: pointer;  // Add cursor pointer to indicate clickability
 `;
 
-const Transcript: React.FC<TranscriptProps> = ({ played }) => {
-
+// The main Transcript component
+const Transcript: React.FC<TranscriptProps> = ({ played, setPlayed }) => {
+  // Function to render each line of the LRC
   const lineRenderer = useCallback(
-    ({ active, line: { content } }: { active: boolean; line: LrcLine }) => (
-      <Line active={active}>{content}</Line>
+    ({ active, line: { content, startMillisecond } }: { active: boolean; line: LrcLine }) => (
+      <Line active={active} onClick={() => setPlayed(startMillisecond / 1000)}>{content}</Line>
     ),
-    []
+    [setPlayed]
   );
 
   return (
@@ -70,7 +71,7 @@ const Transcript: React.FC<TranscriptProps> = ({ played }) => {
       <Lrc
         lrc={LRC}
         lineRenderer={lineRenderer}
-        currentMillisecond={played*1000}
+        currentMillisecond={played * 1000} // Convert seconds to milliseconds
         verticalSpace
         style={lrcStyle}
         recoverAutoScrollInterval={5000}

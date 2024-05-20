@@ -81,22 +81,21 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
     model = whisper.load_model("base")
     
     def seconds_to_srt_time(seconds):
-        return str(timedelta(seconds=seconds))
+        # Format time as [hh:mm:ss]
+        return f"[{str(timedelta(seconds=seconds))[:-4].replace('.', ',')}]"
 
     # Transcribe the audio file
     result = model.transcribe(audio_file_path)
     
-    # Generate SRT content
+    # Generate SRT-like content with start time and subtitle text
     srt_content = ""
-    for i, segment in enumerate(result["segments"]):
-        start = seconds_to_srt_time(segment["start"])
-        end = seconds_to_srt_time(segment["end"])
+    for segment in result["segments"]:
+        start_time = seconds_to_srt_time(segment["start"])
         text = segment["text"]
-        srt_content += f"{i+1}\n{start} --> {end}\n{text}\n\n"
+        srt_content += f"{start_time} {text}\n"
 
-    # Create the SRT file name based on the audio file name
-    audio_file_name = os.path.basename(audio_file_path)
-    srt_file_name = os.path.splitext(audio_file_name)[0] + ".srt"
+    # Create the SRT file
+    srt_file_name = "transcript.srt"
     srt_file_path = os.path.join(output_folder_path, srt_file_name)
 
     # Save the SRT file
