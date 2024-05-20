@@ -19,5 +19,5 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('rosbag/', include('rosbag_processing.urls')),
+    path('api/', include('rosbag_processing.urls')),
 ]
