@@ -24,7 +24,7 @@ def process_rosbag(request):
         return Response({'error': 'Invalid bag filename'}, status=400)
     
     booklist_filename = request.data.get('booklist_filename')
-    # annotation_filename = request.data.get('annotation_filename')
+    annotation_filename = request.data.get('annotation_filename')
     
     output_folder = os.path.join('/app/processed_data/', os.path.basename(bag_filename))
     images_folder = os.path.join(output_folder, 'images')
@@ -42,6 +42,17 @@ def process_rosbag(request):
     else:
         booklist_data = {}
 
+    annotation_data = None
+    if annotation_filename:
+        annotation_path = os.path.join('/app/datas/annotation/', annotation_filename)
+        if not os.path.exists(annotation_path):
+            return Response({'error': 'Invalid annotation filename'}, status=400)
+        
+        try:
+            annotation_data = load_annotation(annotation_filename)
+        except Exception as e:
+            return Response({'error': f'Error loading annotation data: {str(e)}'}, status=500)
+
     # Check if the bag file has already been processed
     if all(os.path.exists(path) for path in [video_path, audio_path, waveform_image_path, srt_file_path]):
         with open(srt_file_path, 'r') as transcript_file:
@@ -52,6 +63,7 @@ def process_rosbag(request):
             'waveform_image_path': get_relative_path(waveform_image_path),
             'audio_transcript': transcript,
             'booklist_data': booklist_data,
+            'annotation_data': annotation_data,
             'message': 'File already processed'
         })
     
@@ -77,11 +89,13 @@ def process_rosbag(request):
             'waveform_image_path': get_relative_path(waveform_image_path),
             'audio_transcript': transcript,
             'booklist_data': booklist_data,
+            'annotation_data': annotation_data,
             'message': 'Processing complete'
         })
     
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+
 
 @api_view(['GET'])
 def list_filenames(request):
@@ -149,11 +163,6 @@ def update_booklist(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
 
-import os
-import csv
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-
 @csrf_exempt
 @api_view(['POST'])
 def save_annotation(request):
@@ -183,7 +192,7 @@ def save_annotation(request):
                             'id': annotation_entry['id'],
                             'axisType': annotation_entry['axisType'],
                             'axisName': annotation_entry['axisName'],
-                            'axisBooklisteName': annotation_entry.get('axisBooklisteName', ''),  # Handle the case where axisBooklisteName is missing
+                            'axisBooklisteName': annotation_entry.get('axisBooklisteName', ''),
                             'start': block['start'],
                             'end': block['end'],
                             'text': block['text']
@@ -194,4 +203,20 @@ def save_annotation(request):
             return JsonResponse({'error': str(e)}, status=500)
     else:
         return JsonResponse({'error': 'Method not allowed'}, status=405)
+    
+# testing the load_annotation function 
+@api_view(['GET'])
+def get_annotation(request):
+    annotation_filename = request.query_params.get('annotation_filename')
+    
+    if not annotation_filename:
+        return Response({'error': 'annotation_name parameter is required'}, status=400)
+    
+    try:
+        annotation_json = load_annotation(annotation_filename)
+        return Response(annotation_json, status=200)
+    except FileNotFoundError:
+        return Response({'error': 'File not found'}, status=404)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
 

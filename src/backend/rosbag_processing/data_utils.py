@@ -1,4 +1,5 @@
 import base64
+import csv
 import json
 import os
 import subprocess
@@ -139,3 +140,37 @@ def get_relative_path(path):
     base_path = "/app/processed_data/"
     relative_path = os.path.relpath(path, base_path)
     return relative_path
+
+def load_annotation(annotation_filename):
+    annotation_path = '/app/datas/annotation/'
+    file_path = os.path.join(annotation_path, f'{annotation_filename}.csv')
+
+    if not os.path.exists(file_path):
+        raise FileNotFoundError('File not found')
+
+    try:
+        with open(file_path, 'r') as csvfile:
+            reader = csv.DictReader(csvfile)
+            annotations = []
+
+            for row in reader:
+                annotation_entry = next((item for item in annotations if item['id'] == int(row['id'])), None)
+                if not annotation_entry:
+                    annotation_entry = {
+                        'id': int(row['id']),
+                        'axisType': row['axisType'],
+                        'axisName': row['axisName'],
+                        'axisBooklisteName': row['axisBooklisteName'],
+                        'annotationBlocks': []
+                    }
+                    annotations.append(annotation_entry)
+
+                annotation_entry['annotationBlocks'].append({
+                    'start': int(row['start']),
+                    'end': int(row['end']),
+                    'text': row['text']
+                })
+
+        return {'annotation_data': annotations}
+    except Exception as e:
+        raise IOError(f'Error loading annotation data: {str(e)}')
