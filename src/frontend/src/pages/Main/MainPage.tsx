@@ -85,7 +85,7 @@ const MainPage = () => {
 
   return (
     <div>
-      <Annotator bookListFileName={bookListFile} bookListData={bookListData} />
+      <Annotator rosBagFileName={rosBagFile} bookListFileName={bookListFile} bookListData={bookListData} />
     </div>
   );
 };

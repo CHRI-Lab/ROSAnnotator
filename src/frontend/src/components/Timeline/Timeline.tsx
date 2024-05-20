@@ -19,6 +19,8 @@ import AxesContext from "../AxesProvider";
 let globalAxisId = 0;
 
 interface TimelineProps {
+  rosBagFileName: string;
+  bookListFileName: string;
   duration: number;
   played: number;
   onSeek: (time: number) => void;
@@ -75,6 +77,8 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
 }));
 
 const Timeline: React.FC<TimelineProps> = ({
+  rosBagFileName,
+  bookListFileName,
   duration,
   played,
   onSeek,
@@ -120,21 +124,31 @@ const Timeline: React.FC<TimelineProps> = ({
     const data = collectData();
     console.log(JSON.stringify(data));
     try {
-      const response = await fetch("/api/.../saveData", {
+      const response = await fetch("http://0.0.0.0:8000/api/save_annotation/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          annotation_name: `${rosBagFileName}+${bookListFileName}`,
+          annotation_data: data,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to save data.");
+        switch (response.status) {
+          case 500:
+            throw new Error("Internal server error");
+          case 400:
+            throw new Error("Invalid JSON format");
+          case 405:
+            throw new Error("Method not allowed");
+        }
       } else {
         alert("Data saved successfully.");
       }
     } catch (error) {
-      setError("Failed to save data. Please try again.");
+      setError("Failed to save data. Please try again.\n" + error);
       setIsErrorDialogOpen(true);
     }
   };
