@@ -11,7 +11,7 @@ const App: React.FC = () => {
       <Routes>
         <Route path="/" element={<Annotator />} />
         <Route path="/load" element={<LandingPage />} />
-        <Route path="/main" element={<MainPage />} />
+        {/* <Route path="/main" element={<MainPage />} /> */}
         <Route path="/main/:rosBagFile" element={<MainPage />} />
         <Route path="/main/:rosBagFile/:bookListFile" element={<MainPage />} />
       </Routes>

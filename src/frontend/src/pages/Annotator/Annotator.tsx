@@ -13,7 +13,7 @@ import { AxesProvider } from "../../components/AxesProvider/AxesContext";
 
 import bookListDataTest from "../../../public/predefined_booklist.json";
 
-const Annotator = ({ bookListFileName, bookListData }) => {
+const Annotator = ({ rosBagFileName, bookListFileName, bookListData }) => {
   const [_, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
@@ -25,23 +25,23 @@ const Annotator = ({ bookListFileName, bookListData }) => {
     setSelectedTab(newValue);
   };
 
-  const handleSaveBooklist = jsonData => {
+  const handleSaveBooklist = (jsonData) => {
     setBookList(jsonData);
-    fetch("/api/.../saveBooklist", {
+    fetch("http://0.0.0.0:8000/api/update_booklist/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ booklist_filename: bookListFileName, booklist_data: jsonData }),
+      body: JSON.stringify({ name: bookListFileName, data: jsonData }),
     })
-    .then(response => response.json())
-    .then(data => {
-      console.log("Success:", data);
-      alert("Data saved successfully!");
-      setEditMode(false); // Exit edit mode after saving
-    })
-    .catch(error => {
-      console.error("Error:", error);
-      alert("Failed to save data.");
-    });
+      .then((response) => response.json())
+      .then((data) => {
+        console.log("Success:", data);
+        alert("Data saved successfully!");
+        setEditMode(false); // Exit edit mode after saving
+      })
+      .catch((error) => {
+        console.error("Error:", error);
+        alert("Failed to save data.");
+      });
   };
 
   const handleOnEdit = () => {
@@ -54,8 +54,18 @@ const Annotator = ({ bookListFileName, bookListData }) => {
 
   return (
     <AxesProvider>
-      <Box display="flex" justifyContent="center" alignItems="center" flexDirection="column">
-        <Box display="flex" justifyContent="center" alignItems="center" flexDirection="row">
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        flexDirection="column"
+      >
+        <Box
+          display="flex"
+          justifyContent="center"
+          alignItems="center"
+          flexDirection="row"
+        >
           <Box width="100%" height={452} maxWidth={602} margin={1}>
             <ReactPlayer
               ref={playerRef}
@@ -69,17 +79,26 @@ const Annotator = ({ bookListFileName, bookListData }) => {
             />
           </Box>
           <Box width={600} height={452} overflow="auto" margin={1}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-              <Tabs value={selectedTab} onChange={handleTabChange} aria-label="annotation tabs">
+            <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
+              <Tabs
+                value={selectedTab}
+                onChange={handleTabChange}
+                aria-label="annotation tabs"
+              >
                 <Tab label="Annotations" />
                 <Tab label="Transcript" />
                 <Tab label="Booklist" />
               </Tabs>
             </Box>
             {selectedTab === 0 && <AnnotationTable />}
-            {selectedTab === 1 && <Transcript played={played} setPlayed={time => setPlayed(time)} />}
-            {selectedTab === 2 && (
-              editMode ? (
+            {selectedTab === 1 && (
+              <Transcript
+                played={played}
+                setPlayed={(time) => setPlayed(time)}
+              />
+            )}
+            {selectedTab === 2 &&
+              (editMode ? (
                 <EditBooklistForm
                   bookListData={bookList}
                   onSave={handleSaveBooklist}
@@ -95,17 +114,18 @@ const Annotator = ({ bookListFileName, bookListData }) => {
                   </Button>
                   <Booklist bookListData={bookList} />
                 </Box>
-              )
-            )}
+              ))}
           </Box>
         </Box>
 
         <Box width="100%" maxWidth={1200}>
           <Timeline
+            rosBagFileName={rosBagFileName}
+            bookListFileName={bookListFileName}
             duration={duration}
             played={played}
             annotations={bookList}
-            onSeek={time => setPlayed(time)}
+            onSeek={(time) => setPlayed(time)}
           />
         </Box>
       </Box>
