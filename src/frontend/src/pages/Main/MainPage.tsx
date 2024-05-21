@@ -32,12 +32,14 @@ const MainPage = () => {
           }
         );
 
+        const data = await response.json();
+
         if (!response.ok) {
           switch (response.status) {
             case 500:
-              throw new Error("Internal server error");
+              throw new Error(data.error);
             case 400:
-              throw new Error("Invalid file names");
+              throw new Error(data.error);
             case 405:
               throw new Error("Method not allowed");
             default:
@@ -45,7 +47,6 @@ const MainPage = () => {
           }
         }
 
-        const data = await response.json();
         setData(data);
         setBookListData(data.booklist_data);
         setLoading(false);
@@ -77,7 +78,7 @@ const MainPage = () => {
           </Typography>
           <br />
           <Typography variant="body2" color="error">
-            Error Message: {String(error)}
+            Message: {String(error)}
           </Typography>
         </DialogContent>
       </Dialog>
