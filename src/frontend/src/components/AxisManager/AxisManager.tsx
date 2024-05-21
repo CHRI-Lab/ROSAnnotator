@@ -12,6 +12,7 @@ import {
   Select,
   TextField,
   Tooltip,
+  Box,
 } from "@mui/material";
 
 interface BlockProps {
@@ -51,72 +52,78 @@ const AxisManager: React.FC<AxisManagerProps> = ({
   onNameChange,
 }) => {
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>Manage Axes</DialogTitle>
       <DialogContent>
         <List>
           {axes.map((axis) => (
             <ListItem key={axis.id} divider>
               <ListItemText
-                primary={`Axis ID: ${axis.id}`}
-                secondary={`Type: ${axis.type}${
-                  axis.typeName ? ` - ${axis.typeName}` : ""
-                }`}
+                primary={`Axis ${axis.id}:`}
+                sx={{ width:"120px" }}
               />
-              <TextField
-                label="Rename Axis"
-                value={axis.axisName || ""}
-                onChange={(event) => onNameChange(axis.id, event.target.value)}
-                style={{ marginRight: "10px" }}
-              />
-              <Select
-                value={axis.type}
-                onChange={(event) =>
-                  onTypeChange(
-                    axis.id,
-                    event.target.value as string,
-                    axis.typeName
-                  )
-                }
-                style={{ marginRight: "10px" }}
+              <Box
+                display="flex"
+                flexDirection="row"
+                alignItems="center"
+                justifyContent="space-between"
+                width="100%"
               >
-                <MenuItem value="type-in">Type-in</MenuItem>
-                <MenuItem value="selected">Selected</MenuItem>
-              </Select>
-              {axis.type === "selected" && (
+                <TextField
+                  label="Rename Axis"
+                  value={axis.axisName || ""}
+                  onChange={(event) => onNameChange(axis.id, event.target.value)}
+                  style={{ marginRight: "10px" }}
+                />
                 <Select
-                  value={axis.typeName || ""}
+                  value={axis.type}
                   onChange={(event) =>
                     onTypeChange(
                       axis.id,
-                      axis.type,
-                      event.target.value as string
+                      event.target.value as string,
+                      axis.typeName
                     )
                   }
-                  style={{ marginRight: "10px", width: "150px" }}
+                  style={{ marginRight: "10px", flexGrow: 1 }}
                 >
-                  {Object.keys(booklist).map((key) => (
-                    <MenuItem key={key} value={key}>
-                      {key}
-                    </MenuItem>
-                  ))}
+                  <MenuItem value="type-in">Type-in</MenuItem>
+                  <MenuItem value="selected">Selected</MenuItem>
                 </Select>
-              )}
-              <Tooltip title="Set a shortcut key to quickly create an annotation block on this axis">
-                <TextField
-                  label="Shortcut Key"
-                  value={axis.shortcutKey || ""}
-                  onChange={(event) =>
-                    onShortcutChange(axis.id, event.target.value)
-                  }
-                  style={{
-                    width: "200px",
-                    marginLeft: "0px",
-                    marginRight: "10px",
-                  }}
-                  inputProps={{ maxLength: 1 }}
-                />
-              </Tooltip>
+                {axis.type === "selected" && (
+                  <Select
+                    value={axis.typeName || ""}
+                    onChange={(event) =>
+                      onTypeChange(
+                        axis.id,
+                        axis.type,
+                        event.target.value as string
+                      )
+                    }
+                    style={{ marginRight: "10px", width: "150px" }}
+                  >
+                    {Object.keys(booklist).map((key) => (
+                      <MenuItem key={key} value={key}>
+                        {key}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                )}
+                <Tooltip title="Set a shortcut key to quickly create an annotation block on this axis">
+                  <TextField
+                    label="Shortcut Key"
+                    value={axis.shortcutKey || ""}
+                    onChange={(event) =>
+                      onShortcutChange(axis.id, event.target.value)
+                    }
+                    style={{
+                      width: "150px",
+                      marginLeft: "0px",
+                      marginRight: "10px",
+                    }}
+                    inputProps={{ maxLength: 1 }}
+                  />
+                </Tooltip>
+              </Box>
               <Button
                 variant="outlined"
                 color="secondary"
