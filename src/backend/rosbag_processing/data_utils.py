@@ -160,7 +160,7 @@ def load_annotation(annotation_filename):
                         'id': int(row['id']),
                         'axisType': row['axisType'],
                         'axisName': row['axisName'],
-                        'axisBooklisteName': row['axisBooklisteName'],
+                        'axisBooklistName': row['axisBooklistName'],
                         'annotationBlocks': []
                     }
                     annotations.append(annotation_entry)

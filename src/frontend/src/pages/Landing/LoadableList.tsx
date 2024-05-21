@@ -36,7 +36,6 @@ function LoadableList() {
           },
         });
         const data = await response.json();
-        console.log(data);
         setFileNameList({
           rosbag_files: data.rosbag_files,
           booklist_files: data.booklist_files,
@@ -54,8 +53,10 @@ function LoadableList() {
     if (rosBagFile === "") {
       setOpen(true);
     } else {
-      const booklistPath = bookListFile ? "/" + bookListFile : "";
-      const annotationPath = annotationFile ? "/" + annotationFile : "";
+      const booklistPath = bookListFile ? "/book/" + bookListFile : "";
+      const annotationPath = annotationFile
+        ? "/annotation/" + annotationFile
+        : "";
       navigate("/main/" + rosBagFile + booklistPath + annotationPath);
     }
   };

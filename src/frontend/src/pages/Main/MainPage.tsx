@@ -14,6 +14,7 @@ const MainPage = () => {
   const [errorDisplay, setErrorDisplay] = useState(false);
 
   useEffect(() => {
+    console.log(rosBagFile, bookListFile, annotationFile);
     // Define the async function to fetch data
     const fetchData = async () => {
       try {
