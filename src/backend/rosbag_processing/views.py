@@ -210,7 +210,7 @@ def get_annotation(request):
     annotation_filename = request.query_params.get('annotation_filename')
     
     if not annotation_filename:
-        return Response({'error': 'annotation_name parameter is required'}, status=400)
+        return Response({'error': 'annotation_filename parameter is required'}, status=400)
     
     try:
         annotation_json = load_annotation(annotation_filename)

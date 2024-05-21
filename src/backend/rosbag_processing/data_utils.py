@@ -143,7 +143,7 @@ def get_relative_path(path):
 
 def load_annotation(annotation_filename):
     annotation_path = '/app/datas/annotation/'
-    file_path = os.path.join(annotation_path, f'{annotation_filename}.csv')
+    file_path = os.path.join(annotation_path, f'{annotation_filename}')
 
     if not os.path.exists(file_path):
         raise FileNotFoundError('File not found')
@@ -171,6 +171,6 @@ def load_annotation(annotation_filename):
                     'text': row['text']
                 })
 
-        return {'annotation_data': annotations}
+        return annotations
     except Exception as e:
         raise IOError(f'Error loading annotation data: {str(e)}')
