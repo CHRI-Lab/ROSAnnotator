@@ -105,7 +105,7 @@ const Timeline: React.FC<TimelineProps> = ({
         id: globalAxisId++,
         type: axisData.axisType,
         axisName: axisData.axisName,
-        typeName: axisData.axisBooklisteName,
+        typeName: axisData.axisBooklistName,
         blocks: axisData.annotationBlocks,
       }));
       setAxes(newAxes);
@@ -150,7 +150,9 @@ const Timeline: React.FC<TimelineProps> = ({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          annotation_name: `${rosBagFileName}+${bookListFileName}`,
+          annotation_name: `${rosBagFileName}+${
+            bookListFileName ? bookListFileName : "noBookList"
+          }`,
           annotation_data: data,
         }),
       });
@@ -177,13 +179,15 @@ const Timeline: React.FC<TimelineProps> = ({
     const data = axes.map((axis) => ({
       id: axis.id,
       axisType: axis.type,
-      axisName: axis.axisName,
-      axisBooklisteName: axis.typeName,
-      annotationBlocks: axis.blocks.map((block) => ({
-        start: block.start,
-        end: block.end,
-        text: block.text,
-      })),
+      axisName: axis.axisName ? axis.axisName : "",
+      axisBooklistName: axis.typeName ? axis.typeName : "",
+      annotationBlocks: axis.blocks
+        ? axis.blocks.map((block) => ({
+            start: block.start,
+            end: block.end,
+            text: block.text,
+          }))
+        : [],
     }));
     console.log(data);
     return data;

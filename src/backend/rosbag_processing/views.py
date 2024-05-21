@@ -182,7 +182,7 @@ def save_annotation(request):
 
         try:
             with open(file_path, 'w', newline='') as csvfile:
-                fieldnames = ['id', 'axisType', 'axisName', 'axisBooklisteName', 'start', 'end', 'text']
+                fieldnames = ['id', 'axisType', 'axisName', 'axisBooklistName', 'start', 'end', 'text']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
                 writer.writeheader()
@@ -192,7 +192,7 @@ def save_annotation(request):
                             'id': annotation_entry['id'],
                             'axisType': annotation_entry['axisType'],
                             'axisName': annotation_entry['axisName'],
-                            'axisBooklisteName': annotation_entry.get('axisBooklisteName', ''),
+                            'axisBooklistName': annotation_entry.get('axisBooklistName', ''),
                             'start': block['start'],
                             'end': block['end'],
                             'text': block['text']

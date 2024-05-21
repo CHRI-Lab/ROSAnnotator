@@ -12,8 +12,18 @@ const App: React.FC = () => {
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/main/:rosBagFile" element={<MainPage />} />
-        <Route path="/main/:rosBagFile/:bookListFile" element={<MainPage />} />
-        <Route path="/main/:rosBagFile/:bookListFile/:annotationFile" element={<MainPage />} />
+        <Route
+          path="/main/:rosBagFile/book/:bookListFile"
+          element={<MainPage />}
+        />
+        <Route
+          path="/main/:rosBagFile/annotation/:annotationFile"
+          element={<MainPage />}
+        />
+        <Route
+          path="/main/:rosBagFile/book/:bookListFile/annotation/:annotationFile"
+          element={<MainPage />}
+        />
         {/* Testing Routes */}
         <Route path="/loading" element={<LoadingPage />} />
         <Route path="/maintest" element={<Annotator />} />
