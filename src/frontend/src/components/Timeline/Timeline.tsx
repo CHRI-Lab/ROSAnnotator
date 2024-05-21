@@ -389,7 +389,7 @@ const Timeline: React.FC<TimelineProps> = ({
               variant="contained"
               sx={{
                 mb: 2.25, // 增加这个属性让按钮之间有间距，从而产生对齐的效果
-                top: "110px",
+                top: "145px",
                 width: "150px",
                 height: "42px",
               }}
