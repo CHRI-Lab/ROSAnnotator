@@ -19,7 +19,7 @@ const Annotator = ({
   data,
   bookListData,
 }) => {
-  const [_, setPlayer] = useState<ReactPlayer | null>(null);
+  const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
   const [editMode, setEditMode] = useState(false);
@@ -62,6 +62,13 @@ const Annotator = ({
   const playerRef = useCallback((playerInstance: ReactPlayer) => {
     setPlayer(playerInstance);
   }, []);
+
+  const handleSeek = useCallback((time: number) => {
+    setPlayed(time);
+    if (player) {
+      player.seekTo(time);
+    }
+  }, [player]);
 
   return (
     <AxesProvider>
@@ -108,7 +115,7 @@ const Annotator = ({
               <Transcript
                 LRC={data.audio_transcript}
                 played={played}
-                setPlayed={(time) => setPlayed(time)}
+                setPlayed={handleSeek}
               />
             )}
             {selectedTab === 2 &&
@@ -140,7 +147,7 @@ const Annotator = ({
             bookListFileName={bookListFileName}
             duration={duration}
             played={played}
-            onSeek={(time) => setPlayed(time)}
+            onSeek={handleSeek}
             booklist={bookList}
             annotationData={data.annotation_data}
           />
