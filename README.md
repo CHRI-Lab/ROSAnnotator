@@ -19,6 +19,8 @@ Human-Robot Interaction (HRI) is a growing field of study that explores how huma
 ## Project Timeline
 
 [Overall project management link with Trello board](https://comp90082-2024-na-koala.atlassian.net/wiki/spaces/comp900822/pages/6062124/Sprint+Management+with+Trello+Board)
+
+
 [Project Confluence Home Page](https://comp90082-2024-na-koala.atlassian.net/wiki/spaces/comp900822/overview?homepageId=589914)
 
 ### Sprint 1 (3.11-3.22)
