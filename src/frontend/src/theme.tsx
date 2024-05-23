@@ -65,7 +65,7 @@ export const darkTheme = createTheme({
       fontWeight: 400,
     },
     button: {
-      textTransform: 'none'  // Avoid uppercase buttons for a more modern look
+      textTransform: 'none'  // Avoid uppercase buttons
     },
   },
   components: {
