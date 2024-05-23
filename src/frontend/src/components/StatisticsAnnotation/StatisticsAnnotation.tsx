@@ -4,7 +4,7 @@ import AxesContext from "../AxesProvider";
 const StatisticsAnnotation: React.FC = () => {
   const axesContext = useContext(AxesContext);
 
-  // Ensure the context is not null or undefined
+  // Ensure the context is not null or undefined 
   if (!axesContext) {
     throw new Error("StatisticsAnnotation must be used within an AxesProvider");
   }
