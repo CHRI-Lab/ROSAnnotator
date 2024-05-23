@@ -20,6 +20,7 @@ const AnnotationTable: React.FC = () => {
         return end - begin;
     };
 
+    // Load data
     useEffect(() => {
         const newRows: TableData[] = [];
         axes.forEach(axis => {
