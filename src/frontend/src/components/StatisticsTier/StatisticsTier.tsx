@@ -28,7 +28,7 @@ const StatisticsTier: React.FC = () => {
               return Math.max(max, lastBlockEnd);
             }
             return max;
-          }, 0);          
+          }, 0);        
         const annotationDurationPercentage = (totalDurations / mediaDuration) * 100;
         const latency = axis.blocks.length > 0 ? axis.blocks[0].start : 0;
 
