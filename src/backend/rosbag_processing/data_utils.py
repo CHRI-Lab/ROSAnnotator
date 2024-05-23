@@ -76,15 +76,15 @@ def combine_video_audio(output_folder):
     output_path = os.path.join(output_folder, 'output.mp4')
 
     command = [
-    'ffmpeg',
-    '-i', video_path,
-    '-i', audio_path,
-    '-c:v', 'libx264',
-    '-preset', 'fast',
-    '-c:a', 'aac',
-    '-map', '0:v',
-    '-map', '1:a',
-    '-y', output_path
+        'ffmpeg',
+        '-i', video_path,
+        '-i', audio_path,
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-c:a', 'aac',
+        '-map', '0:v',
+        '-map', '1:a',
+        '-y', output_path
     ]
 
     subprocess.run(command)
