@@ -140,6 +140,7 @@ const Timeline: React.FC<TimelineProps> = ({
     setSeekTime(played);
   }, [played]);
 
+  // Save data through API
   const handleSaveData = async () => {
     const data = collectData();
     console.log(JSON.stringify(data));
@@ -216,7 +217,6 @@ const Timeline: React.FC<TimelineProps> = ({
       text: "",
     };
 
-    // 检查是否有重叠
     const axis = axes.find((axis) => axis.id === axisId);
     if (axis) {
       const overlap = axis.blocks.some(
@@ -309,7 +309,7 @@ const Timeline: React.FC<TimelineProps> = ({
   const marks = Array.from(
     { length: Math.ceil(duration / markInterval) },
     (_, index) => {
-      const value = Math.round(markInterval * index * 10) / 10; // 四舍五入到小数点后一位
+      const value = Math.round(markInterval * index * 10) / 10;
       return {
         value: value,
         label: `${value}s`,
@@ -392,7 +392,7 @@ const Timeline: React.FC<TimelineProps> = ({
               onClick={() => handleCreateBlock(axis.id)}
               variant="contained"
               sx={{
-                mb: 2.25, // 增加这个属性让按钮之间有间距，从而产生对齐的效果
+                mb: 2.25,
                 top: "145px",
                 width: "150px",
                 height: "42px",
