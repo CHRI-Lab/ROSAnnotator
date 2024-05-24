@@ -3,6 +3,7 @@
 ```
 ├── ConfluenceSprint1.pdf    # Sprint 1 Confluence export
 ├── ConfluenceSprint2.pdf    # Sprint 2 Confluence export
+├── ConfluenceSprint3.pdf    # Sprint 3 Confluence export
 ├── trello.png               # Trello screenshot. 
 └── trello backlog.png       # Trello backlog screenshot. 
 ```
