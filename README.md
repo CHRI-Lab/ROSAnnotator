@@ -100,9 +100,9 @@ See [README.md](https://github.com/COMP90082-2024-SM1/ros-annotator/blob/main/sr
 
 ## Product Demo Video
 
-#### Sprint 2
+#### Sprint 2 Please open with unimelb email account
 https://drive.google.com/file/d/19A8k8uDG5NgB5xpRQiOwexR_nYtFT-9I/view?pli=1
 
 
-#### Sprint 3
+#### Sprint 3 Please open with unimelb email account
 https://drive.google.com/file/d/1TVW8IRGzAULBHdEeJwETAcFMruCib3e5/view?usp=sharing 
