@@ -98,6 +98,11 @@ See [README.md](https://github.com/COMP90082-2024-SM1/ros-annotator/tree/main/sr
 
 See [README.md](https://github.com/COMP90082-2024-SM1/ros-annotator/blob/main/src/backend/readme.md) at <code>src/backend</code>
 
-## Product Demo (Sprint 2)
+## Product Demo Video
 
+#### Sprint 2
 https://drive.google.com/file/d/19A8k8uDG5NgB5xpRQiOwexR_nYtFT-9I/view?pli=1
+
+
+#### Sprint 3
+https://drive.google.com/file/d/1TVW8IRGzAULBHdEeJwETAcFMruCib3e5/view?usp=sharing 
