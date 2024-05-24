@@ -5,7 +5,7 @@ import { LandingPage } from "./pages/Landing";
 import Annotator from "./pages/Annotator";
 import MainPage from "./pages/Main";
 import LoadingPage from "./pages/Loading";
-
+// import { Annotator } from "./pages/Annotator";
 const App: React.FC = () => {
   return (
     <Router>
