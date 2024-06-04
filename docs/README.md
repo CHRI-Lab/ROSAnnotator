@@ -11,3 +11,5 @@
 For full Trello please see [here](https://trello.com/b/0RMtLBnV/sprint-tracking) 
 
 For full Trello backlog please see [here](https://trello.com/b/0HyYM81K/backlogs)
+
+For demonstration video and final presentation slide please see [here](https://drive.google.com/drive/folders/1oYMnDyaVjkL_c_3Ghgp_6xqJf9EZvFbe?usp=sharing)
