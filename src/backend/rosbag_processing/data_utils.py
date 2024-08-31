@@ -18,7 +18,9 @@ import matplotlib.pyplot as plt
 from .serializers import BooklistSerializer, TranscriptionRequestSerializer
 from pydub import AudioSegment
 import whisper
+from pyannote.audio import Pipeline
 
+#huggingface token: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
 
 def extract_images_from_rosbag(bag_filename, output_folder):
     bag = Bag(bag_filename, 'r')
@@ -47,12 +49,23 @@ def extract_video(bag_filename, output_folder):
 
 
 def extract_audio(bag_filename, output_folder):
+    # 打开ROS bag文件
     bag = Bag(bag_filename, 'r')
-    with open(f'{output_folder}/audio.mp3', 'wb') as f:
+    
+    # 创建输出文件路径
+    output_path = os.path.join(output_folder, 'audio.mp3')
+    
+    # 打开输出文件，以二进制写入模式
+    with open(output_path, 'wb') as f:
+        # 读取指定话题的消息
         for i, (_, message, t) in enumerate(bag.read_messages(topics='/audio')):
-            for byte in message.data:
-                # f.write(int.to_bytes(byte))
-                f.write(byte.to_bytes(1, 'big'))
+            # 将消息的数据部分直接写入文件
+            f.write(message.data)
+    
+    # 关闭ROS bag文件
+    bag.close()
+    
+    return output_path
 
 def plot_waveform(audio_path, output_filename, start_sec=None, end_sec=None):
     audio = AudioSegment.from_file(audio_path)
@@ -91,30 +104,47 @@ def combine_video_audio(output_folder):
 
 
 def transcribe_audio_to_srt(audio_file_path, output_folder_path):
-    model = whisper.load_model("base")
-    
-    def seconds_to_srt_time(seconds):
-        # Format time as [hh:mm:ss]
-        td = str(timedelta(seconds=seconds))
-        minutes, seconds = td.split(":")[1], td.split(":")[2]
-        seconds = seconds[:-4] if len(seconds) > 5 else seconds
-        return f"[{minutes}:{seconds.replace(',', '.')}]"
+    # Check if the file is in MP3 format and convert it to WAV if necessary
+    if audio_file_path.endswith(".mp3"):
+        audio = AudioSegment.from_mp3(audio_file_path)
+        wav_file_path = os.path.join(output_folder_path, "converted_audio.wav")
+        audio.export(wav_file_path, format="wav")
+        audio_file_path = wav_file_path
 
-    # Transcribe the audio file
+    model = whisper.load_model("base")
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token="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")
+
+    if model is None or pipeline is None:
+        raise RuntimeError("Failed to load models.")
+        
+    def seconds_to_srt_time(seconds):
+        # Format time as [mm:ss]
+        td = timedelta(seconds=seconds)
+        total_seconds = int(td.total_seconds())
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        return f"[{minutes:02}:{seconds:02}]"
+
     result = model.transcribe(audio_file_path)
-    
-    # Generate SRT-like content with start time and subtitle text
+    diarization = pipeline(audio_file_path)
+
     srt_content = ""
-    for segment in result["segments"]:
+    tolerance = 1
+    for index, segment in enumerate(result["segments"]):
         start_time = seconds_to_srt_time(segment["start"])
         text = segment["text"]
-        srt_content += f"{start_time}{text}\n"
 
-    # Create the SRT file
-    srt_file_name = "transcript.srt"
+        speaker_label = "Unknown Speaker"
+        for turn, _, speaker in diarization.itertracks(yield_label=True):
+            if turn.start - tolerance <= segment["start"] <= turn.end + tolerance:
+                speaker_label = speaker
+                break
+
+        srt_content += f"{start_time} Speaker {speaker_label}: {text}\n"
+
+    srt_file_name = "transcript_with_speakers.srt"
     srt_file_path = os.path.join(output_folder_path, srt_file_name)
 
-    # Save the SRT file
     with open(srt_file_path, "w") as srt_file:
         srt_file.write(srt_content)
 

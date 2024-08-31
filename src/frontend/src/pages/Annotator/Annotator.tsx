@@ -38,7 +38,7 @@ const Annotator = ({
 
   const handleSaveBooklist = (jsonData) => {
     setBookList(jsonData);
-    fetch("http://0.0.0.0:8000/api/update_booklist/", {
+    fetch("http://localhost:8000/api/update_booklist/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: bookListFileName, data: jsonData }),

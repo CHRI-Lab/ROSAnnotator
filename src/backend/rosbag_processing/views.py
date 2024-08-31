@@ -96,29 +96,29 @@ def process_rosbag(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
-
 @api_view(['GET'])
 def list_filenames(request):
     # Define folder paths
-    rosbag_file_folder_path = '/app/datas/rosbag-data/'
-    booklist_folder_path = '/app/datas/booklist/'
-    annotation_folder_path = '/app/datas/annotation/'
+    if request.method == 'GET':
+        rosbag_file_folder_path = '/app/datas/rosbag-data/'
+        booklist_folder_path = '/app/datas/booklist/'
+        annotation_folder_path = '/app/datas/annotation/'
 
-    # Validate folder paths
-    if not all(map(os.path.isdir, [rosbag_file_folder_path, booklist_folder_path, annotation_folder_path])):
-        return JsonResponse({'error': 'Invalid folder paths'}, status=500)
+        # Validate folder paths
+        if not all(map(os.path.isdir, [rosbag_file_folder_path, booklist_folder_path, annotation_folder_path])):
+            return JsonResponse({'error': 'Invalid folder paths'}, status=500)
 
-    # List files in the directories
-    rosbag_files = [file for file in os.listdir(rosbag_file_folder_path) if file.endswith('.bag')]
-    booklist_files = [file for file in os.listdir(booklist_folder_path) if file.endswith('.json')]
-    annotation_files = [file for file in os.listdir(annotation_folder_path) if file.endswith('.csv')]
+        # List files in the directories
+        rosbag_files = [file for file in os.listdir(rosbag_file_folder_path) if file.endswith('.bag')]
+        booklist_files = [file for file in os.listdir(booklist_folder_path) if file.endswith('.json')]
+        annotation_files = [file for file in os.listdir(annotation_folder_path) if file.endswith('.csv')]
 
-    # Return the list of files as JSON response
-    return Response({
-        'rosbag_files': rosbag_files,
-        'booklist_files': booklist_files,
-        'annotation_files': annotation_files
-    })
+        # Return the list of files as JSON response
+        return Response({
+            'rosbag_files': rosbag_files,
+            'booklist_files': booklist_files,
+            'annotation_files': annotation_files
+        })
 
 
 # For testing if the transcibe_audio is working 

@@ -19,7 +19,7 @@ const MainPage = () => {
     const fetchData = async () => {
       try {
         const response = await fetch(
-          "http://0.0.0.0:8000/api/process_rosbag/",
+          "http://localhost:8000/api/process_rosbag/",
           {
             method: "POST",
             headers: {

@@ -29,7 +29,7 @@ function LoadableList() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const response = await fetch("http://0.0.0.0:8000/api/list_filenames", {
+        const response = await fetch("http://localhost:8000/api/list_filenames", {
           method: "GET",
           headers: {
             "Content-Type": "application/json",
@@ -41,8 +41,9 @@ function LoadableList() {
           booklist_files: data.booklist_files,
           annotation_files: data.annotation_files,
         });
+        console.log(data)
       } catch (error) {
-        console.error(error);
+        console.log(error);
       }
     };
 

@@ -16,8 +16,21 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from django.urls import path
+from rosbag_processing import views  
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('rosbag_processing.urls')),
 ]
+
+# urlpatterns = [
+#     path('list_filenames/', views.list_filenames, name='list_filenames'),
+#     path('process_rosbag/', views.process_rosbag, name='process_rosbag'),
+#     path('transcribe_audio/', views.transcribe_audio, name='transcribe_audio'),
+#     path('update_booklist/', views.update_booklist, name='update_booklist'),
+#     path('save_annotation/', views.save_annotation, name='save_annotation'),
+#     path('get_annotation/', views.get_annotation, name='get_annotation'),
+# ]
+
+
