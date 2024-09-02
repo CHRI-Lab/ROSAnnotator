@@ -26,6 +26,7 @@ interface TimelineProps {
   onSeek: (time: number) => void;
   booklist: any;
   annotationData: any;
+  speakerData?: Array<any>;
 }
 
 const MainContainer = styled(Paper)(({ theme }) => ({
@@ -85,6 +86,7 @@ const Timeline: React.FC<TimelineProps> = ({
   onSeek,
   booklist,
   annotationData,
+  speakerData,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
@@ -98,6 +100,35 @@ const Timeline: React.FC<TimelineProps> = ({
 
   const { axes, setAxes } = useContext(AxesContext)!;
 
+  useEffect(() => {
+    if (annotationData) {
+      const newAxes = annotationData.map((axisData: any) => ({
+        id: globalAxisId++,
+        type: axisData.axisType,
+        axisName: axisData.axisName,
+        typeName: axisData.axisBooklistName,
+        blocks: axisData.annotationBlocks,
+      }));
+      setAxes(newAxes);
+    }
+  
+    if (speakerData) {
+      const speakerAxes = speakerData.map((segment) => ({
+        id: globalAxisId++,
+        type: "speakers",
+        axisName: segment.speaker_label,
+        blocks: [
+          {
+            start: segment.start_time,
+            end: segment.end_time,
+            text: segment.text,
+          },
+        ],
+        shortcutKey: segment.speaker_label.charAt(0).toUpperCase(),
+      }));
+      setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
+    }
+  }, [annotationData, speakerData]);
   useEffect(() => {
     if (annotationData) {
       //TODO check this code

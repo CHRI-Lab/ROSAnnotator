@@ -12,6 +12,7 @@ import AnnotationTable from "../../components/AnnotationTable";
 import { AxesProvider } from "../../components/AxesProvider/AxesContext";
 import StatisticsAnnotation from "../../components/StatisticsAnnotation";
 import StatisticsTier from "../../components/StatisticsTier";
+import Axis from "../../components/Axis/Axis";
 
 const Annotator = ({
   rosBagFileName,
@@ -25,12 +26,14 @@ const Annotator = ({
   const [editMode, setEditMode] = useState(false);
   const [bookList, setBookList] = useState(bookListData);
   const [selectedTab, setSelectedTab] = useState(0);
+  const [axes, setAxes] = useState([]);
 
   useEffect(() => {
     if (bookListData) {
       setBookList(bookListData);
     }
-  }, []);
+
+  }, [data, bookListData]);
 
   const handleTabChange = (_event, newValue) => {
     setSelectedTab(newValue);
@@ -47,7 +50,7 @@ const Annotator = ({
       .then((data) => {
         console.log("Success:", data);
         alert("Data saved successfully!");
-        setEditMode(false); // Exit edit mode after saving
+        setEditMode(false); // 保存后退出编辑模式
       })
       .catch((error) => {
         console.error("Error:", error);
@@ -150,7 +153,9 @@ const Annotator = ({
             onSeek={handleSeek}
             booklist={bookList}
             annotationData={data.annotation_data}
+            speakerData={data.speaker_data}
           />
+          
         </Box>
       </Box>
     </AxesProvider>

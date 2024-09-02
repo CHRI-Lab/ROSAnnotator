@@ -104,13 +104,14 @@ def combine_video_audio(output_folder):
 
 
 def transcribe_audio_to_srt(audio_file_path, output_folder_path):
-    # Check if the file is in MP3 format and convert it to WAV if necessary
+    # 如果音频文件是MP3格式，则将其转换为WAV格式
     if audio_file_path.endswith(".mp3"):
         audio = AudioSegment.from_mp3(audio_file_path)
         wav_file_path = os.path.join(output_folder_path, "converted_audio.wav")
         audio.export(wav_file_path, format="wav")
         audio_file_path = wav_file_path
 
+    # 加载模型
     model = whisper.load_model("base")
     pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token="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")
 
@@ -118,37 +119,52 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
         raise RuntimeError("Failed to load models.")
         
     def seconds_to_srt_time(seconds):
-        # Format time as [mm:ss]
+        # 将时间格式化为 [mm:ss]
         td = timedelta(seconds=seconds)
         total_seconds = int(td.total_seconds())
         minutes = total_seconds // 60
         seconds = total_seconds % 60
         return f"[{minutes:02}:{seconds:02}]"
 
+    # 转录音频并执行说话人分离
     result = model.transcribe(audio_file_path)
-    diarization = pipeline(audio_file_path)
+    diarization = pipeline(audio_file_path, num_speakers=2)
 
     srt_content = ""
-    tolerance = 1
+    segments = []
+    tolerance = 0.4
+    last_end = 0
     for index, segment in enumerate(result["segments"]):
         start_time = seconds_to_srt_time(segment["start"])
         text = segment["text"]
 
         speaker_label = "Unknown Speaker"
+        next_segment_start = result["segments"][index + 1]["start"] if index + 1 < len(result["segments"]) else float("inf")
+
         for turn, _, speaker in diarization.itertracks(yield_label=True):
-            if turn.start - tolerance <= segment["start"] <= turn.end + tolerance:
+            if turn.start + tolerance >= last_end and turn.end - tolerance <= next_segment_start:
+                last_end = segment["end"]
                 speaker_label = speaker
                 break
 
         srt_content += f"{start_time} Speaker {speaker_label}: {text}\n"
+        
+        segments.append({
+            "start_time": segment["start"],
+            "end_time": segment["end"],
+            "speaker_label": speaker,
+            "text": text
+        })
 
     srt_file_name = "transcript_with_speakers.srt"
     srt_file_path = os.path.join(output_folder_path, srt_file_name)
 
+    # 保存 SRT 文件
     with open(srt_file_path, "w") as srt_file:
         srt_file.write(srt_content)
 
-    return srt_file_path, srt_content
+    # 直接返回包含说话者分段信息的 JSON 数据
+    return srt_file_path, srt_content, segments
 
 def format_time(duration):
     total_seconds = int(duration.total_seconds())

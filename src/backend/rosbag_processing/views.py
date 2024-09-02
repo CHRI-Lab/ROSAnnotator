@@ -78,7 +78,7 @@ def process_rosbag(request):
         extract_video(bag_filepath, output_folder)
 
         # Transcribe the audio to an SRT file
-        srt_file_path, transcript = transcribe_audio_to_srt(audio_path, output_folder)
+        srt_file_path, transcript,speaker_data = transcribe_audio_to_srt(audio_path, output_folder)
 
         # Combine the video and audio files
         combine_video_audio(output_folder)
@@ -90,6 +90,7 @@ def process_rosbag(request):
             'audio_transcript': transcript,
             'booklist_data': booklist_data,
             'annotation_data': annotation_data,
+            'speaker_data':speaker_data,
             'message': 'Processing complete'
         })
     
