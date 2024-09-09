@@ -1,6 +1,7 @@
 import React from 'react';
 import { Paper, styled } from '@mui/material';
-import Block from '../Block'; 
+import Block from '../Block';
+import { Droppable, Draggable } from 'react-beautiful-dnd';
 
 interface BlockData {
   start: number;
@@ -9,13 +10,12 @@ interface BlockData {
 }
 
 interface AxisProps {
+  id: number;
   duration: number;
   selectedRange: number[];
   blocks: BlockData[];
   axisType: string;
   axisName?: string;
-  typeName?: string; 
-  booklist:any,
   onSave: (index: number, text: string) => void;
   onDeleteBlock: (index: number) => void;
 }
@@ -27,37 +27,51 @@ const AxisContainer = styled(Paper)(({ theme }) => ({
   marginTop: '10px',
   position: 'relative',
   width: '100%',
-  minHeight: '50px',  
+  minHeight: '50px',
 }));
 
 const TypeName = styled('div')(() => ({
   position: 'absolute',
   width: '100%',
-  top: 0,  
+  top: 0,
   left: 0,
   color: '#999',
   fontStyle: 'italic',
   padding: '0 10px',
   fontSize: '0.8rem',
-  zIndex: 1  
+  zIndex: 1,
 }));
 
-const Axis: React.FC<AxisProps> = ({ duration, blocks, axisType, typeName, axisName, booklist, onSave, onDeleteBlock }) => {
+const Axis: React.FC<AxisProps> = ({ id, duration, blocks, axisType, axisName, onSave, onDeleteBlock }) => {
   return (
-    <AxisContainer>
-      <TypeName>{axisName || 'No axis Name'}</TypeName>
-      {blocks.map((block, index) => (
-        <Block
-          key={index}
-          block={block}
-          duration={duration}
-          axisType={axisType}
-          booklist={booklist}
-          onSave={(text) => onSave(index, text)}
-          onDelete={() => onDeleteBlock(index)}
-        />
-      ))}
-    </AxisContainer>
+    <Droppable droppableId={String(id)}>
+      {(provided) => (
+        <AxisContainer ref={provided.innerRef} {...provided.droppableProps}>
+          <TypeName>{axisName || 'No axis Name'}</TypeName>
+          {blocks.map((block, index) => (
+            <Draggable key={`block-${id}-${block.start}`} draggableId={String(`block-${id}-${block.start}`)} index={index}>
+              {(provided) => (
+                <div
+                  ref={provided.innerRef}
+                  {...provided.draggableProps}
+                  {...provided.dragHandleProps}
+                  style={{ ...provided.draggableProps.style, marginBottom: '8px' }}  // Add spacing between blocks
+                >
+                  <Block
+                    block={block}
+                    duration={duration}
+                    axisType={axisType}
+                    onSave={(text) => onSave(index, text)}
+                    onDelete={() => onDeleteBlock(index)}
+                  />
+                </div>
+              )}
+            </Draggable>
+          ))}
+          {provided.placeholder}
+        </AxisContainer>
+      )}
+    </Droppable>
   );
 };
 

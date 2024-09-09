@@ -9,6 +9,14 @@ from rest_framework import status
 from .serializers import BooklistSerializer, TranscriptionRequestSerializer
 import csv
 from django.views.decorators.csrf import csrf_exempt
+import openai
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+
+openai_api_key = os.getenv("OPENAI_API_KEY")
+
 
 @api_view(['POST'])
 def process_rosbag(request):
@@ -97,6 +105,105 @@ def process_rosbag(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
+
+@api_view(['POST'])
+def gpt_chat(request):
+    try:
+        # 从请求体中获取用户消息
+        data = json.loads(request.body)
+        message = data.get("message")
+        audio_transcript = data.get("audio_transcript")  # 获取音频转录文本
+        Axiinfo = data.get("Axeinfo")  # 获取 Axi 信息
+
+        # 确保消息和音频转录文本都存在
+        if not message:
+            return JsonResponse({"error": "No message provided"}, status=400)
+        if not audio_transcript:
+            return JsonResponse({"error": "No audio transcript provided"}, status=400)
+        if not Axiinfo:
+            return JsonResponse({"error": "No Axi information provided"}, status=400)
+
+        client = OpenAI(api_key=openai_api_key)
+
+        # 将 Axiinfo 转换为格式化字符串，确保格式正确
+        Axiinfo_str = json.dumps(Axiinfo, indent=2)
+
+        prompt = f"""
+        The following is a transcript of an audio recording. This is not a question, but a reference text.
+        You should use the transcript as context to help you answer the user's question.
+
+        Audio transcript: {audio_transcript}
+
+        Now, based on this transcript, answer the following question:
+
+        {message}
+        """
+
+        # 调用 GPT API
+        chat_completion = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": f"""
+                    You are an assistant that can manipulate timelines. Based on the audio transcript, here are the actions you can perform:
+                    
+                    1. Add a new `axi`: Method: `addAxi`, Parameters: `axisId` (integer),'axisName' (string),'axistype' (string).
+                    2. Add a new `block`: Method: `addBlock`, Parameters: `axisId` (integer), `start` (float), `end` (float), `text` (string).
+                    3. Delete a old 'block':Mthod:'deleteBlock', Parameters: `axisId` (integer), 'blockIndex' (integer).
+                    When you need to perform multiple actions to complete the task, return the response in the following format:
+                    {{
+                      "type": "instruction",
+                      "steps": [
+                        {{
+                          "action": "addAxi",
+                          "parameters": 
+                          {{
+                            "axisId": 1,
+                            "axisName": Greeting
+                            "axistype": Topic annotate
+                            }}
+                        }},
+                        {{
+                          "action": "addBlock",
+                          "parameters": {{
+                            "axisId": 1,
+                            "start": 10,
+                            "end": 20,
+                            "text": "This is a new block"
+                          }}
+                        }}
+                        {{
+                          "action": "deleteBlock",
+                          "parameters": {{
+                            "axisId": 1,
+                            "blockIndex": 0
+                          }}
+                        }}
+                      ]
+                    }}
+                    axis Name are normally the topic of this axi.
+                    Selet one of the axi type('speaker','topic annotate')
+                    Always create steps, even there only one step.
+                    When you want to return an instruction, only return the format, no plain text.
+                    The newest axi id will be current largest id+1.
+                    Overlap with other block in one axi will lead to error.
+                    If the response is a normal conversation, return the plain text as usual.
+                    Here is the current Axi information, you can consider axiId based on this:
+
+                    {Axiinfo_str}
+                    """
+                },
+                {"role": "user", "content": prompt}
+            ],
+        )
+
+        response_text = chat_completion.choices[0].message.content
+        return JsonResponse({"response": response_text})
+    
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+    
 @api_view(['GET'])
 def list_filenames(request):
     # Define folder paths

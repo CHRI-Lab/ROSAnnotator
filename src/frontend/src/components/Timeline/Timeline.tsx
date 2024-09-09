@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useContext } from "react";
+import { Droppable, Draggable, DragDropContext, DropResult } from 'react-beautiful-dnd';
 import {
   Box,
   Button,
@@ -16,7 +17,8 @@ import Axis from "../Axis";
 import AxisManager from "../AxisManager";
 import AxesContext from "../AxesProvider";
 
-let globalAxisId = 0;
+let globalAxisId = 1;
+
 
 interface TimelineProps {
   rosBagFileName: string;
@@ -27,6 +29,8 @@ interface TimelineProps {
   booklist: any;
   annotationData: any;
   speakerData?: Array<any>;
+  onAxesUpdate: (axes: any) => void;//Send information to parent
+  instruction: any;
 }
 
 const MainContainer = styled(Paper)(({ theme }) => ({
@@ -78,6 +82,7 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
   userSelect: "none",
 }));
 
+
 const Timeline: React.FC<TimelineProps> = ({
   rosBagFileName,
   bookListFileName,
@@ -87,6 +92,8 @@ const Timeline: React.FC<TimelineProps> = ({
   booklist,
   annotationData,
   speakerData,
+  onAxesUpdate,
+  instruction,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
@@ -101,6 +108,60 @@ const Timeline: React.FC<TimelineProps> = ({
   const { axes, setAxes } = useContext(AxesContext)!;
 
   useEffect(() => {
+    if (instruction) {
+      handleExecuteInstruction(instruction); // 如果接收到新的指令，就执行
+    }
+  }, [instruction]);
+
+  useEffect(() => {
+    if (onAxesUpdate) {
+      onAxesUpdate(axes);
+    }
+  }, [axes, onAxesUpdate]);
+  
+  const handleExecuteInstruction = (instruction) => {
+    instruction.steps.forEach((step) => {
+      const { action, parameters } = step;
+  
+      switch (action) {
+        case "addAxi":
+          const { axisId, axisName, axistype } = parameters;
+          handleAddAxis_gpt(axisId, axisName, axistype); // 调用已有的添加 Axis 方法
+          break;
+  
+        case "addBlock":
+          const { axisId: blockAxisId, start, end, text } = parameters;
+          handleCreateBlockFromInstruction(blockAxisId, start, end, text); // 根据指令添加 Block
+          break;
+        
+        case "deleteBlock":
+          const {axisId: deleteAxisId, blockIndex } = parameters;
+          handleDeleteBlock(deleteAxisId, blockIndex);
+          break
+
+        default:
+          console.error(`Unknown action: ${action}`);
+      }
+    });
+  };
+  
+  const handleCreateBlockFromInstruction = (axisId, start, end, text) => {
+    const newBlock = { start, end, text };
+  
+    setAxes((prevAxes) =>
+      prevAxes.map((axis) => {
+        if (axis.id === axisId) {
+          const updatedBlocks = [...axis.blocks, newBlock];
+          return { ...axis, blocks: updatedBlocks };
+        }
+        return axis;
+      })
+    );
+  };
+
+
+  useEffect(() => {
+
     if (annotationData) {
       const newAxes = annotationData.map((axisData: any) => ({
         id: globalAxisId++,
@@ -113,19 +174,40 @@ const Timeline: React.FC<TimelineProps> = ({
     }
   
     if (speakerData) {
-      const speakerAxes = speakerData.map((segment) => ({
-        id: globalAxisId++,
-        type: "speakers",
-        axisName: segment.speaker_label,
-        blocks: [
-          {
+      // 创建一个用于存放按 speaker_label 分组的数据的 Map
+      const speakerAxesMap = new Map<string, any>();
+  
+      speakerData.forEach((segment) => {
+        const speakerLabel = segment.speaker_label;
+  
+        // 如果 map 中已经有该 speaker_label 的数据，更新 blocks
+        if (speakerAxesMap.has(speakerLabel)) {
+          const existingAxis = speakerAxesMap.get(speakerLabel);
+          existingAxis.blocks.push({
             start: segment.start_time,
             end: segment.end_time,
             text: segment.text,
-          },
-        ],
-        shortcutKey: segment.speaker_label.charAt(0).toUpperCase(),
-      }));
+          });
+        } else {
+          // 如果 map 中没有该 speaker_label，创建新的 axis 并添加到 map 中
+          speakerAxesMap.set(speakerLabel, {
+            id: globalAxisId++,
+            type: "speakers",
+            axisName: speakerLabel,
+            blocks: [
+              {
+                start: segment.start_time,
+                end: segment.end_time,
+                text: segment.text,
+              },
+            ],
+            shortcutKey: speakerLabel.charAt(0).toUpperCase(),
+          });
+        }
+      });
+  
+      // 将 speakerAxesMap 转换为数组并合并到现有 axes 中
+      const speakerAxes = Array.from(speakerAxesMap.values());
       setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
     }
   }, [annotationData, speakerData]);
@@ -176,7 +258,7 @@ const Timeline: React.FC<TimelineProps> = ({
     const data = collectData();
     console.log(JSON.stringify(data));
     try {
-      const response = await fetch("http://0.0.0.0:8000/api/save_annotation/", {
+      const response = await fetch("http://localhost:8000/api/save_annotation/", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -230,17 +312,64 @@ const Timeline: React.FC<TimelineProps> = ({
     onSeek(newValue as number);
   };
 
+  const handleDragEnd = (result: DropResult) => {
+    const { source, destination } = result;
+  
+    // 如果没有目标位置，直接返回
+    if (!destination) return;
+  
+    // 查找源轴和目标轴
+    const sourceAxis = axes.find((axis) => String(axis.id) === source.droppableId);
+    const destinationAxis = axes.find((axis) => String(axis.id) === destination.droppableId);
+  
+    // 确保源轴和目标轴存在
+    if (sourceAxis && destinationAxis) {
+      if (sourceAxis == destinationAxis) return;
+      const sourceBlocks = [...sourceAxis.blocks];
+      const destinationBlocks = [...destinationAxis.blocks];
+  
+      // 从源轴中移除拖动的 block
+      const [movedBlock] = sourceBlocks.splice(source.index, 1);
+  
+      // 确保 block 被插入到目标轴的正确位置
+      destinationBlocks.splice(destination.index, 0, movedBlock);
+  
+      // 使用回调函数来确保状态更新一致性
+      setAxes((prevAxes) =>
+        prevAxes.map((axis) => {
+          if (axis.id === sourceAxis.id) {
+            return { ...axis, blocks: sourceBlocks };
+          } else if (axis.id === destinationAxis.id) {
+            return { ...axis, blocks: destinationBlocks };
+          } else {
+            return axis;
+          }
+        })
+      );
+    }
+  };
   const handleRangeChange = (_event: Event, newValue: number | number[]) => {
     setSelectedRange(newValue as number[]);
+  };
+  const handleAddAxis_gpt = (axisId: number, axisName: string, type: string) => {
+    setAxes((prev) => [
+      ...prev,
+      { 
+        id: axisId,
+        type: type ,
+        axisName: axisName ,
+        blocks: []
+      },
+    ]);
+    globalAxisId=globalAxisId++
   };
 
   const handleAddAxis = () => {
     setAxes((prev) => [
       ...prev,
-      { id: globalAxisId++, type: "type-in", blocks: [] },
+      { id: globalAxisId++, type: "type-in", axisName:String(globalAxisId-1) ,blocks: [] },
     ]);
   };
-
   const handleCreateBlock = (axisId: number) => {
     const newBlock = {
       start: selectedRange[0],
@@ -262,6 +391,7 @@ const Timeline: React.FC<TimelineProps> = ({
         return;
       }
     }
+
 
     setError("");
     setIsErrorDialogOpen(false);
@@ -382,6 +512,7 @@ const Timeline: React.FC<TimelineProps> = ({
   const totalWidth = (duration / markInterval) * 50;
 
   return (
+    <DragDropContext onDragEnd={handleDragEnd}>
     <MainContainer>
       <Dialog
         open={isErrorDialogOpen}
@@ -485,7 +616,8 @@ const Timeline: React.FC<TimelineProps> = ({
             </TimelineMarks>
             {axes.map((axis) => (
               <Axis
-                key={`${axis.id}-${axis.blocks.length}`}
+                key={axis.id}
+                id = {axis.id}
                 duration={duration}
                 selectedRange={selectedRange}
                 blocks={axis.blocks}
@@ -505,6 +637,7 @@ const Timeline: React.FC<TimelineProps> = ({
         </ScrollableTimelineContainer>
       </div>
     </MainContainer>
+    </DragDropContext>
   );
 };
 

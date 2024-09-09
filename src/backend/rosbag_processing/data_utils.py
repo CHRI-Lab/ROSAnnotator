@@ -19,8 +19,11 @@ from .serializers import BooklistSerializer, TranscriptionRequestSerializer
 from pydub import AudioSegment
 import whisper
 from pyannote.audio import Pipeline
+from dotenv import load_dotenv
 
-#huggingface token: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
+load_dotenv()
+
+huggingface_auth_token = os.getenv("HUGGINGFACE_AUTH_TOKEN")
 
 def extract_images_from_rosbag(bag_filename, output_folder):
     bag = Bag(bag_filename, 'r')
@@ -113,8 +116,9 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
 
     # 加载模型
     model = whisper.load_model("base")
-    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token="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")
-
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=huggingface_auth_token)
+    if huggingface_auth_token is None:
+        raise ValueError("Huggingface token not found in environment variables.")
     if model is None or pipeline is None:
         raise RuntimeError("Failed to load models.")
         
@@ -152,7 +156,7 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
         segments.append({
             "start_time": segment["start"],
             "end_time": segment["end"],
-            "speaker_label": speaker,
+            "speaker_label": speaker_label,
             "text": text
         })
 
