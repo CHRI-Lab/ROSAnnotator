@@ -140,6 +140,7 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
     last_end = 0
     for index, segment in enumerate(result["segments"]):
         start_time = seconds_to_srt_time(segment["start"])
+        end_time = seconds_to_srt_time(segment["end"])
         text = segment["text"]
 
         speaker_label = "Unknown Speaker"
@@ -151,7 +152,7 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
                 speaker_label = speaker
                 break
 
-        srt_content += f"{start_time} Speaker {speaker_label}: {text}\n"
+        srt_content += f"{start_time} Speaker {speaker_label}: {text} {end_time}\n"
         
         segments.append({
             "start_time": segment["start"],
@@ -166,6 +167,7 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
     # 保存 SRT 文件
     with open(srt_file_path, "w") as srt_file:
         srt_file.write(srt_content)
+
 
     # 直接返回包含说话者分段信息的 JSON 数据
     return srt_file_path, srt_content, segments

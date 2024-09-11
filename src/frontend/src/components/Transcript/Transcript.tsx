@@ -44,21 +44,27 @@ const Transcript: React.FC<TranscriptProps> = ({ LRC, played, setPlayed }) => {
       line: LrcLine;
     }) => (
       <Line active={active} onClick={() => setPlayed(startMillisecond / 1000)}>
-        {content}
+        {content.slice(0, -7)}
       </Line>
     ),
     [setPlayed]
   );
 
   return (
-    <Box width="100%" height="100%" display="flex" flexDirection="column">
+    <Box
+      width="100%"
+      height="100%"
+      display="flex"
+      flexDirection="column"
+      style={{ overflowY: "auto" }} // Enable scrolling if content overflows
+    >
       <Lrc
         lrc={LRC}
         lineRenderer={lineRenderer}
         currentMillisecond={played * 1000} // Convert seconds to milliseconds
         verticalSpace
-        style={lrcStyle}
-        recoverAutoScrollInterval={5000}
+        style={{ ...lrcStyle, maxHeight: "400px", overflowY: "scroll" }} // Add maxHeight and scroll
+        recoverAutoScrollInterval={1000} // Reduce scroll recovery interval
       />
     </Box>
   );

@@ -15,6 +15,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+gpt_history = ""
+
+
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 
@@ -39,7 +42,7 @@ def process_rosbag(request):
     video_path = os.path.join(output_folder, 'output.mp4')
     audio_path = os.path.join(output_folder, 'audio.mp3')
     waveform_image_path = os.path.join(output_folder, 'output_waveform.png')
-    srt_file_path = os.path.join(output_folder, 'transcript.srt')
+    srt_file_path = os.path.join(output_folder, 'transcript_with_speakers.srt')
 
     if booklist_filename:
         booklist_path = os.path.join('/app/datas/booklist/', booklist_filename)
@@ -108,6 +111,7 @@ def process_rosbag(request):
 
 @api_view(['POST'])
 def gpt_chat(request):
+    global gpt_history
     try:
         # 从请求体中获取用户消息
         data = json.loads(request.body)
@@ -151,6 +155,7 @@ def gpt_chat(request):
                     1. Add a new `axi`: Method: `addAxi`, Parameters: `axisId` (integer),'axisName' (string),'axistype' (string).
                     2. Add a new `block`: Method: `addBlock`, Parameters: `axisId` (integer), `start` (float), `end` (float), `text` (string).
                     3. Delete a old 'block':Mthod:'deleteBlock', Parameters: `axisId` (integer), 'blockIndex' (integer).
+                    4. Delete a old 'axi':Mthod:'deleteAxi', Parameters: `axisId` (integer).
                     When you need to perform multiple actions to complete the task, return the response in the following format:
                     {{
                       "type": "instruction",
@@ -180,6 +185,12 @@ def gpt_chat(request):
                             "blockIndex": 0
                           }}
                         }}
+                        {{
+                          "action": "deleteAxi",
+                          "parameters": {{
+                            "axisId": 1
+                          }}
+                        }}
                       ]
                     }}
                     axis Name are normally the topic of this axi.
@@ -192,13 +203,17 @@ def gpt_chat(request):
                     Here is the current Axi information, you can consider axiId based on this:
 
                     {Axiinfo_str}
+
+                    Here is previous chat history between you and user:
+                    {gpt_history}
                     """
                 },
                 {"role": "user", "content": prompt}
             ],
         )
-
+        
         response_text = chat_completion.choices[0].message.content
+        gpt_history = gpt_history + message + response_text
         return JsonResponse({"response": response_text})
     
     except Exception as e:

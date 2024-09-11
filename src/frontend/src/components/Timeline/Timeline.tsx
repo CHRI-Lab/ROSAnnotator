@@ -139,6 +139,11 @@ const Timeline: React.FC<TimelineProps> = ({
           handleDeleteBlock(deleteAxisId, blockIndex);
           break
 
+        case "deleteAxi":
+          const {axisId: deleteAxiId } = parameters;
+          handleDeleteAxis(deleteAxiId);
+          break
+          
         default:
           console.error(`Unknown action: ${action}`);
       }
