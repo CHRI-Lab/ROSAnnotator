@@ -60,9 +60,7 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
   }, [block.text]);
 
   const handleDoubleClick = () => {
-    if (axisType === 'type-in') {
       setIsEditing(true);
-    }
   };
 
   const handleBlur = () => {
@@ -83,7 +81,7 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
         duration={duration}
         onDoubleClick={handleDoubleClick}
       >
-        {axisType === 'type-in' && isEditing ? (
+        { isEditing ? (
           <TextField
             value={selectedAnnotation}
             onChange={(e) => setSelectedAnnotation(e.target.value)}

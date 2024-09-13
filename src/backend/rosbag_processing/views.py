@@ -137,7 +137,7 @@ def gpt_chat(request):
         You should use the transcript as context to help you answer the user's question.
 
         Audio transcript: {audio_transcript}
-
+        Consider the end of latest senetence as end of audio.
         Now, based on this transcript, answer the following question:
 
         {message}
@@ -206,6 +206,7 @@ def gpt_chat(request):
 
                     Here is previous chat history between you and user:
                     {gpt_history}
+                    User may ask you to undo some previous instruction generate by you.
                     """
                 },
                 {"role": "user", "content": prompt}

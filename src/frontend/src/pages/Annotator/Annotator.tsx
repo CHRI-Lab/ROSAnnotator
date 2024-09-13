@@ -156,7 +156,7 @@ const Annotator = ({
                 playing
               />
             </Box>
-            <Box width={600} flexGrow={1} overflow="auto" margin={1}>
+            <Box width={600} flexGrow={1} overflow="auto" margin={1} maxHeight = "50vh">
               <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
                 <Tabs
                   value={selectedTab}
