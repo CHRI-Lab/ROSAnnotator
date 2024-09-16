@@ -16,7 +16,7 @@ interface AxisProps {
   blocks: BlockData[];
   axisType: string;
   axisName?: string;
-  onSave: (index: number, text: string) => void;
+  onSave: (index: number, text: string,start: number, end: number) => void;
   onDeleteBlock: (index: number) => void;
 }
 
@@ -61,7 +61,7 @@ const Axis: React.FC<AxisProps> = ({ id, duration, blocks, axisType, axisName, o
                     block={block}
                     duration={duration}
                     axisType={axisType}
-                    onSave={(text) => onSave(index, text)}
+                    onSave={(text, start, end) => onSave(index, text, start, end)}  // Pass the start, end, and text back to onSave
                     onDelete={() => onDeleteBlock(index)}
                   />
                 </div>

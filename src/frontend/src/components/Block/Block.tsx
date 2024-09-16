@@ -1,24 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TextField, styled, IconButton, MenuItem, Tooltip, Select as MuiSelect } from '@mui/material';
 
 const CustomSelect = styled(MuiSelect)(({ theme }) => ({
   '& .MuiOutlinedInput-notchedOutline': {
-    border: 'none', 
+    border: 'none',
   },
   '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-    border: 'none', 
+    border: 'none',
   },
   '& .MuiSelect-select': {
-    padding: theme.spacing(1),  
+    padding: theme.spacing(1),
   },
   '& .MuiInputBase-root': {
     '&:hover:not(.Mui-disabled):before': {
-      borderBottom: 'none'  
+      borderBottom: 'none',
     },
     '&:before': {
-      borderBottom: 'none'  
-    }
-  }
+      borderBottom: 'none',
+    },
+  },
 }));
 
 interface BlockProps {
@@ -30,7 +30,7 @@ interface BlockProps {
   duration: number;
   axisType: string;
   booklist: string[];
-  onSave: (text: string) => void;
+  onSave: (text: string, start: number, end: number) => void;
   onDelete: () => void;
 }
 
@@ -54,41 +54,79 @@ const BlockDisplay = styled('div')<{ start: number; end: number; duration: numbe
 const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSave, onDelete }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [selectedAnnotation, setSelectedAnnotation] = useState(block.text || '');
+  const [start, setStart] = useState(block.start);
+  const [end, setEnd] = useState(block.end);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setSelectedAnnotation(block.text || '');
-  }, [block.text]);
+    setStart(block.start);
+    setEnd(block.end);
+  }, [block.text, block.start, block.end]);
 
   const handleDoubleClick = () => {
-      setIsEditing(true);
+    setIsEditing(true);
   };
 
-  const handleBlur = () => {
-    onSave(selectedAnnotation);
+  const handleSave = () => {
+    onSave(selectedAnnotation, start, end);
     setIsEditing(false);
   };
 
   const handleSelectChange = (event: any) => {
     setSelectedAnnotation(event.target.value as string);
-    onSave(event.target.value as string);
+  };
+
+  const handleBlur = (e: React.FocusEvent<HTMLDivElement>) => {
+    if (!containerRef.current?.contains(e.relatedTarget)) {
+      handleSave();
+    }
   };
 
   return (
-    <Tooltip title={selectedAnnotation} placement="top" arrow>
+    <Tooltip title={`${selectedAnnotation} (${start} - ${end})`} placement="top" arrow>
       <BlockDisplay
-        start={block.start}
-        end={block.end}
+        start={start}  // Use state start here
+        end={end}      // Use state end here
         duration={duration}
         onDoubleClick={handleDoubleClick}
       >
-        { isEditing ? (
-          <TextField
-            value={selectedAnnotation}
-            onChange={(e) => setSelectedAnnotation(e.target.value)}
-            onBlur={handleBlur}
-            autoFocus
-            fullWidth
-          />
+        {isEditing ? (
+          <div 
+          ref={containerRef} 
+          tabIndex={-1} 
+          onBlur={handleBlur} 
+          style={{ display: 'flex', alignItems: 'center', gap: '10px' }}  // Added flexbox layout
+        >
+            <TextField
+              value={selectedAnnotation}
+              onChange={(e) => setSelectedAnnotation(e.target.value)}
+              autoFocus
+              fullWidth
+            />
+            <TextField
+              label="Start"
+              type="number"
+              value={start}
+              onChange={(e) => setStart(parseInt(e.target.value, 10))}
+              inputProps={{
+                size: start.toString().length || 1, // Dynamically adjust size based on length
+                min: 0,  // Ensure valid input
+                style: { minWidth: '50px' }  // Set a minimum width
+              }}
+            />
+            <TextField
+              label="End"
+              type="number"
+              value={end}
+              onChange={(e) => setEnd(parseInt(e.target.value, 10))}
+              inputProps={{
+                size: end.toString().length || 1, // Dynamically adjust size based on length
+                min: 0,  // Ensure valid input
+                style: { minWidth: '50px' }  // Set a minimum width
+              }}
+            />
+          </div>
         ) : axisType === 'selected' ? (
           <CustomSelect
             value={selectedAnnotation}
@@ -96,12 +134,14 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
             displayEmpty
             fullWidth
           >
-            {booklist.map(annotation => (
-              <MenuItem key={annotation} value={annotation}>{annotation}</MenuItem>
+            {booklist.map((annotation) => (
+              <MenuItem key={annotation} value={annotation}>
+                {annotation}
+              </MenuItem>
             ))}
           </CustomSelect>
         ) : (
-          <span>{selectedAnnotation || 'Double-click to edit'}</span>
+          <span>{`${selectedAnnotation} (${start} - ${end})`}</span>
         )}
         <IconButton onClick={onDelete} size="small">
           x

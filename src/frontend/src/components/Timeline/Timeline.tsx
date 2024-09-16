@@ -455,13 +455,13 @@ const Timeline: React.FC<TimelineProps> = ({
     );
   };
 
-  const handleSave = (axisId: number, blockIndex: number, newText: string) => {
+  const handleSave = (axisId: number, blockIndex: number, newText: string, newstart:number, newend:number) => {
     setAxes(
       axes.map((axis) => {
         if (axis.id === axisId) {
           const newBlocks = axis.blocks.map((block, index) => {
             if (index === blockIndex) {
-              return { ...block, text: newText };
+              return { ...block, text: newText, start:newstart, end:newend };
             }
             return block;
           });
@@ -630,8 +630,8 @@ const Timeline: React.FC<TimelineProps> = ({
                 axisName={axis.axisName || "No Axis Name"}
                 typeName={axis.typeName}
                 booklist={axis.typeName ? booklist[axis.typeName] || [] : []}
-                onSave={(blockIndex, text) =>
-                  handleSave(axis.id, blockIndex, text)
+                onSave={(blockIndex, text,start,end) =>
+                  handleSave(axis.id, blockIndex, text,start,end)
                 }
                 onDeleteBlock={(blockIndex) =>
                   handleDeleteBlock(axis.id, blockIndex)

@@ -137,13 +137,12 @@ def gpt_chat(request):
         You should use the transcript as context to help you answer the user's question.
 
         Audio transcript: {audio_transcript}
-        Consider the end of latest senetence as end of audio.
+
         Now, based on this transcript, answer the following question:
 
         {message}
         """
 
-        # 调用 GPT API
         chat_completion = client.chat.completions.create(
             model="gpt-4",
             messages=[
@@ -194,6 +193,7 @@ def gpt_chat(request):
                       ]
                     }}
                     axis Name are normally the topic of this axi.
+                    Remove axi could remove all blocks in the axi.
                     Selet one of the axi type('speaker','topic annotate')
                     Always create steps, even there only one step.
                     When you want to return an instruction, only return the format, no plain text.
@@ -206,7 +206,6 @@ def gpt_chat(request):
 
                     Here is previous chat history between you and user:
                     {gpt_history}
-                    User may ask you to undo some previous instruction generate by you.
                     """
                 },
                 {"role": "user", "content": prompt}
