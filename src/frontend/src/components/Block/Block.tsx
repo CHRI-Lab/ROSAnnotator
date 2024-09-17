@@ -108,22 +108,24 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
               label="Start"
               type="number"
               value={start}
-              onChange={(e) => setStart(parseInt(e.target.value, 10))}
+              onChange={(e) => setStart(parseFloat(e.target.value, 10))}
               inputProps={{
                 size: start.toString().length || 1, // Dynamically adjust size based on length
                 min: 0,  // Ensure valid input
-                style: { minWidth: '50px' }  // Set a minimum width
+                style: { minWidth: '50px' },  // Set a minimum width
+                step:0.001
               }}
             />
             <TextField
               label="End"
               type="number"
               value={end}
-              onChange={(e) => setEnd(parseInt(e.target.value, 10))}
+              onChange={(e) => setEnd(parseFloat(e.target.value, 10))}
               inputProps={{
                 size: end.toString().length || 1, // Dynamically adjust size based on length
                 min: 0,  // Ensure valid input
-                style: { minWidth: '50px' }  // Set a minimum width
+                style: { minWidth: '50px' },  // Set a minimum width
+                step:0.001
               }}
             />
           </div>

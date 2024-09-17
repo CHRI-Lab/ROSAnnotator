@@ -475,10 +475,10 @@ const Timeline: React.FC<TimelineProps> = ({
   const marks = Array.from(
     { length: Math.ceil(duration / markInterval) },
     (_, index) => {
-      const value = Math.round(markInterval * index * 10) / 10;
+      const value = Math.round(markInterval * index * 1000) / 1000; // 使用毫秒精度
       return {
         value: value,
-        label: `${value}s`,
+        label: `${(value / 1000).toFixed(3)}s`, // 显示为秒到毫秒
       };
     }
   );
@@ -532,15 +532,6 @@ const Timeline: React.FC<TimelineProps> = ({
         </DialogActions>
       </Dialog>
       <ControlsContainer>
-        <Box>
-          <Label variant="body2">Mark Interval (s):</Label>
-          <input
-            type="number"
-            value={markInterval}
-            onChange={handleMarkIntervalChange}
-            style={{ width: "100px", marginRight: "20px" }}
-          />
-        </Box>
         <Button onClick={handleSaveData} variant="contained">
           Save and Send Data
         </Button>
@@ -575,7 +566,7 @@ const Timeline: React.FC<TimelineProps> = ({
               value={seekTime}
               min={0}
               max={duration}
-              step={markInterval}
+              step={0.001}
               onChange={handleSliderChange}
               valueLabelDisplay="off"
               marks={marks.map((mark) => ({ value: mark.value, label: "" }))}
@@ -603,7 +594,7 @@ const Timeline: React.FC<TimelineProps> = ({
               value={selectedRange}
               min={0}
               max={duration}
-              step={markInterval} // Ensure the step is the same as markInterval
+              step={0.001} // Ensure the step is the same as markInterval
               onChange={handleRangeChange}
               valueLabelDisplay="auto"
               sx={{ marginTop: "20px", marginBottom: "20px" }}
