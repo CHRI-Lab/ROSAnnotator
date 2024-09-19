@@ -17,12 +17,14 @@ load_dotenv()
 
 gpt_history = ""
 
-
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 
 @api_view(['POST'])
 def process_rosbag(request):
+    global video_frames
+    global video_fps
+
     if request.method != 'POST':
         return Response({'error': 'Invalid request method'}, status=405)
     
@@ -66,6 +68,26 @@ def process_rosbag(request):
 
     # Check if the bag file has already been processed
     if all(os.path.exists(path) for path in [video_path, audio_path, waveform_image_path, srt_file_path]):
+        video = cv2.VideoCapture(video_path)
+
+        base64Frames = []
+        while video.isOpened():
+            success, frame = video.read()
+            if not success:
+                break
+            _, buffer = cv2.imencode(".jpg", frame)
+            base64Frames.append(base64.b64encode(buffer).decode("utf-8"))
+
+        video.release()
+
+        
+        video_frames = base64Frames
+
+        
+        video_fps = int(video.get(cv2.CAP_PROP_FPS))
+        if video_fps == 0:
+            video_fps = 30
+        print(len(base64Frames), "frames read.")
         with open(srt_file_path, 'r') as transcript_file:
             transcript = transcript_file.read()
         return Response({
@@ -93,7 +115,24 @@ def process_rosbag(request):
 
         # Combine the video and audio files
         combine_video_audio(output_folder)
+        video = cv2.VideoCapture(video_path)
 
+        base64Frames = []
+        while video.isOpened():
+            success, frame = video.read()
+            if not success:
+                break
+            _, buffer = cv2.imencode(".jpg", frame)
+            base64Frames.append(base64.b64encode(buffer).decode("utf-8"))
+
+        video.release()
+
+        video_frames = base64Frames
+
+        video_fps = int(video.get(cv2.CAP_PROP_FPS))
+        if video_fps == 0:
+            video_fps = 30
+        print(len(base64Frames), "frames read.")
         return Response({
             'video_path': get_relative_path(video_path),
             'audio_path': get_relative_path(audio_path),
@@ -117,34 +156,34 @@ def gpt_chat(request):
         data = json.loads(request.body)
         message = data.get("message")
         audio_transcript = data.get("audio_transcript")  # 获取音频转录文本
-        Axiinfo = data.get("Axeinfo")  # 获取 Axi 信息
+        Axiinfo = data.get("Axeinfo")
+        # 获取 Axi 信息
 
         # 确保消息和音频转录文本都存在
         if not message:
             return JsonResponse({"error": "No message provided"}, status=400)
         if not audio_transcript:
             return JsonResponse({"error": "No audio transcript provided"}, status=400)
-        if not Axiinfo:
-            return JsonResponse({"error": "No Axi information provided"}, status=400)
 
         client = OpenAI(api_key=openai_api_key)
 
         # 将 Axiinfo 转换为格式化字符串，确保格式正确
         Axiinfo_str = json.dumps(Axiinfo, indent=2)
 
+
         prompt = f"""
-        The following is a transcript of an audio recording. This is not a question, but a reference text.
-        You should use the transcript as context to help you answer the user's question.
-
-        Audio transcript: {audio_transcript}
-
-        Now, based on this transcript, answer the following question:
+        User want you based on the audio_transcript and video frames answer some qustion 
+        Now, based on this transcript and frames, answer the following question:
 
         {message}
+        If the question not relative with audio and video, you dont need to watch the following data.
+        Here is the audio transcription:
+        {audio_transcript}
+        Here is the video frames
         """
 
         chat_completion = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o",
             messages=[
                 {
                     "role": "system", 
@@ -192,6 +231,7 @@ def gpt_chat(request):
                         }}
                       ]
                     }}
+
                     axis Name are normally the topic of this axi.
                     Remove axi could remove all blocks in the axi.
                     Selet one of the axi type('speaker','topic annotate')
@@ -206,9 +246,12 @@ def gpt_chat(request):
 
                     Here is previous chat history between you and user:
                     {gpt_history}
-                    """
+
+
+                    """,
+                    
                 },
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": [prompt,*map(lambda x: {"image": x}, video_frames[0::max(1, len(video_frames) // 50)][:50])]}
             ],
         )
         

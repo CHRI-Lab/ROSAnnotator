@@ -218,8 +218,8 @@ def load_annotation(annotation_filename):
                     annotations.append(annotation_entry)
 
                 annotation_entry['annotationBlocks'].append({
-                    'start': int(row['start']),
-                    'end': int(row['end']),
+                    'start': float(row['start']),
+                    'end': float(row['end']),
                     'text': row['text']
                 })
 
