@@ -25,6 +25,11 @@ def process_rosbag(request):
     global video_frames
     global video_fps
 
+    def detect_faces(frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)):
+        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=scaleFactor, minNeighbors=minNeighbors, minSize=minSize)
+        return len(faces) > 0
     if request.method != 'POST':
         return Response({'error': 'Invalid request method'}, status=405)
     
@@ -75,15 +80,19 @@ def process_rosbag(request):
             success, frame = video.read()
             if not success:
                 break
+            
+            # Detect face
+            if detect_faces(frame):
+                print("Frame with face detected, skipping.")
+                continue
+            
             _, buffer = cv2.imencode(".jpg", frame)
             base64Frames.append(base64.b64encode(buffer).decode("utf-8"))
 
         video.release()
 
-        
         video_frames = base64Frames
 
-        
         video_fps = int(video.get(cv2.CAP_PROP_FPS))
         if video_fps == 0:
             video_fps = 30
@@ -111,7 +120,7 @@ def process_rosbag(request):
         extract_video(bag_filepath, output_folder)
 
         # Transcribe the audio to an SRT file
-        srt_file_path, transcript,speaker_data = transcribe_audio_to_srt(audio_path, output_folder)
+        srt_file_path, transcript, speaker_data = transcribe_audio_to_srt(audio_path, output_folder)
 
         # Combine the video and audio files
         combine_video_audio(output_folder)
@@ -122,6 +131,12 @@ def process_rosbag(request):
             success, frame = video.read()
             if not success:
                 break
+            
+            # 检查帧中是否包含人脸，包含则跳过
+            if detect_faces(frame):
+                print("Frame with face detected, skipping.")
+                continue
+
             _, buffer = cv2.imencode(".jpg", frame)
             base64Frames.append(base64.b64encode(buffer).decode("utf-8"))
 
@@ -140,7 +155,7 @@ def process_rosbag(request):
             'audio_transcript': transcript,
             'booklist_data': booklist_data,
             'annotation_data': annotation_data,
-            'speaker_data':speaker_data,
+            'speaker_data': speaker_data,
             'message': 'Processing complete'
         })
     

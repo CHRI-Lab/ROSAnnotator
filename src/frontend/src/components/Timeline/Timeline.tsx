@@ -475,10 +475,10 @@ const Timeline: React.FC<TimelineProps> = ({
   const marks = Array.from(
     { length: Math.ceil(duration / markInterval) },
     (_, index) => {
-      const value = Math.round(markInterval * index * 1000) / 1000; // 使用毫秒精度
+      const value = Math.round(markInterval * index);
       return {
         value: value,
-        label: `${(value / 1000).toFixed(3)}s`, // 显示为秒到毫秒
+        label: `${value}s`, // 仅显示秒，不显示毫秒
       };
     }
   );
@@ -566,7 +566,7 @@ const Timeline: React.FC<TimelineProps> = ({
               value={seekTime}
               min={0}
               max={duration}
-              step={0.001}
+              step={markInterval}
               onChange={handleSliderChange}
               valueLabelDisplay="off"
               marks={marks.map((mark) => ({ value: mark.value, label: "" }))}
@@ -594,7 +594,7 @@ const Timeline: React.FC<TimelineProps> = ({
               value={selectedRange}
               min={0}
               max={duration}
-              step={0.001} // Ensure the step is the same as markInterval
+              step={markInterval} // Ensure the step is the same as markInterval
               onChange={handleRangeChange}
               valueLabelDisplay="auto"
               sx={{ marginTop: "20px", marginBottom: "20px" }}
