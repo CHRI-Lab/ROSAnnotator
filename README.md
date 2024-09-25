@@ -7,6 +7,8 @@ Human-Robot Interaction (HRI) is a growing field of study that explores how huma
 
 ## Project Structure
 
+The ROS Annotator project integrates ROS (Robot Operating System) with Django for processing and annotating ROS bag files. The project also includes a React-based frontend for interacting with the annotations and managing data.
+
 The project is organized into the following main directories:
 
 ### Root Directory
