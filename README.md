@@ -6,9 +6,11 @@ The ROSAnnotator project aims to develop a standalone web application specifical
 Human-Robot Interaction (HRI) is a growing field of study that explores how humans interact with robots in various contexts, from industrial applications to personal assistance and beyond. The analysis of HRI data is complex, involving multiple modalities such as visual data, audio communications, and sensor data from the robot. The ROS ecosystem provides a flexible framework for robot development and research, but the analysis of ROSBag data, especially from HRI experiments, requires specialized tools. Existing tools like Elan offer some capabilities for annotation and analysis but may not fully meet the unique needs of HRI research, such as handling specific ROS data types or synchronizing multiple data streams.
 
 ##Project Structure
+
 The project is organized into the following main directories:
 
 ###Root Directory
+
 ```.github/```: GitHub configuration files, including workflow actions for continuous integration.
 
 ```data-samples/```: Sample data and related documentation for testing and demonstration.
@@ -20,6 +22,7 @@ The project is organized into the following main directories:
 ```tests/```: Test cases and test documentation for the project.
 
 ###Backend
+
 Located in src/backend/, this directory contains the Django backend code for handling ROS bag files and serving data to the frontend.
 
 ```ros_annotator/```: Main Django application.
@@ -49,6 +52,7 @@ Located in src/backend/, this directory contains the Django backend code for han
 ```requirements.txt```: List of Python dependencies required by the backend.
 
 ###Frontend
+
 Located in ```src/frontend/```, this directory contains the React frontend code for the user interface of the ROS Annotator.
 
 ```public/```: Static assets and public files for the frontend.
