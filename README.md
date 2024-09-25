@@ -5,6 +5,7 @@ The ROSAnnotator project aims to develop a standalone web application specifical
 ## Project Background
 Human-Robot Interaction (HRI) is a growing field of study that explores how humans interact with robots in various contexts, from industrial applications to personal assistance and beyond. The analysis of HRI data is complex, involving multiple modalities such as visual data, audio communications, and sensor data from the robot. The ROS ecosystem provides a flexible framework for robot development and research, but the analysis of ROSBag data, especially from HRI experiments, requires specialized tools. Existing tools like Elan offer some capabilities for annotation and analysis but may not fully meet the unique needs of HRI research, such as handling specific ROS data types or synchronizing multiple data streams.
 
+
 ## Project Structure
 
 The ROS Annotator project integrates ROS (Robot Operating System) with Django for processing and annotating ROS bag files. The project also includes a React-based frontend for interacting with the annotations and managing data.
@@ -19,19 +20,12 @@ The project is organized into the following main directories:
 
 ```data-samples/```: Sample data and related documentation for testing and demonstration.
 
-```docs/```: Project documentation, including sprint summaries and presentation slides.
-
 ```src/```: The main source code for the project, divided into backend and frontend sections.
 
-```tests/```: Test cases and test documentation for the project.
 
 ### Backend
 
 Located in src/backend/, this directory contains the Django backend code for handling ROS bag files and serving data to the frontend.
-
-```ros_annotator/```: Main Django application.
-
-```settings.py```: Configuration settings for the Django project.
 
 ```urls.py```: URL routing for the Django project.
 
@@ -43,12 +37,6 @@ Located in src/backend/, this directory contains the Django backend code for han
 
 ```views.py```: API endpoints for interacting with ROS bag data.
 
-```models.py```: Django models representing the database structure.
-
-```serializers.py```: Data serializers for converting complex data types to JSON.
-
-```env_config/```: Scripts and configuration files for setting up the environment.
-
 ```Dockerfile```: Dockerfile for building the backend container.
 
 ```docker-compose.yml```: Docker Compose configuration for the backend services.
@@ -59,25 +47,10 @@ Located in src/backend/, this directory contains the Django backend code for han
 
 Located in ```src/frontend/```, this directory contains the React frontend code for the user interface of the ROS Annotator.
 
-```public/```: Static assets and public files for the frontend.
-
-```index.html```: Main HTML file for the React app.
-
-```src/```: Source code for the React application.
-
 ```components/```: Reusable React components such as AnnotationTable, Timeline, and Transcript.
 
 ```pages/```: Page components for different routes, including Annotator, Landing, and Main.
 
-```App.tsx```: Main application component.
-
-```main.tsx```: Entry point of the React application.
-
-```Dockerfile```: Dockerfile for building the frontend container.
-
-```package.json```: NPM configuration file listing dependencies for the frontend.
-
-```vite.config.ts```: Configuration file for Vite, the frontend build tool.
 
 ### Data Samples
 
