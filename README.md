@@ -25,7 +25,7 @@ The project is organized into the following main directories:
 
 ### Backend
 
-Located in src/backend/, this directory contains the Django backend code for handling ROS bag files and serving data to the frontend.
+Located in ```src/backend/```, this directory contains the Django backend code for handling ROS bag files and serving data to the frontend.
 
 ```urls.py```: URL routing for the Django project.
 
