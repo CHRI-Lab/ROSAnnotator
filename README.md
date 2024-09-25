@@ -1,46 +1,12 @@
 # ROS Annotator
 ## Project Overview
-The ROSAnnotator project aims to develop a standalone web application specifically designed to enhance the analysis of Robot Operating System Bag (ROSBag) data, with a particular emphasis on Human-Robot Interaction (HRI). ROSBags are a crucial element in robotics research, serving as a standard format for logging and replaying messages within the ROS ecosystem. These logs can include a wide variety of data types, such as video streams, 3D point clouds, and custom messages tailored for HRI studies. The application is envisioned to be a versatile tool for researchers, enabling the loading of multiple ROSBags, integration with auto-transcription tools for audio data processing, and the provision of a synchronized, interactive dashboard for intuitive data visualization.
+The ROSAnnotator project aims to develop a standalone web application specifically designed to enhance the analysis of Robot Operating System Bag (ROSBag) data, with a particular emphasis on Human-Robot Interaction (HRI). ROSBags are a crucial element in robotics research, serving as a standard format for logging and replaying messages within the ROS ecosystem. These logs can include a wide variety of data types, such as video streams, 3D point clouds, and custom messages tailored for HRI studies. The application is envisioned to be a versatile tool for researchers, enabling the loading of multiple ROSBags, the provision of a synchronized, interactive dashboard for intuitive data visualization and Connected with Chatgpt API which can automatically annotate by interaction with GPT.
 
 ## Project Background
 Human-Robot Interaction (HRI) is a growing field of study that explores how humans interact with robots in various contexts, from industrial applications to personal assistance and beyond. The analysis of HRI data is complex, involving multiple modalities such as visual data, audio communications, and sensor data from the robot. The ROS ecosystem provides a flexible framework for robot development and research, but the analysis of ROSBag data, especially from HRI experiments, requires specialized tools. Existing tools like Elan offer some capabilities for annotation and analysis but may not fully meet the unique needs of HRI research, such as handling specific ROS data types or synchronizing multiple data streams.
 
-## Project Goal
-*  The primary goal of ROSAnnotator is to fill this gap by providing a comprehensive tool that facilitates the detailed analysis of HRI experiments. The project focuses on several key objectives:
+## Project Sturcture
 
-*  Data Handling Capabilities: To build robust support for reading and parsing the diverse data types contained in ROSBags, ensuring researchers can access and analyze all relevant data components of their HRI experiments.
-
-*  Synchronised Interactive Dashboard: To develop an intuitive, user-friendly interface that displays various data streams in a synchronized manner, allowing researchers to interact with and analyze data more effectively.
-
-*  Annotation Features: To enable detailed annotations of HRI interactions, including custom scales for states (e.g., "child looking at the robot") and events (e.g., "child entering input on the table"), thereby enhancing the depth and specificity of analysis.
-
-*  Integration and Automation: Although given less priority initially, integrating with auto-transcription tools for audio data and exploring automatic annotation methods based on audio transcripts are also envisioned to streamline the annotation process and make the tool more versatile.
-
-## Project Timeline
-
-[Overall project management link with Trello board](https://comp90082-2024-na-koala.atlassian.net/wiki/spaces/comp900822/pages/6062124/Sprint+Management+with+Trello+Board)
-
-
-[Project Confluence Home Page](https://comp90082-2024-na-koala.atlassian.net/wiki/spaces/comp900822/overview?homepageId=589914)
-
-### Sprint 1 (3.11-3.22)
-[Link](https://comp90082-2024-na-koala.atlassian.net/wiki/spaces/comp900822/pages/3932161/Sprint+1) to documentation
-
-### Sprint 2 (3.23-5.2)
-[Link](https://comp90082-2024-na-koala.atlassian.net/wiki/spaces/comp900822/pages/7143431/Sprint+2) to documentation
-### Sprint 3 (5.3-5.24)
-[Link](https://comp90082-2024-na-koala.atlassian.net/wiki/spaces/comp900822/pages/7471122/Sprint+3) to documentation
-## Team Information
-
-| Name                  | Email                               | Position           |
-| --------------------- | ----------------------------------- | ------------------ |
-| Bowen Fan             | bffa@student.unimelb.edu.au         | Product Manager    |
-| Tianqi Wang           | tww2@student.unimelb.edu.au         | Scrum Master       |
-| Guanqin Wang          | guanqinw@student.unimelb.edu.au     | DevOps Manager     |
-| Yujie Zheng           | yujiezheng@student.unimelb.edu.au   | Backend Developer  |
-| Yuchen Song           | yuchsong2@student.unimelb.edu.au    | Frontend Developer |
-| Yucheng Peng          | yucpeng1@student.unimelb.edu.au     | ROS Analyst        |
-| Abhishek Tummalapalli | atummalapall@student.unimelb.edu.au | ROS Analyst        |
 
 ## Repository Structure
 
