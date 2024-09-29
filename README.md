@@ -101,7 +101,7 @@ The ```data-samples/``` directory contains sample data and a README file explain
 
 4. **Enviroment**
 
-Application require OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in root path of **backend** and place two variables **OPENAI_API_KEY** and  **HUGGINGFACE_AUTH_TOKEN** inside manually.
+    Application require OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in root path of **backend** and place two variables **OPENAI_API_KEY** and  **HUGGINGFACE_AUTH_TOKEN** inside manually.
 
 5. **Access the Application**
 
