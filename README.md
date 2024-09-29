@@ -99,7 +99,11 @@ The ```data-samples/``` directory contains sample data and a README file explain
 
    To use the desired data or files, place them into the corresponding folders. This location is set up to be accessible within the backend environment using attached docker volumes.
 
-4. **Access the Application**
+4. **Enviroment**
+
+Application require OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in root path of **backend** and place two variables **OPENAI_API_KEY** and  **HUGGINGFACE_AUTH_TOKEN** inside manually.
+
+5. **Access the Application**
 
    Both the frontend and the backend is hosted in a Docker container locally. Once the server is up and running, you can access the [web app](http://localhost:5173/) at `http://localhost:5173/`.
 
