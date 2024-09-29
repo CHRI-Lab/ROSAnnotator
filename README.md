@@ -52,20 +52,33 @@ Located in ```src/frontend/```, this directory contains the React frontend code 
 ```pages/```: Page components for different routes, including Annotator, Landing, and Main.
 
 
-### Data Samples
-
-The ```data-samples/``` directory contains sample data and a README file explaining how to use them.
-
 
 ## Repository Structure
 
+The ROS Annotator project integrates ROS (Robot Operating System) with Django for processing and annotating ROS bag files. The project also includes a React-based frontend for interacting with the annotations and managing data.
+
+
 ```
-├── docs/          # Documentation files
-├── data-samples/  # Data samples
-└── src/           # Source code for the project
-    ├── backend/   # Backend application code
-    └── frontend/  # Frontend application code
-├── tests/         # Test files
+├── .github/        # GitHub configuration and workflows
+├── docs/           # Documentation files
+├── data-samples/   # Sample data for testing
+├── src/            # Source code for the project
+│   ├── backend/    # Backend (Django) application code
+│   │   ├── asgi.py # ASGI config
+│   │   ├── wsgi.py # WSGI config
+│   │   ├── urls.py # URL routing
+│   │   ├── rosbag_processing/  # ROS bag processing code
+│   │   │   ├── views.py        # API endpoints related to rosbag
+│   │   │   ├── data_utils.py   # Data utilities related to rosbag
+│   │   │   ├── file_utils.py   # File utilities related to rosbag
+│   │   ├── Dockerfile          # Dockerfile for backend
+│   │   ├── docker-compose.yml  # Docker Compose config
+│   │   └── requirements.txt    # Python dependencies
+│   └── frontend/   # Frontend (React) application code
+│       ├── components/  # Reusable React components
+│       └── pages/       # Page components for different routes
+└── tests/         # Test files for both backend and frontend
+
 ```
 
 ## Usage Guide
