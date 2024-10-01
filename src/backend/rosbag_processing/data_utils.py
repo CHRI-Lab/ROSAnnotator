@@ -52,20 +52,20 @@ def extract_video(bag_filename, output_folder):
 
 
 def extract_audio(bag_filename, output_folder):
-    # 打开ROS bag文件
+
     bag = Bag(bag_filename, 'r')
     
-    # 创建输出文件路径
+
     output_path = os.path.join(output_folder, 'audio.mp3')
     
-    # 打开输出文件，以二进制写入模式
+
     with open(output_path, 'wb') as f:
-        # 读取指定话题的消息
+
         for i, (_, message, t) in enumerate(bag.read_messages(topics='/audio')):
-            # 将消息的数据部分直接写入文件
+
             f.write(message.data)
     
-    # 关闭ROS bag文件
+
     bag.close()
     
     return output_path
@@ -107,14 +107,14 @@ def combine_video_audio(output_folder):
 
 
 def transcribe_audio_to_srt(audio_file_path, output_folder_path):
-    # 如果音频文件是MP3格式，则将其转换为WAV格式
+
     if audio_file_path.endswith(".mp3"):
         audio = AudioSegment.from_mp3(audio_file_path)
         wav_file_path = os.path.join(output_folder_path, "converted_audio.wav")
         audio.export(wav_file_path, format="wav")
         audio_file_path = wav_file_path
 
-    # 加载模型
+
     model = whisper.load_model("base")
     pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=huggingface_auth_token)
     if huggingface_auth_token is None:
@@ -123,16 +123,16 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
         raise RuntimeError("Failed to load models.")
         
     def seconds_to_srt_time(seconds):
-        # 将时间格式化为 [mm:ss]
+
         td = timedelta(seconds=seconds)
         total_seconds = int(td.total_seconds())
         minutes = total_seconds // 60
         seconds = total_seconds % 60
         return f"[{minutes:02}:{seconds:02}]"
 
-    # 转录音频并执行说话人分离
+
     result = model.transcribe(audio_file_path)
-    diarization = pipeline(audio_file_path, num_speakers=2)
+    diarization = pipeline(audio_file_path)
 
     srt_content = ""
     segments = []

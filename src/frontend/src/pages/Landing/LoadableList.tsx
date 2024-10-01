@@ -128,9 +128,9 @@ function LoadableList() {
             component="h2"
             style={{ fontWeight: "bold", textAlign: "center" }}
           >
-            Predefined Booklist
+            Predefined Codebook
           </Typography>
-          <List component="nav" aria-label="Predefined Booklist">
+          <List component="nav" aria-label="Predefined Codebook">
             {fileNameList.booklist_files.length === 0 ? (
               <ListItem button>
                 <ListItemText primary="No file found. Please place your files in the prescribed location." />

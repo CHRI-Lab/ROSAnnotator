@@ -129,20 +129,24 @@ const Annotator = ({
 
   return (
     <AxesProvider>
-      <Box display="flex" height="100vh"> {/* 设置全屏高度 */}
+      <Box display="flex" height="100vh" overflow="hidden">
         {/* 左侧的主内容区域 */}
         <Box
           display="flex"
           justifyContent="center"
           alignItems="center"
           flexDirection="column"
-          flex={0.7} // 左侧占据70%的宽度
+          flex={0.7}
+          height="100%"  
+          overflow="auto"
         >
           <Box
             display="flex"
             justifyContent="center"
             alignItems="center"
             flexDirection="row"
+            flex="1 1 auto"
+            overflow="auto"
           >
             <Box width="100%" flexGrow={1} maxWidth={602} margin={1}>
               <ReactPlayer
@@ -156,7 +160,7 @@ const Annotator = ({
                 playing
               />
             </Box>
-            <Box width={600} flexGrow={1} overflow="auto" margin={1} maxHeight = "50vh">
+            <Box width={600} flexGrow={1} overflow="auto" margin={1} maxHeight="50vh">
               <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
                 <Tabs
                   value={selectedTab}
@@ -165,7 +169,7 @@ const Annotator = ({
                 >
                   <Tab label="Annotations" />
                   <Tab label="Transcript" />
-                  <Tab label="Booklist" />
+                  <Tab label="Codebook" />
                   <Tab label="Statistics (Annotations)" />
                   <Tab label="Statistics (Tiers)" />
                 </Tabs>
@@ -201,7 +205,8 @@ const Annotator = ({
             </Box>
           </Box>
   
-          <Box width="100%" maxWidth={1200}>
+          {/* 包裹 Timeline 的容器，添加滚动条 */}
+          <Box width="100%" maxWidth={1200} overflow="auto" maxHeight="50vh">
             <Timeline
               rosBagFileName={rosBagFileName}
               bookListFileName={bookListFileName}
@@ -219,21 +224,21 @@ const Annotator = ({
   
         {/* 右侧的 Chatbox 区域 */}
         <Box
-          flex={0.3} // 右侧占据30%的宽度
-          height="100%" // 让 Chatbox 占满右侧全高度
-          bgcolor="background.paper" // 设置背景颜色
-          borderLeft={1} // 添加左侧的边框线
+          flex={0.3}
+          height="100%"
+          bgcolor="background.paper"
+          borderLeft={1}
           borderColor="divider"
           display="flex"
           flexDirection="column"
           justifyContent="space-between"
+          overflow="auto"
         >
           <Chatbox onSendMessage={handleSendMessageToGPT} />
         </Box>
       </Box>
     </AxesProvider>
   );
-  
 };
 
 export default Annotator;
