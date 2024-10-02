@@ -100,20 +100,6 @@ The ROS Annotator project integrates ROS (Robot Operating System) with Django fo
 
    > _Note: The total image size is about 5 GB, so it may take a while for the first time to download and build the image. The speed depends on your computational resources and internet connection._
 
-3. **Data Placement**
-
-   After running the above command, Docker will automatically create the below folders in the root directory of the project:
-
-   ```
-   └── datas/
-       ├── rosbag-data/   # place your rosbag data here
-       ├── booklist/   # place your predefined booklist here
-       └── annotation/  # retrieve your annotation output here
-       └── processed/  # store all processed data of a rosbag with timestamps
-   ```
-
-   To use the desired data or files, place them into the corresponding folders. This location is set up to be accessible within the backend environment using attached docker volumes.
-
 4. **Enviroment**
 
     Application require OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in root path of **backend** and place two variables **OPENAI_API_KEY** and  **HUGGINGFACE_AUTH_TOKEN** inside manually.
