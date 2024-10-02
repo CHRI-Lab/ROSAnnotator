@@ -5,6 +5,15 @@ The ROSAnnotator project aims to develop a standalone web application specifical
 ## Project Background
 Human-Robot Interaction (HRI) is a growing field of study that explores how humans interact with robots in various contexts, from industrial applications to personal assistance and beyond. The analysis of HRI data is complex, involving multiple modalities such as visual data, audio communications, and sensor data from the robot. The ROS ecosystem provides a flexible framework for robot development and research, but the analysis of ROSBag data, especially from HRI experiments, requires specialized tools. Existing tools like Elan offer some capabilities for annotation and analysis but may not fully meet the unique needs of HRI research, such as handling specific ROS data types or synchronizing multiple data streams.
 
+## Project Function
+ROSAnnotator combine traditional annotate tool with Large Language Model which provide a more powerful function:
+
+1. ROSAnnotator will convert audio into text and recognize speaker automatically when loading a new package.
+2. Axi manager allow user annotate package and edit annotation easier.
+3. Chat with ROSAnnotator by plain text, it will help user annotate effectively.(e.g "Help me labeling all greeting topic sentences in a new axi")
+4. Finally, rosannotator could save all axi data into csv for further work.
+
+
 
 ## Project Structure
 
