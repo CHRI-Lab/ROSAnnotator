@@ -132,7 +132,6 @@ def process_rosbag(request):
             if not success:
                 break
             
-            # 检查帧中是否包含人脸，包含则跳过
             if detect_faces(frame):
                 print("Frame with face detected, skipping.")
                 continue
@@ -167,14 +166,13 @@ def process_rosbag(request):
 def gpt_chat(request):
     global gpt_history
     try:
-        # 从请求体中获取用户消息
         data = json.loads(request.body)
         message = data.get("message")
-        audio_transcript = data.get("audio_transcript")  # 获取音频转录文本
+        audio_transcript = data.get("audio_transcript")
         Axiinfo = data.get("Axeinfo")
-        # 获取 Axi 信息
+        Codebook = data.get("Codebook")
 
-        # 确保消息和音频转录文本都存在
+
         if not message:
             return JsonResponse({"error": "No message provided"}, status=400)
         if not audio_transcript:
@@ -182,7 +180,6 @@ def gpt_chat(request):
 
         client = OpenAI(api_key=openai_api_key)
 
-        # 将 Axiinfo 转换为格式化字符串，确保格式正确
         Axiinfo_str = json.dumps(Axiinfo, indent=2)
 
 
@@ -246,7 +243,7 @@ def gpt_chat(request):
                         }}
                       ]
                     }}
-
+                    You dont have to say its a json file, only provide the fomat when you want to do some instructions.
                     axis Name are normally the topic of this axi.
                     Remove axi could remove all blocks in the axi.
                     Selet one of the axi type('speaker','topic annotate')
@@ -259,7 +256,12 @@ def gpt_chat(request):
 
                     {Axiinfo_str}
 
+                    Here is the Codebook predefined by user:
+
+                    {Codebook}
+                    
                     Here is previous chat history between you and user:
+
                     {gpt_history}
 
 

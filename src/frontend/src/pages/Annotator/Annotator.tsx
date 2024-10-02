@@ -56,6 +56,7 @@ const Annotator = ({
         message: message, // 用户消息
         audio_transcript: data.audio_transcript, // 音频转录的文本
         Axeinfo: axesData,
+        Codebook: data.bookListData
       }),
     })
       .then((response) => {
