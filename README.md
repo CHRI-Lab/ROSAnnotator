@@ -5,6 +5,15 @@ The ROSAnnotator project aims to develop a standalone web application specifical
 ## Project Background
 Human-Robot Interaction (HRI) is a growing field of study that explores how humans interact with robots in various contexts, from industrial applications to personal assistance and beyond. The analysis of HRI data is complex, involving multiple modalities such as visual data, audio communications, and sensor data from the robot. The ROS ecosystem provides a flexible framework for robot development and research, but the analysis of ROSBag data, especially from HRI experiments, requires specialized tools. Existing tools like Elan offer some capabilities for annotation and analysis but may not fully meet the unique needs of HRI research, such as handling specific ROS data types or synchronizing multiple data streams.
 
+## Project Function
+ROSAnnotator combine traditional annotate tool with Large Language Model which provide a more powerful function:
+
+1. ROSAnnotator will convert audio into text and recognize speaker automatically when loading a new package.
+2. Axi manager allow user annotate package and edit annotation easier.
+3. Chat with ROSAnnotator by plain text, it will help user annotate effectively.(e.g "Help me labeling all greeting topic sentences in a new axi")
+4. Finally, rosannotator could save all axi data into csv for further work.
+
+
 
 ## Project Structure
 
@@ -59,25 +68,27 @@ The ROS Annotator project integrates ROS (Robot Operating System) with Django fo
 
 
 ```
-├── .github/        # GitHub configuration and workflows
-├── docs/           # Documentation files
-├── data-samples/   # Sample data for testing
-├── src/            # Source code for the project
+├── .github/         # GitHub configuration and workflows
+├── data-samples/    # Sample data for testing
+├── src/             # Source code for the project
 │   ├── backend/    # Backend (Django) application code
 │   │   ├── asgi.py # ASGI config
 │   │   ├── wsgi.py # WSGI config
 │   │   ├── urls.py # URL routing
-│   │   ├── rosbag_processing/  # ROS bag processing code
-│   │   │   ├── views.py        # API endpoints related to rosbag
-│   │   │   ├── data_utils.py   # Data utilities related to rosbag
-│   │   │   ├── file_utils.py   # File utilities related to rosbag
+│   │   ├── rosbag_processing/  # ROSBag processing code
+│   │   │   ├── views.py        # API endpoints related to ROSBag
+│   │   │   └── data_utils.py   # Data utilities related to ROSBag
 │   │   ├── Dockerfile          # Dockerfile for backend
-│   │   ├── docker-compose.yml  # Docker Compose config
 │   │   └── requirements.txt    # Python dependencies
 │   └── frontend/   # Frontend (React) application code
 │       ├── components/  # Reusable React components
 │       └── pages/       # Page components for different routes
-└── tests/         # Test files for both backend and frontend
+├── docker-compse.yml # Docker Compose config
+└── datas/            # Will be created after building the Docker image
+    ├── rosbag-data/ # Place your ROSBag data here
+    ├── booklist/    # Place your predefined codebook here
+    ├── annotation/  # Retrieve your annotation output here
+    └── processed/   # Store all processed data of a ROSBag with timestamps
 
 ```
 
@@ -97,20 +108,6 @@ The ROS Annotator project integrates ROS (Robot Operating System) with Django fo
    ```
 
    > _Note: The total image size is about 5 GB, so it may take a while for the first time to download and build the image. The speed depends on your computational resources and internet connection._
-
-3. **Data Placement**
-
-   After running the above command, Docker will automatically create the below folders in the root directory of the project:
-
-   ```
-   └── datas/
-       ├── rosbag-data/   # place your rosbag data here
-       ├── booklist/   # place your predefined booklist here
-       └── annotation/  # retrieve your annotation output here
-       └── processed/  # store all processed data of a rosbag with timestamps
-   ```
-
-   To use the desired data or files, place them into the corresponding folders. This location is set up to be accessible within the backend environment using attached docker volumes.
 
 4. **Enviroment**
 
