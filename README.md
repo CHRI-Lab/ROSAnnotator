@@ -75,11 +75,11 @@ The ROS Annotator project integrates ROS (Robot Operating System) with Django fo
 │       ├── components/  # Reusable React components
 │       └── pages/       # Page components for different routes
 ├── docker-compse.yml # Docker Compose config
-└── datas/
-    ├── rosbag-data/  # Place your ROSBag data here
-    ├── booklist/     # Place your predefined codebook here
-    ├── annotation/   # Retrieve your annotation output here
-    └── processed/    # Store all processed data of a ROSBag with timestamps
+└── datas/            # Will be created after building the Docker image
+    ├── rosbag-data/ # Place your ROSBag data here
+    ├── booklist/    # Place your predefined codebook here
+    ├── annotation/  # Retrieve your annotation output here
+    └── processed/   # Store all processed data of a ROSBag with timestamps
 
 ```
 
