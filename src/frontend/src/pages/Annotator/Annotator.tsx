@@ -72,22 +72,22 @@ const Annotator = ({
         const responseString = data.response; // GPT 返回的响应
   
         try {
-          // 尝试解析字符串为 JSON
+
           const parsedObject = JSON.parse(responseString);
   
-          // 检查解析后的对象是否为指令
+
           if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
             console.log("This is an instruction:", parsedObject);
             setInstruction(parsedObject);
-            return "Done"; // 返回指令已完成
+            return "Done"; 
           } else {
-            // 如果解析成功但不是指令，返回普通语句
-            return responseString; // 返回普通对话
+
+            return responseString; 
           }
         } catch (error) {
-          // 如果解析失败，则认为是普通字符串
+
           console.log("This is a normal message:", responseString);
-          return responseString; // 返回普通对话
+          return responseString;
         }
       });
   };
@@ -95,23 +95,37 @@ const Annotator = ({
 
 
   const handleSaveBooklist = (jsonData) => {
-    setBookList(jsonData);
+    
+    if (!bookListFileName) {
+      bookListFileName = `booklist_${new Date().getTime()}.json`;
+    }
+  
+    console.log("BookList File Name: ", bookListFileName);
+    console.log("Data to send: ", { name: bookListFileName, data: jsonData });
+  
     fetch("http://localhost:8000/api/update_booklist/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: bookListFileName, data: jsonData }),
     })
-      .then((response) => response.json())
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Failed to save data");
+        }
+        return response.json();
+      })
       .then((data) => {
         console.log("Success:", data);
         alert("Data saved successfully!");
         setEditMode(false);
+        setBookList(jsonData);
       })
       .catch((error) => {
         console.error("Error:", error);
         alert("Failed to save data.");
       });
   };
+  
 
   const handleOnEdit = () => {
     setEditMode(true);

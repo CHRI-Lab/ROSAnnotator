@@ -322,24 +322,25 @@ def transcribe_audio(request):
 @api_view(['POST'])
 def update_booklist(request):
     booklist_path = '/app/datas/booklist/'
+    
+    if not os.path.exists(booklist_path):
+        os.makedirs(booklist_path)
+    
     serializer = BooklistSerializer(data=request.data)
+    
     if serializer.is_valid():
         booklist_name = serializer.validated_data['name']
         booklist_data = serializer.validated_data['data']
 
         print(booklist_data)
-            
-        # Construct file path
+        
         booklist_file_path = os.path.join(booklist_path, booklist_name)
 
-        if not os.path.exists(booklist_file_path):
-            return Response({"error": "Booklist file does not exist"}, status=status.HTTP_400_BAD_REQUEST)
-
         try:
-            # Write booklist data to file
             with open(booklist_file_path, 'w') as f:
                 json.dump(booklist_data, f, indent=4)
-            return Response({"message": "Booklist updated successfully", "New BookList": booklist_data}, status=status.HTTP_200_OK)
+            
+            return Response({"message": "Booklist created/updated successfully", "New BookList": booklist_data}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     else:
