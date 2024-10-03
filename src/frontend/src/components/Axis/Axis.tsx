@@ -16,8 +16,9 @@ interface AxisProps {
   blocks: BlockData[];
   axisType: string;
   axisName?: string;
-  onSave: (index: number, text: string,start: number, end: number) => void;
+  onSave: (index: number, text: string, start: number, end: number) => void;
   onDeleteBlock: (index: number) => void;
+  onDoubleClickCreateBlock: (axisId: number, startTime: number) => void; 
 }
 
 const AxisContainer = styled(Paper)(({ theme }) => ({
@@ -42,11 +43,38 @@ const TypeName = styled('div')(() => ({
   zIndex: 1,
 }));
 
-const Axis: React.FC<AxisProps> = ({ id, duration, blocks, axisType, axisName, onSave, onDeleteBlock }) => {
+const Axis: React.FC<AxisProps> = ({
+  id,
+  duration,
+  blocks,
+  axisType,
+  axisName,
+  onSave,
+  onDeleteBlock,
+  onDoubleClickCreateBlock,  
+}) => {
+
+  const handleDoubleClick = (event: React.MouseEvent) => {
+    const container = event.currentTarget as HTMLElement;
+    const containerRect = container.getBoundingClientRect(); // 获取容器的边界信息
+    const clickX = event.clientX - containerRect.left; // 计算相对于容器左边界的 X 坐标
+    const containerWidth = container.offsetWidth;  // 获取容器的宽度
+  
+    // 根据点击位置计算 block 的起始时间，并确保时间为整数
+    const clickedTime = Math.round((clickX / containerWidth) * duration);
+  
+    // 调用父组件的 onDoubleClickCreateBlock 回调
+    onDoubleClickCreateBlock(id, clickedTime);
+  };
+
   return (
     <Droppable droppableId={String(id)}>
       {(provided) => (
-        <AxisContainer ref={provided.innerRef} {...provided.droppableProps}>
+        <AxisContainer
+          ref={provided.innerRef}
+          {...provided.droppableProps}
+          onDoubleClick={handleDoubleClick}  // 监听双击事件
+        >
           <TypeName>{axisName || 'No axis Name'}</TypeName>
           {blocks.map((block, index) => (
             <Draggable key={`block-${id}-${block.start}`} draggableId={String(`block-${id}-${block.start}`)} index={index}>

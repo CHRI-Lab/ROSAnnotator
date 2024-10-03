@@ -493,7 +493,40 @@ const Timeline: React.FC<TimelineProps> = ({
       })
     );
   };
-
+  const handleDoubleClickCreateBlock = (axisId: number, startTime: number) => {
+    const newBlock = {
+      start: startTime,
+      end: startTime + 5,
+      text: "New Block",
+    };
+  
+    const axis = axes.find((axis) => axis.id === axisId);
+    if (axis) {
+      const overlap = axis.blocks.some(
+        (block) => newBlock.start <= block.end && newBlock.end >= block.start
+      );
+  
+      if (overlap) {
+        setError(
+          "Error: Block overlaps with an existing block. Create a new axis or adjust the range."
+        );
+        setIsErrorDialogOpen(true);
+        return;
+      }
+    }
+  
+    setError("");
+    setIsErrorDialogOpen(false);
+    setAxes((prevAxes) =>
+      prevAxes.map((axis) => {
+        if (axis.id === axisId) {
+          const updatedBlocks = [...axis.blocks, newBlock];
+          return { ...axis, blocks: updatedBlocks };
+        }
+        return axis;
+      })
+    );
+  };
   const handleMarkIntervalChange = (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -627,6 +660,7 @@ const Timeline: React.FC<TimelineProps> = ({
                 onDeleteBlock={(blockIndex) =>
                   handleDeleteBlock(axis.id, blockIndex)
                 }
+                onDoubleClickCreateBlock={handleDoubleClickCreateBlock}
               />
             ))}
           </div>
