@@ -61,7 +61,7 @@ const Axis: React.FC<AxisProps> = ({
     const containerWidth = container.offsetWidth;  // 获取容器的宽度
   
     // 根据点击位置计算 block 的起始时间，并确保时间为整数
-    const clickedTime = Math.round((clickX / containerWidth) * duration);
+    const clickedTime = Math.floor((clickX / containerWidth) * duration);
   
     // 调用父组件的 onDoubleClickCreateBlock 回调
     onDoubleClickCreateBlock(id, clickedTime);
