@@ -53,8 +53,8 @@ const Annotator = ({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        message: message, // 用户消息
-        audio_transcript: data.audio_transcript, // 音频转录的文本
+        message: message, 
+        audio_transcript: data.audio_transcript, 
         Axeinfo: axesData,
         Codebook: bookList
       }),
@@ -70,29 +70,29 @@ const Annotator = ({
       .then((data) => {
         let responseString = data.response;
   
-        // 尝试查找 JSON 数据的开始位置
+
         const jsonStartIndex = responseString.indexOf("{");
         const jsonEndIndex = responseString.lastIndexOf("}");
   
         if (jsonStartIndex !== -1 && jsonEndIndex !== -1 && jsonEndIndex > jsonStartIndex) {
-          // 将普通文本与 JSON 部分分开
+
           const normalMessage = responseString.substring(0, jsonStartIndex).trim();
           const jsonString = responseString.substring(jsonStartIndex, jsonEndIndex + 1).trim(); // 获取完整的 JSON 部分
   
           try {
-            // 解析 JSON 部分
+
             const parsedObject = JSON.parse(jsonString);
   
             if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
               console.log("This is an instruction:", parsedObject);
               setInstruction(parsedObject);
               
-              // 返回普通文本部分，如果为空则返回 "Done"
+
               return responseString || "Done";
             }
           } catch (error) {
             console.error("Failed to parse JSON:", error);
-            return normalMessage; // 如果 JSON 解析失败，返回普通的文字部分
+            return normalMessage; 
           }
         } else {
           return responseString;
@@ -234,7 +234,7 @@ const Annotator = ({
             </Box>
           </Box>
   
-          {/* 包裹 Timeline 的容器，添加滚动条 */}
+
           <Box width="100%" maxWidth={1200} overflow="auto" maxHeight="50vh">
             <Timeline
               rosBagFileName={rosBagFileName}
@@ -251,7 +251,7 @@ const Annotator = ({
           </Box>
         </Box>
   
-        {/* 右侧的 Chatbox 区域 */}
+
         <Box
           flex={0.3}
           height="100%"

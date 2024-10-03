@@ -109,7 +109,7 @@ const Timeline: React.FC<TimelineProps> = ({
 
   useEffect(() => {
     if (instruction) {
-      handleExecuteInstruction(instruction); // 如果接收到新的指令，就执行
+      handleExecuteInstruction(instruction); 
     }
   }, [instruction]);
 
@@ -126,12 +126,12 @@ const Timeline: React.FC<TimelineProps> = ({
       switch (action) {
         case "addAxi":
           const { axisId, axisName, axistype } = parameters;
-          handleAddAxis_gpt(axisId, axisName, axistype); // 调用已有的添加 Axis 方法
+          handleAddAxis_gpt(axisId, axisName, axistype); 
           break;
   
         case "addBlock":
           const { axisId: blockAxisId, start, end, text } = parameters;
-          handleCreateBlockFromInstruction(blockAxisId, start, end, text); // 根据指令添加 Block
+          handleCreateBlockFromInstruction(blockAxisId, start, end, text);
           break;
         
         case "deleteBlock":
@@ -211,7 +211,6 @@ const Timeline: React.FC<TimelineProps> = ({
         }
       });
   
-      // 将 speakerAxesMap 转换为数组并合并到现有 axes 中
       const speakerAxes = Array.from(speakerAxesMap.values());
       setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
     }
@@ -320,26 +319,26 @@ const Timeline: React.FC<TimelineProps> = ({
   const handleDragEnd = (result: DropResult) => {
     const { source, destination } = result;
   
-    // 如果没有目标位置，直接返回
+
     if (!destination) return;
   
-    // 查找源轴和目标轴
+
     const sourceAxis = axes.find((axis) => String(axis.id) === source.droppableId);
     const destinationAxis = axes.find((axis) => String(axis.id) === destination.droppableId);
   
-    // 确保源轴和目标轴存在
+ 
     if (sourceAxis && destinationAxis) {
       if (sourceAxis == destinationAxis) return;
       const sourceBlocks = [...sourceAxis.blocks];
       const destinationBlocks = [...destinationAxis.blocks];
   
-      // 从源轴中移除拖动的 block
+
       const [movedBlock] = sourceBlocks.splice(source.index, 1);
   
-      // 确保 block 被插入到目标轴的正确位置
+
       destinationBlocks.splice(destination.index, 0, movedBlock);
   
-      // 使用回调函数来确保状态更新一致性
+
       setAxes((prevAxes) =>
         prevAxes.map((axis) => {
           if (axis.id === sourceAxis.id) {
@@ -478,7 +477,7 @@ const Timeline: React.FC<TimelineProps> = ({
       const value = Math.round(markInterval * index);
       return {
         value: value,
-        label: `${value}s`, // 仅显示秒，不显示毫秒
+        label: `${value}s`,
       };
     }
   );

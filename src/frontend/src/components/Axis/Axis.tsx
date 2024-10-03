@@ -56,14 +56,13 @@ const Axis: React.FC<AxisProps> = ({
 
   const handleDoubleClick = (event: React.MouseEvent) => {
     const container = event.currentTarget as HTMLElement;
-    const containerRect = container.getBoundingClientRect(); // 获取容器的边界信息
-    const clickX = event.clientX - containerRect.left; // 计算相对于容器左边界的 X 坐标
-    const containerWidth = container.offsetWidth;  // 获取容器的宽度
+    const containerRect = container.getBoundingClientRect();
+    const clickX = event.clientX - containerRect.left; 
+    const containerWidth = container.offsetWidth;  
   
-    // 根据点击位置计算 block 的起始时间，并确保时间为整数
+
     const clickedTime = Math.floor((clickX / containerWidth) * duration);
   
-    // 调用父组件的 onDoubleClickCreateBlock 回调
     onDoubleClickCreateBlock(id, clickedTime);
   };
 
@@ -73,7 +72,7 @@ const Axis: React.FC<AxisProps> = ({
         <AxisContainer
           ref={provided.innerRef}
           {...provided.droppableProps}
-          onDoubleClick={handleDoubleClick}  // 监听双击事件
+          onDoubleClick={handleDoubleClick} 
         >
           <TypeName>{axisName || 'No axis Name'}</TypeName>
           {blocks.map((block, index) => (
