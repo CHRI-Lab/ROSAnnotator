@@ -56,7 +56,8 @@ const Annotator = ({
         message: message, // 用户消息
         audio_transcript: data.audio_transcript, // 音频转录的文本
         Axeinfo: axesData,
-        Codebook: data.bookListData
+        Codebook:bookList
+
       }),
     })
       .then((response) => {
@@ -119,6 +120,7 @@ const Annotator = ({
         alert("Data saved successfully!");
         setEditMode(false);
         setBookList(jsonData);
+        console.log("Updated BookList: ", bookListData);
       })
       .catch((error) => {
         console.error("Error:", error);
