@@ -56,12 +56,10 @@ const Annotator = ({
         message: message, // 用户消息
         audio_transcript: data.audio_transcript, // 音频转录的文本
         Axeinfo: axesData,
-        Codebook:bookList
-
+        Codebook: bookList
       }),
     })
       .then((response) => {
-        // 检查响应是否成功
         if (!response.ok) {
           return response.text().then((text) => {
             throw new Error(`Error ${response.status}: ${text}`);
@@ -70,28 +68,42 @@ const Annotator = ({
         return response.json();
       })
       .then((data) => {
-        const responseString = data.response; // GPT 返回的响应
+        let responseString = data.response;
   
-        try {
-
-          const parsedObject = JSON.parse(responseString);
+        // 尝试查找 JSON 数据的开始位置
+        const jsonStartIndex = responseString.indexOf("{");
+        const jsonEndIndex = responseString.lastIndexOf("}");
   
-
-          if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
-            console.log("This is an instruction:", parsedObject);
-            setInstruction(parsedObject);
-            return "Done"; 
-          } else {
-
-            return responseString; 
+        if (jsonStartIndex !== -1 && jsonEndIndex !== -1 && jsonEndIndex > jsonStartIndex) {
+          // 将普通文本与 JSON 部分分开
+          const normalMessage = responseString.substring(0, jsonStartIndex).trim();
+          const jsonString = responseString.substring(jsonStartIndex, jsonEndIndex + 1).trim(); // 获取完整的 JSON 部分
+  
+          try {
+            // 解析 JSON 部分
+            const parsedObject = JSON.parse(jsonString);
+  
+            if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
+              console.log("This is an instruction:", parsedObject);
+              setInstruction(parsedObject);
+              
+              // 返回普通文本部分，如果为空则返回 "Done"
+              return responseString || "Done";
+            }
+          } catch (error) {
+            console.error("Failed to parse JSON:", error);
+            return normalMessage; // 如果 JSON 解析失败，返回普通的文字部分
           }
-        } catch (error) {
-
-          console.log("This is a normal message:", responseString);
+        } else {
           return responseString;
         }
+      })
+      .catch((error) => {
+        console.error("Error in GPT API call:", error);
+        return `Error: ${error.message}`;
       });
   };
+  
 
 
 

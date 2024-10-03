@@ -243,12 +243,11 @@ def gpt_chat(request):
                         }}
                       ]
                     }}
-                    You dont have to say its a json file, only provide the fomat when you want to do some instructions.
+
                     axis Name are normally the topic of this axi.
                     Remove axi could remove all blocks in the axi.
                     Selet one of the axi type('speaker','topic annotate')
                     Always create steps, even there only one step.
-                    When you want to return an instruction, only return the format, no plain text.
                     The newest axi id will be current largest id+1.
                     Overlap with other block in one axi will lead to error.
                     If the response is a normal conversation, return the plain text as usual.
