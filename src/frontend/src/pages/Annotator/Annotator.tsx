@@ -33,9 +33,11 @@ const Annotator = ({
   useEffect(() => {
     if (bookListData) {
       setBookList(bookListData);
+    } else {
+      setBookList([]);
     }
-
   }, [data, bookListData]);
+  
 
   const handleTabChange = (_event, newValue) => {
     setSelectedTab(newValue);

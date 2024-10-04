@@ -149,6 +149,9 @@ const Timeline: React.FC<TimelineProps> = ({
       }
     });
   };
+  useEffect(() => {
+    console.log("booklist passed to Timeline:", booklist);
+  }, [booklist]);
   
   const handleCreateBlockFromInstruction = (axisId, start, end, text) => {
     const newBlock = { start, end, text };
@@ -179,13 +182,11 @@ const Timeline: React.FC<TimelineProps> = ({
     }
   
     if (speakerData) {
-      // 创建一个用于存放按 speaker_label 分组的数据的 Map
       const speakerAxesMap = new Map<string, any>();
   
       speakerData.forEach((segment) => {
         const speakerLabel = segment.speaker_label;
   
-        // 如果 map 中已经有该 speaker_label 的数据，更新 blocks
         if (speakerAxesMap.has(speakerLabel)) {
           const existingAxis = speakerAxesMap.get(speakerLabel);
           existingAxis.blocks.push({
@@ -356,17 +357,20 @@ const Timeline: React.FC<TimelineProps> = ({
     setSelectedRange(newValue as number[]);
   };
   const handleAddAxis_gpt = (axisId: number, axisName: string, type: string) => {
-    setAxes((prev) => [
-      ...prev,
-      { 
-        id: axisId,
-        type: type ,
-        axisName: axisName ,
-        blocks: []
-      },
-    ]);
-    globalAxisId=globalAxisId++
+    const newAxis = {
+      id: axisId,  // 从指令中获取的 axis ID
+      type: type || "type-in",  // 默认类型可以是 "type-in"，也可以根据传入的 type 决定
+      axisName: axisName || `Axis ${axisId}`,  // 如果没有名称，则生成默认名称
+      blocks: [],  // 新建 axis 时默认没有 block
+      typeName: "",  // 初始化时可以是空字符串，稍后可以赋值
+      shortcutKey: "",  // 如果有需要可以设置快捷键
+    };
+  
+    // 将 GPT 指令创建的 axis 添加到 axes 状态中
+    setAxes((prev) => [...prev, newAxis]);
+    globalAxisId = globalAxisId++
   };
+  
 
   const handleAddAxis = () => {
     setAxes((prev) => [

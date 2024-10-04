@@ -52,6 +52,7 @@ const BlockDisplay = styled('div')<{ start: number; end: number; duration: numbe
 );
 
 const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSave, onDelete }) => {
+  
   const [isEditing, setIsEditing] = useState(false);
   const [selectedAnnotation, setSelectedAnnotation] = useState(block.text || '');
   const [start, setStart] = useState(block.start);
@@ -64,7 +65,7 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
     setEnd(block.end);
   }, [block.text, block.start, block.end]);
 
-  const handleDoubleClick = () => {
+  const handleClick = () => {
     setIsEditing(true);
   };
 
@@ -89,7 +90,7 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
         start={start}  // Use state start here
         end={end}      // Use state end here
         duration={duration}
-        onDoubleClick={handleDoubleClick}
+        onClick={handleClick}  // Use click instead of double click
       >
         {isEditing ? (
           <div 
@@ -129,19 +130,6 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
               }}
             />
           </div>
-        ) : axisType === 'selected' ? (
-          <CustomSelect
-            value={selectedAnnotation}
-            onChange={handleSelectChange}
-            displayEmpty
-            fullWidth
-          >
-            {booklist.map((annotation) => (
-              <MenuItem key={annotation} value={annotation}>
-                {annotation}
-              </MenuItem>
-            ))}
-          </CustomSelect>
         ) : (
           <span>{`${selectedAnnotation} (${start} - ${end})`}</span>
         )}
