@@ -19,6 +19,10 @@ RUN cat /env_config/entrypoint.sh
 # Install ROS
 RUN bash /env_config/forge-ros.sh
 
+#Force ban LD_PRELOAD
+ENV LD_PRELOAD=
+
+
 # Install python dependencies
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
