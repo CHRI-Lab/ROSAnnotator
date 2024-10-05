@@ -88,18 +88,18 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
     Select your bag files, codebook (optional), and annotation file (if you need to retrieve your work) on the import page.
 
-   ![](instruction_imgs\import_page.png)
+   ![](instruction_imgs/import_page.png)
 
    The transcription may take several minutes, depending on the audio length.
    
-   ![](instruction_imgs\transcripting.png)
+   ![](instruction_imgs/transcripting.png)
    
 
 2. **Manual Annotation**
 
    The transcription and codebook will appear at the top of the annotation page. The transcription will be automatically annotated in time axes.
 
-   ![](instruction_imgs\annotation_page.png)
+   ![](instruction_imgs/annotation_page.png)
 
    Click "Add new axis" to create a new annotation tier. In "Manage Axes", users can change the name and type of the time axis. There are two types: "type-in" allows users to type any codes as annotation; "select" allows users to choose one code from the codebook via a drop-down list.
 
@@ -109,11 +109,11 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    In the toolbar panel, there is an "annotation" function. Users can see the summary of all the annotations and edit all the attributes in a table.
 
-   ![](instruction_imgs\annotation_edit.png)
+   ![](instruction_imgs/annotation_edit.png)
 
    Users can edit the pre-defined codebook from the toolbar. By clicking "save", the codebook JSON file will be updated.
 
-   ![](instruction_imgs\codebook.png)   
+   ![](instruction_imgs/codebook.png)   
 
 4. **Auto Annotation**
 
@@ -125,7 +125,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    The VLM's annotation is not always correct. Users can edit the annotation manually.
 
-   ![](instruction_imgs\auto_annotation.png) 
+   ![](instruction_imgs/auto_annotation.png) 
 
 6. **Statistic Summary**
    
