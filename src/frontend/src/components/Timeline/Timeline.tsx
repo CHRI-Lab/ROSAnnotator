@@ -198,7 +198,7 @@ const Timeline: React.FC<TimelineProps> = ({
           // 如果 map 中没有该 speaker_label，创建新的 axis 并添加到 map 中
           speakerAxesMap.set(speakerLabel, {
             id: globalAxisId++,
-            type: "speakers",
+            type: "Type-in",
             axisName: speakerLabel,
             blocks: [
               {
@@ -359,7 +359,7 @@ const Timeline: React.FC<TimelineProps> = ({
   const handleAddAxis_gpt = (axisId: number, axisName: string, type: string) => {
     const newAxis = {
       id: axisId,  // 从指令中获取的 axis ID
-      type: type || "type-in",  // 默认类型可以是 "type-in"，也可以根据传入的 type 决定
+      type: "Type-in",  // 默认类型可以是 "type-in"，也可以根据传入的 type 决定
       axisName: axisName || `Axis ${axisId}`,  // 如果没有名称，则生成默认名称
       blocks: [],  // 新建 axis 时默认没有 block
       typeName: "",  // 初始化时可以是空字符串，稍后可以赋值

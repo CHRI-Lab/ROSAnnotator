@@ -58,6 +58,17 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
   const [start, setStart] = useState(block.start);
   const [end, setEnd] = useState(block.end);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [updatedBooklist, setUpdatedBooklist] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (booklist && Array.isArray(booklist)) {
+      // 更新 booklist，确保它为有效数组
+      setUpdatedBooklist(booklist.length > 0 ? booklist : ['Default annotation']);
+    } else {
+      // 如果 booklist 不存在，设置默认值
+      setUpdatedBooklist(['Default annotation']);
+    }
+  }, [booklist]);
 
   useEffect(() => {
     setSelectedAnnotation(block.text || '');
@@ -130,6 +141,25 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
               }}
             />
           </div>
+        ) : axisType === 'selected' ? (
+<CustomSelect
+  value={selectedAnnotation}
+  onChange={handleSelectChange}
+  displayEmpty
+  fullWidth
+>
+  {(updatedBooklist && updatedBooklist.length > 0) ? (
+    updatedBooklist.map((annotation) => (
+      <MenuItem key={annotation} value={annotation}>
+        {annotation}
+      </MenuItem>
+    ))
+  ) : (
+    <MenuItem disabled value="">
+      No Annotations Available
+    </MenuItem>
+  )}
+</CustomSelect>
         ) : (
           <span>{`${selectedAnnotation} (${start} - ${end})`}</span>
         )}

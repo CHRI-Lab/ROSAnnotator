@@ -16,6 +16,7 @@ interface AxisProps {
   blocks: BlockData[];
   axisType: string;
   axisName?: string;
+  booklist: string[];
   onSave: (index: number, text: string, start: number, end: number) => void;
   onDeleteBlock: (index: number) => void;
   onDoubleClickCreateBlock: (axisId: number, startTime: number) => void; 
@@ -49,9 +50,10 @@ const Axis: React.FC<AxisProps> = ({
   blocks,
   axisType,
   axisName,
+  booklist = [],  // 设置默认值为空数组
   onSave,
   onDeleteBlock,
-  onDoubleClickCreateBlock,  
+  onDoubleClickCreateBlock,
 }) => {
 
   const handleDoubleClick = (event: React.MouseEvent) => {
@@ -88,6 +90,7 @@ const Axis: React.FC<AxisProps> = ({
                     block={block}
                     duration={duration}
                     axisType={axisType}
+                    booklist={booklist}
                     onSave={(text, start, end) => onSave(index, text, start, end)}  // Pass the start, end, and text back to onSave
                     onDelete={() => onDeleteBlock(index)}
                   />
