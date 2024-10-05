@@ -40,6 +40,8 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 2. **Starting the Server**
 
+   First, clone this repo to your local device of any system (Windows, OS, Linux).
+
    Run the following commands in the root directory of the project:
 
    ```bash
@@ -120,7 +122,9 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    Users can provide instructions in the chatbox, and the VLM can provide help after several minutes of processing. Instruction examples are:
    
    > Can you annotate all the request utterances made by participants in a new time axis?
+   > 
    > Can you annotate the participant's attitudes in speech according to the codebook in a new time axis?
+   > 
    > Can you annotate the participant's gestures in the video according to the codebook in a new time axis?
 
    The VLM's annotation is not always correct. Users can edit the annotation manually.
