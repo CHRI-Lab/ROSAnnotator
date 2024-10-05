@@ -103,6 +103,8 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    ![](instruction_imgs/annotation_page.png)
 
+   ![](instruction_imgs/manage_axis.png)
+
    Click "Add new axis" to create a new annotation tier. In "Manage Axes", users can change the name and type of the time axis. There are two types: "type-in" allows users to type any codes as annotation; "select" allows users to choose one code from the codebook via a drop-down list.
 
    In the annotation area, users can double-click to create a block for annotation. By clicking the block, users can edit the code, change the time interval, or delete it.
