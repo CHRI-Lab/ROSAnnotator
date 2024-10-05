@@ -73,7 +73,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 6. **Sample Data**
 
-   We provided a sample ROSBag and a sample codebook in the folder "data-samples". The codebook needs to be in JSON format and put in the datas/booklist folder. Please put the .bag file in the datas/rosbag-data folder.
+   We provided a sample ROSBag and a sample codebook in the folder `/data-samples`. The codebook needs to be in JSON format and put in the `/datas/booklist` folder. Please put the .bag file in the `/datas/rosbag-data` folder.
 
 7. **Customised Data**
 
