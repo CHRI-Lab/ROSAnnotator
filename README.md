@@ -69,6 +69,10 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    Both the front end and the back end are hosted locally in a Docker container. Once the server is up and running, you can access the [web app](http://localhost:5173/) at `http://localhost:5173/`.
 
+6. **Sample Data**
+
+   We provided a sample ROSBag and a sample codebook in the folder "data-samples". The codebook needs to be in JSON format.
+
 
 ## Usage Guide
 1. **Import Data**
@@ -99,15 +103,39 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    Click "Add new axis" to create a new annotation tier. In "Manage Axes", users can change the name and type of the time axis. There are two types: "type-in" allows users to type any codes as annotation; "select" allows users to choose one code from the codebook via a drop-down list.
 
-   In the annotation area, users can double-click to create a block for annotation. By clicking the block, users can edit the code, change the time interval, or delete it. Users can also drag those two blue dots on top of the time axis to mark a specific time and click "create" on the left side of one of the time axis to create an annotation. 
+   In the annotation area, users can double-click to create a block for annotation. By clicking the block, users can edit the code, change the time interval, or delete it.
+
+   Users can also drag those two blue dots on top of the time axis to mark a specific time and click "create" on the left side of one of the time axis to create an annotation.
+
+   In the toolbar panel, there is an "annotation" function. Users can see the summary of all the annotations and edit all the attributes in a table.
 
    ![](instruction_imgs\annotation_edit.png)
 
    Users can edit the pre-defined codebook from the toolbar. By clicking "save", the codebook JSON file will be updated.
 
-   ![](instruction_imgs\codebook.png)
-   
+   ![](instruction_imgs\codebook.png)   
 
 4. **Auto Annotation**
 
+   Users can provide instructions in the chatbox, and the VLM can provide help after several minutes of processing. Instruction examples are:
    
+   > Can you annotate all the request utterances made by participants in a new time axis?
+   > Can you annotate the participant's attitudes in speech according to the codebook in a new time axis?
+   > Can you annotate the participant's gestures in the video according to the codebook in a new time axis?
+
+   The VLM's annotation is not always correct. Users can edit the annotation manually.
+
+   ![](instruction_imgs\auto_annotation.png) 
+
+6. **Statistic Summary**
+   
+    In the toolbar panel, there are two statistic summary functions. Users can check both the summary of all annotations and the summary of annotations in different tiers.
+
+7. **Save Data**
+
+    **It is very important to click "Save and Send Data" before exiting ROSAnnotator.** The saved file will be in the "datas/annotation" folder in CSV format so that users can retrieve their process by loading that file next time.
+
+8. **Others**
+
+   The transcription will be saved in "data/processed". Users can generate the annotation for transcription again by deleting that file.
+      
