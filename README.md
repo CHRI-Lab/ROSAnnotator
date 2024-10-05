@@ -1,71 +1,10 @@
 # ROS Annotator
 ## Project Overview
-The ROSAnnotator project aims to develop a standalone web application specifically designed to enhance the analysis of Robot Operating System Bag (ROSBag) data, with a particular emphasis on Human-Robot Interaction (HRI). ROSBags are a crucial element in robotics research, serving as a standard format for logging and replaying messages within the ROS ecosystem. These logs can include a wide variety of data types, such as video streams, 3D point clouds, and custom messages tailored for HRI studies. The application is envisioned to be a versatile tool for researchers, enabling the loading of multiple ROSBags, the provision of a synchronized, interactive dashboard for intuitive data visualization and Connected with Chatgpt API which can automatically annotate by interaction with GPT.
-
-## Project Background
-Human-Robot Interaction (HRI) is a growing field of study that explores how humans interact with robots in various contexts, from industrial applications to personal assistance and beyond. The analysis of HRI data is complex, involving multiple modalities such as visual data, audio communications, and sensor data from the robot. The ROS ecosystem provides a flexible framework for robot development and research, but the analysis of ROSBag data, especially from HRI experiments, requires specialized tools. Existing tools like Elan offer some capabilities for annotation and analysis but may not fully meet the unique needs of HRI research, such as handling specific ROS data types or synchronizing multiple data streams.
-
-## Project Function
-ROSAnnotator combine traditional annotate tool with Large Language Model which provide a more powerful function:
-
-1. ROSAnnotator will convert audio into text and recognize speaker automatically when loading a new package.
-2. Axi manager allow user annotate package and edit annotation easier.
-3. Chat with ROSAnnotator by plain text, it will help user annotate effectively.(e.g "Help me labeling all greeting topic sentences in a new axi")
-4. Finally, rosannotator could save all axi data into csv for further work.
-
-
-
-## Project Structure
-
-The ROS Annotator project integrates ROS (Robot Operating System) with Django for processing and annotating ROS bag files. The project also includes a React-based frontend for interacting with the annotations and managing data.
-
-
-
-The project is organized into the following main directories:
-
-### Root Directory
-
-```.github/```: GitHub configuration files, including workflow actions for continuous integration.
-
-```data-samples/```: Sample data and related documentation for testing and demonstration.
-
-```src/```: The main source code for the project, divided into backend and frontend sections.
-
-
-### Backend
-
-Located in ```src/backend/```, this directory contains the Django backend code for handling ROS bag files and serving data to the frontend.
-
-```urls.py```: URL routing for the Django project.
-
-```asgi.py & wsgi.py```: ASGI and WSGI configurations for deployment.
-
-```rosbag_processing/```: Application for processing and handling ROS bag files.
-
-```data_utils.py & file_utils.py```: Utility functions for data and file operations.
-
-```views.py```: API endpoints for interacting with ROS bag data.
-
-```Dockerfile```: Dockerfile for building the backend container.
-
-```docker-compose.yml```: Docker Compose configuration for the backend services.
-
-```requirements.txt```: List of Python dependencies required by the backend.
-
-### Frontend
-
-Located in ```src/frontend/```, this directory contains the React frontend code for the user interface of the ROS Annotator.
-
-```components/```: Reusable React components such as AnnotationTable, Timeline, and Transcript.
-
-```pages/```: Page components for different routes, including Annotator, Landing, and Main.
-
-
+ROSAnnotator is a web-based application that incorporates a Vision-Language Model (VLM) to support both manual and automated annotation of ROSBag data. The application is envisioned to be a versatile tool for researchers, enabling the loading of multiple ROSBags, the provision of a synchronized, interactive dashboard for intuitive data visualization. ROSAnnotator currently facilitates video, audio, and transcription annotations and provides an open interface for custom ROS messages and tools.
 
 ## Repository Structure
 
-The ROS Annotator project integrates ROS (Robot Operating System) with Django for processing and annotating ROS bag files. The project also includes a React-based frontend for interacting with the annotations and managing data.
-
+The ROSAnnotator project integrates ROS (Robot Operating System) with Django to process and annotate ROSBag files. The project also includes a React-based frontend for interacting with the annotations and managing data.
 
 ```
 ├── .github/         # GitHub configuration and workflows
@@ -92,7 +31,7 @@ The ROS Annotator project integrates ROS (Robot Operating System) with Django fo
 
 ```
 
-## Usage Guide
+## Installation
 
 1. **Prerequisites - Docker Installation**
 
@@ -104,34 +43,71 @@ The ROS Annotator project integrates ROS (Robot Operating System) with Django fo
    Run the following commands in the root directory of the project:
 
    ```bash
-   docker-compose up --build
+   docker compose up --build
    ```
 
-   > _Note: The total image size is about 5 GB, so it may take a while for the first time to download and build the image. The speed depends on your computational resources and internet connection._
+   > _Note: The total image size is about 20 GB, so it may take a while for the first time to download and build the image. The speed depends on your computational resources and internet connection._
 
-4. **Enviroment**
+   To stop the docker container:
 
-    Application require OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in root path of **backend** and place two variables **OPENAI_API_KEY** and  **HUGGINGFACE_AUTH_TOKEN** inside manually.
+   ```bash
+   docker compose down
+   ```
+
+   To start the docker container again:
+
+   ```bash
+   docker compose up
+   ```
+   
+
+4. **Environment**
+
+    The application requires OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in the root path of **backend** and place two variables, **OPENAI_API_KEY** and **HUGGINGFACE_AUTH_TOKEN**, inside manually.
 
 5. **Access the Application**
 
-   Both the frontend and the backend is hosted in a Docker container locally. Once the server is up and running, you can access the [web app](http://localhost:5173/) at `http://localhost:5173/`.
-
-## Setup & Development Guide
-
-### Frontend
-
-See [README.md](https://github.com/COMP90082-2024-SM1/ros-annotator/tree/main/src/frontend#readme) at <code>src/frontend</code>
-
-### Backend
-
-See [README.md](https://github.com/COMP90082-2024-SM1/ros-annotator/blob/main/src/backend/readme.md) at <code>src/backend</code>
-
-## Product Demo Video
-
-#### Sprint 2 Please open with unimelb email account
-https://drive.google.com/file/d/19A8k8uDG5NgB5xpRQiOwexR_nYtFT-9I/view?pli=1
+   Both the front end and the back end are hosted locally in a Docker container. Once the server is up and running, you can access the [web app](http://localhost:5173/) at `http://localhost:5173/`.
 
 
-#### Sprint 3 Please open with unimelb email account
-https://drive.google.com/file/d/1TVW8IRGzAULBHdEeJwETAcFMruCib3e5/view?usp=sharing 
+## Usage Guide
+1. **Import Data**
+    Put files in the correct folder.
+
+    ```
+    ├──  datas/        # Will be created after building the Docker image
+        ├── rosbag-data/ # Place your ROSBag data here
+        ├── booklist/    # Place your predefined codebook here
+        ├── annotation/  # Retrieve your annotation output here
+        └── processed/   # Store all processed data of a ROSBag with timestamps
+    ```
+
+    Select your bag files, codebook (optional), and annotation file (if you need to retrieve your work) on the import page.
+
+   ![](instruction_imgs\import_page.png)
+
+   The transcription may take several minutes, depending on the audio length.
+   
+   ![](instruction_imgs\transcripting.png)
+   
+
+2. **Manual Annotation**
+
+   The transcription and codebook will appear at the top of the annotation page. The transcription will be automatically annotated in time axes.
+
+   ![](instruction_imgs\annotation_page.png)
+
+   Click "Add new axis" to create a new annotation tier. In "Manage Axes", users can change the name and type of the time axis. There are two types: "type-in" allows users to type any codes as annotation; "select" allows users to choose one code from the codebook via a drop-down list.
+
+   In the annotation area, users can double-click to create a block for annotation. By clicking the block, users can edit the code, change the time interval, or delete it. Users can also drag those two blue dots on top of the time axis to mark a specific time and click "create" on the left side of one of the time axis to create an annotation. 
+
+   ![](instruction_imgs\annotation_edit.png)
+
+   Users can edit the pre-defined codebook from the toolbar. By clicking "save", the codebook JSON file will be updated.
+
+   ![](instruction_imgs\codebook.png)
+   
+
+4. **Auto Annotation**
+
+   
