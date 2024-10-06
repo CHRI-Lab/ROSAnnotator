@@ -116,7 +116,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    There are two blue dots on the top of the time axis, which users can drag to mark a specific time, then click the `create` button on the left side of one of the time axis to create an annotation.
 
-   In the toolbar panel, there is an `annotation` function. Users can see the summary of all the annotations and edit all the attributes in a table.
+   In the toolbar panel, there is an `annotation` function. Users can see the summary of all the annotations in a table.
 
    ![](instruction_imgs/annotation_edit.png)
 
