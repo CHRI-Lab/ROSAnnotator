@@ -27,7 +27,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
     ├── rosbag-data/ # Place your ROSBag data here
     ├── booklist/    # Place your predefined codebook here
     ├── annotation/  # Retrieve your annotation output here
-    └── processed/   # Store all processed data of a ROSBag with timestamps
+    └── processed/   # Store all the processed data, e.g. extracted videos and transcriptions
 
 ```
 
@@ -65,7 +65,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 4. **Environment**
 
-    The application requires OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in the root path of **backend** and place two variables, **OPENAI_API_KEY** and **HUGGINGFACE_AUTH_TOKEN**, inside manually.
+    The application requires OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in the root path of **backend** and manually place two variables, **OPENAI_API_KEY** and **HUGGINGFACE_AUTH_TOKEN**, inside. Please restart the container after changing the .env file.
 
 5. **Access the Application**
 
@@ -73,8 +73,13 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 6. **Sample Data**
 
-   We provided a sample ROSBag and a sample codebook in the folder "data-samples". The codebook needs to be in JSON format.
+   We provided a sample ROSBag and a sample codebook in the folder `/data-samples`. The codebook needs to be in JSON format and put in the `/datas/booklist` folder. Please put the .bag file in the `/datas/rosbag-data` folder.
 
+7. **Customised Data**
+
+   The topics for video and audio data must be configured to match the corresponding topics in the ROSBag. In the sample ROSBag, the topic for video is `/xtion/rgb/image_raw_throttled`, and the topic for audio is `/audio`. Topic names can be modified in the `/src/backend/rosbag_processing/data_utils.py` file. If additional message types need to be extracted, they should also be defined within this file.
+
+   For any custom tools, users should add the necessary functions in the `/src/backend/rosbag_processing/views.py` file. If users wish to customize prompts for the vision language model (VLM), they can modify them in the same file.
 
 ## Usage Guide
 1. **Import Data**
@@ -85,7 +90,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
         ├── rosbag-data/ # Place your ROSBag data here
         ├── booklist/    # Place your predefined codebook here
         ├── annotation/  # Retrieve your annotation output here
-        └── processed/   # Store all processed data of a ROSBag with timestamps
+        └── processed/   # Store all the processed data, e.g. extracted videos and transcriptions
     ```
 
     Select your bag files, codebook (optional), and annotation file (if you need to retrieve your work) on the import page.
@@ -105,17 +110,17 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    ![](instruction_imgs/manage_axis.png)
 
-   Click "Add new axis" to create a new annotation tier. In "Manage Axes", users can change the name and type of the time axis. There are two types: "type-in" allows users to type any codes as annotation; "select" allows users to choose one code from the codebook via a drop-down list.
+   Click `Add new axis` to create a new annotation tier. In `Manage Axes`, users can change the name and type of the time axis. There are two types: `type-in` allows users to type any codes as annotation; `select` allows users to choose one code from the codebook via a drop-down list.
 
    In the annotation area, users can double-click to create a block for annotation. By clicking the block, users can edit the code, change the time interval, or delete it.
 
-   Users can also drag those two blue dots on top of the time axis to mark a specific time and click "create" on the left side of one of the time axis to create an annotation.
+   There are two blue dots on the top of the time axis, which users can drag to mark a specific time, then click the `create` button on the left side of one of the time axis to create an annotation.
 
-   In the toolbar panel, there is an "annotation" function. Users can see the summary of all the annotations and edit all the attributes in a table.
+   In the toolbar panel, there is an `annotation` function. Users can see the summary of all the annotations in a table.
 
    ![](instruction_imgs/annotation_edit.png)
 
-   Users can edit the pre-defined codebook from the toolbar. By clicking "save", the codebook JSON file will be updated.
+   Users can edit the pre-defined codebook from the toolbar. By clicking `save`, the codebook JSON file will be updated.
 
    ![](instruction_imgs/codebook.png)   
 
@@ -139,9 +144,9 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 7. **Save Data**
 
-    **It is very important to click "Save and Send Data" before exiting ROSAnnotator.** The saved file will be in the "datas/annotation" folder in CSV format so that users can retrieve their process by loading that file next time.
+    **It is very important to click "Save and Send Data" before exiting ROSAnnotator.** The saved file will be in the `/datas/annotation` folder in CSV format so that users can retrieve their process by loading that file next time.
 
 8. **Others**
 
-   The transcription will be saved in "data/processed". Users can generate the annotation for transcription again by deleting that file.
+   The transcription will be saved in `/datas/processed`. Users can generate the annotation for transcription again by deleting that file.
       
