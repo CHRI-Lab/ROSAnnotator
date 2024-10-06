@@ -79,7 +79,7 @@ const Annotator = ({
         if (jsonStartIndex !== -1 && jsonEndIndex !== -1 && jsonEndIndex > jsonStartIndex) {
 
           const normalMessage = responseString.substring(0, jsonStartIndex).trim();
-          const jsonString = responseString.substring(jsonStartIndex, jsonEndIndex + 1).trim(); // 获取完整的 JSON 部分
+          const jsonString = responseString.substring(jsonStartIndex, jsonEndIndex + 1).trim();
   
           try {
 

@@ -50,7 +50,7 @@ const Axis: React.FC<AxisProps> = ({
   blocks,
   axisType,
   axisName,
-  booklist = [],  // 设置默认值为空数组
+  booklist = [], 
   onSave,
   onDeleteBlock,
   onDoubleClickCreateBlock,
