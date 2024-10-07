@@ -61,7 +61,12 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    ```bash
    docker compose up
    ```
-   
+
+   The `/datas` folder will be automatically generated after building the container. For Linux users, please check whether all users have read and write permission to this folder. If not, please run this command:
+
+   ```bash
+   sudo chmod -R 777 datas
+   ```
 
 4. **Environment**
 
