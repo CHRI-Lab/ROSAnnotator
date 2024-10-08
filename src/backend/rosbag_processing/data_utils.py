@@ -164,12 +164,10 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
     srt_file_name = "transcript_with_speakers.srt"
     srt_file_path = os.path.join(output_folder_path, srt_file_name)
 
-    # 保存 SRT 文件
     with open(srt_file_path, "w") as srt_file:
         srt_file.write(srt_content)
 
 
-    # 直接返回包含说话者分段信息的 JSON 数据
     return srt_file_path, srt_content, segments
 
 def format_time(duration):
