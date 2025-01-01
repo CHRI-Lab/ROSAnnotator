@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) [YEAR] [AUTHOR OR ORGANIZATION NAME]
+Copyright (c) 2024 Yan Zhang, Haoqi Li, Ramtin Tabatabaei, Wafa Johal
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
