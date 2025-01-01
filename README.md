@@ -33,12 +33,18 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 ## Installation
 
-1. **Prerequisites - Docker Installation**
+1. **General System Requirements**
+
+   Minimum requirement: A laptop with at least a dual-core processor, 4GB of RAM, a 64-bit operating system, 25GB of available storage, and the capability to run Docker and a modern web browser.
+
+   The code has been tested by this combination: Ubuntu 20.04 LTS, ROS Noetic, Python 3.9, Chrome version:130.0.6723.117.
+   
+3. **Prerequisites - Docker Installation**
 
    - Before you begin, ensure that you have Docker installed on your machine. If not, download and install Docker from [Docker's official site](https://www.docker.com/get-started).
    - Verify that the **Docker daemon** is running by executing `docker info` in your terminal. This should return information about the Docker client and server. If not, please start the Docker daemon.
 
-2. **Starting the Server**
+4. **Starting the Server**
 
    First, clone this repo to your local device of any system (Windows, OS, Linux).
 
@@ -68,19 +74,19 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    sudo chmod -R 777 datas
    ```
 
-4. **Environment**
+5. **Environment**
 
     The application requires OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in the root path of **backend** and manually place two variables, **OPENAI_API_KEY** and **HUGGINGFACE_AUTH_TOKEN**, inside. Please restart the container after changing the .env file.
 
-5. **Access the Application**
+6. **Access the Application**
 
    Both the front end and the back end are hosted locally in a Docker container. Once the server is up and running, you can access the [web app](http://localhost:5173/) at `http://localhost:5173/`.
 
-6. **Sample Data**
+7. **Sample Data**
 
    We provided a sample ROSBag and a sample codebook in the folder `/data-samples`. The codebook needs to be in JSON format and put in the `/datas/booklist` folder. Please put the .bag file in the `/datas/rosbag-data` folder.
 
-7. **Customised Data**
+8. **Customised Data**
 
    The topics for video and audio data must be configured to match the corresponding topics in the ROSBag. In the sample ROSBag, the topic for video is `/xtion/rgb/image_raw_throttled`, and the topic for audio is `/audio`. Topic names can be modified in the `/src/backend/rosbag_processing/data_utils.py` file. If additional message types need to be extracted, they should also be defined within this file.
 
@@ -154,4 +160,26 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 8. **Others**
 
    The transcription will be saved in `/datas/processed`. Users can generate the annotation for transcription again by deleting that file.
-      
+
+## Maintenance
+
+We are dedicated to maintaining this project by addressing bugs, refining functionality, and keeping the documentation up to date. We encourage users to fork the repository for custom development and welcome contributions through pull requests, which we will review thoughtfully and collaboratively.
+
+## Maintenance
+
+ROSAnnotator has been used in the following papers: (coming soon)
+
+## Citation
+
+If you use our code or paper in your work, please cite the following:
+
+```
+
+```
+
+## License
+
+This repository is licensed under the MIT License with a [Commons Clause](https://commonsclause.com).
+
+
+
