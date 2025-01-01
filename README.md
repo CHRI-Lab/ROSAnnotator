@@ -165,11 +165,9 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 We are dedicated to maintaining this project by addressing bugs, refining functionality, and keeping the documentation up to date. We encourage users to fork the repository for custom development and welcome contributions through pull requests, which we will review thoughtfully and collaboratively.
 
-## Maintenance
+## Citation
 
 ROSAnnotator has been used in the following papers: (coming soon)
-
-## Citation
 
 If you use our code or paper in your work, please cite the following:
 
