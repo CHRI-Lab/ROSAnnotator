@@ -93,6 +93,9 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    For any custom tools, users should add the necessary functions in the `/src/backend/rosbag_processing/views.py` file. If users wish to customize prompts for the vision language model (VLM), they can modify them in the same file.
 
 ## Usage Guide
+
+[Overview Video](https://www.youtube.com/watch?v=cCD-JclDxLM)
+
 1. **Import Data**
     Put files in the correct folder.
 
