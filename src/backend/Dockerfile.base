@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+
+# GPU/ROS base image. Rebuild this image only when the runtime dependencies
+# or the ROS environment change.
+FROM ubuntu:focal
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget dos2unix python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY env_config/ /env_config/
+
+RUN chmod -R +x /env_config/ \
+    && dos2unix /env_config/forge-ros.sh \
+    && dos2unix /env_config/entrypoint.sh \
+    && dos2unix /env_config/backend.sh
+
+RUN bash /env_config/forge-ros.sh
+
+ENV LD_PRELOAD="" \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.txt /tmp/requirements.txt
+
+RUN /root/conda/envs/ros_env/bin/python -m pip install \
+        --upgrade pip setuptools wheel \
+    && /root/conda/envs/ros_env/bin/python -m pip install \
+        --no-cache-dir -r /tmp/requirements.txt \
+    && rm -f /tmp/requirements.txt
+
+RUN /env_config/backend.sh \
+    && cat /env_config/bashrc >> "${HOME}/.bashrc"
+
+ENTRYPOINT ["/bin/bash", "/env_config/entrypoint.sh"]

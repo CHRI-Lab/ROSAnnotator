@@ -168,6 +168,32 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 We are dedicated to maintaining this project by addressing bugs, refining functionality, and keeping the documentation up to date. We encourage users to fork the repository for custom development and welcome contributions through pull requests, which we will review thoughtfully and collaboratively.
 
+### Backend container images
+
+The backend container is split into two images so the GitHub-hosted CI runner
+does not reinstall the large ROS, CUDA, PyTorch, Whisper, and Pyannote runtime
+for every change:
+
+- `src/backend/Dockerfile.base` builds the GPU/ROS dependency image.
+- `src/backend/Dockerfile` adds only the Django application code.
+
+Rebuild and publish the base image only when `requirements.txt`,
+`Dockerfile.base`, or `env_config/` changes:
+
+```bash
+docker build \
+  --file src/backend/Dockerfile.base \
+  --tag ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v1 \
+  src/backend
+docker push ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v1
+```
+
+The base package must remain public so pull request workflows can read it
+without exposing registry credentials. Pull requests build both application
+images without publishing them. After a pull request is merged, the `main`
+workflow publishes commit-SHA-tagged frontend and backend application images
+to GHCR.
+
 ## Citation
 
 ROSAnnotator has been used in the following papers: (coming soon)
