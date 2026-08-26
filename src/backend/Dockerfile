@@ -1,45 +1,17 @@
-# ubuntu 20.04
-FROM ubuntu:focal
+# syntax=docker/dockerfile:1
 
-# Install dependencies
-RUN apt-get update \
-    && apt-get install -y wget dos2unix python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+# The large ROS/CUDA/PyTorch dependency layers are built separately and
+# published only when the base dependencies change.
+ARG BACKEND_BASE_IMAGE=ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v1@sha256:5e41f697df35b67f74f48c1fab6974df0388bd1fc6c9102e5515220ef4c80261
+FROM ${BACKEND_BASE_IMAGE}
 
-# Copy files for env setup and set the permission
-COPY env_config/ /env_config/
-RUN chmod -R +x /env_config/
-RUN dos2unix /env_config/forge-ros.sh
-RUN dos2unix /env_config/entrypoint.sh
-RUN dos2unix /env_config/backend.sh
-
-RUN ls -l /env_config/
-RUN cat /env_config/entrypoint.sh
-
-# Install ROS
-RUN bash /env_config/forge-ros.sh
-
-#Force ban LD_PRELOAD
-ENV LD_PRELOAD=
-
-
-# Install python dependencies
-ENV PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY requirements.txt requirements.txt
 
-# Install python dependencies
-RUN /root/conda/envs/ros_env/bin/python -m pip install \
-        --upgrade pip setuptools wheel \
-    && /root/conda/envs/ros_env/bin/python -m pip install \
-        --no-cache-dir -r requirements.txt
+# COPY --link keeps the application layer independent from the large base
+# layers, allowing BuildKit to rebase without downloading the full base image.
+COPY --link manage.py ./
+COPY --link ros_annotator/ ./ros_annotator/
+COPY --link rosbag_processing/ ./rosbag_processing/
+COPY --link public/ ./public/
 
-# Set the environment variables
-RUN /env_config/backend.sh
-
-# Add the bashrc file
-RUN cat /env_config/bashrc >> ${HOME}/.bashrc
-
-# Start the backend & ROS server
-ENTRYPOINT ["/bin/bash", "/env_config/entrypoint.sh"]
-CMD ["python3", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

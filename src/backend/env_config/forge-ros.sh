@@ -76,7 +76,7 @@ print_header "Installing additional packages..."
 conda install -n ros_env -y ipykernel --update-deps --force-reinstall
 rm -rf /root/conda/envs/ros_env/lib/python3.11/site-packages/cv2*
 rm -rf /root/conda/envs/ros_env/lib/python3.11/site-packages/opencv*
-pip3 install opencv-python-headless
+pip3 install opencv-python-headless==4.10.0.84
 print_success "Additional packages installed."
 
 mamba deactivate
