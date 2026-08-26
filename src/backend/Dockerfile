@@ -29,7 +29,10 @@ WORKDIR /app
 COPY requirements.txt requirements.txt
 
 # Install python dependencies
-RUN pip3 install -r requirements.txt
+RUN /root/conda/envs/ros_env/bin/python -m pip install \
+        --upgrade pip setuptools wheel \
+    && /root/conda/envs/ros_env/bin/python -m pip install \
+        --no-cache-dir -r requirements.txt
 
 # Set the environment variables
 RUN /env_config/backend.sh
