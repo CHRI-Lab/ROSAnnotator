@@ -109,13 +109,41 @@ jobs:
 
       - name: Build and publish backend application image
         if: github.event_name == 'push'
-        uses: docker/build-push-action@v6
-        with:
-          context: ./src/backend
-          file: ./src/backend/Dockerfile
-          push: true
-          tags: ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
-          provenance: false
+        shell: bash
+        env:
+          BASE_IMAGE: ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v1@sha256:5e41f697df35b67f74f48c1fab6974df0388bd1fc6c9102e5515220ef4c80261
+          TARGET_IMAGE: ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
+        run: |
+          tar \
+            --directory src/backend \
+            --transform='s,^,app/,' \
+            --create \
+            --file backend-app.tar \
+            manage.py ros_annotator rosbag_processing public
+
+          docker run --rm \
+            --volume "$HOME/.docker/config.json:/root/.docker/config.json:ro" \
+            --volume "$PWD:/workspace" \
+            --workdir /workspace \
+            gcr.io/go-containerregistry/crane:debug \
+            append \
+            --platform linux/amd64 \
+            --base "$BASE_IMAGE" \
+            --new_layer backend-app.tar \
+            --new_tag "$TARGET_IMAGE"
+
+          docker run --rm \
+            --volume "$HOME/.docker/config.json:/root/.docker/config.json:ro" \
+            gcr.io/go-containerregistry/crane:debug \
+            mutate \
+            --platform linux/amd64 \
+            "$TARGET_IMAGE" \
+            --workdir /app \
+            --cmd python \
+            --cmd manage.py \
+            --cmd runserver \
+            --cmd 0.0.0.0:8000 \
+            --tag "$TARGET_IMAGE"
 
   validation:
     name: All image builds successful
