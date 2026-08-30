@@ -143,8 +143,9 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
 
 
     model = whisper.load_model("base")
-    configure_huggingface_compatibility()
-    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=huggingface_auth_token)
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=huggingface_auth_token)
+    if huggingface_auth_token is None:
+        raise ValueError("Huggingface token not found in environment variables.")
     if model is None or pipeline is None:
         raise RuntimeError("Failed to load models.")
         

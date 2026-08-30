@@ -1,3 +1,99 @@
+import json
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from django.test import RequestFactory, SimpleTestCase
+
+from .ai_assistant import LocalAI, RemoteAPI
+
+
+class AIAssistantTests(SimpleTestCase):
+    def setUp(self):
+        self.contexts = {
+            "transcriptContext": "Speaker 1: Hello",
+            "frameContext": [f"frame-{index}" for index in range(101)],
+            "codebookContext": ["Greeting"],
+            "timelineContext": [{"axisId": 1, "axisName": "Topics"}],
+        }
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_remote_api_preserves_existing_gpt_request(self, openai_class):
+        response_message = '{"type":"instruction","steps":[]}'
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=response_message))]
+            )
+        )
+
+        assistant = RemoteAPI(APIKey="test-key", **self.contexts)
+        result = assistant.respond("Add an annotation", "previous history")
+
+        self.assertEqual(result, response_message)
+        self.assertEqual(assistant.APIKey, "test-key")
+        openai_class.assert_called_once_with(api_key="test-key")
+
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["model"], "gpt-4o")
+        self.assertIn("Speaker 1: Hello", request["messages"][1]["content"][0])
+        self.assertIn("Add an annotation", request["messages"][1]["content"][0])
+        self.assertIn("previous history", request["messages"][0]["content"])
+        self.assertIn("Greeting", request["messages"][0]["content"])
+        self.assertIn("Topics", request["messages"][0]["content"])
+
+        sent_frames = request["messages"][1]["content"][1:]
+        self.assertEqual(len(sent_frames), 50)
+        self.assertEqual(sent_frames[0], {"image": "frame-0"})
+        self.assertEqual(sent_frames[-1], {"image": "frame-98"})
+
+    def test_local_ai_is_a_black_box_with_checkpoint_path(self):
+        assistant = LocalAI(checkpointPath="/models/local", **self.contexts)
+
+        self.assertEqual(assistant.checkpointPath, "/models/local")
+        self.assertEqual(assistant.transcriptContext, "Speaker 1: Hello")
+        with self.assertRaises(NotImplementedError):
+            assistant.respond("Add an annotation")
+
+
+class GPTChatEndpointTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_endpoint_keeps_request_and_response_contract(self):
+        from . import views
+
+        views.gpt_history = ""
+        views.video_frames = ["frame-1"]
+        body = {
+            "message": "Add an annotation",
+            "audio_transcript": "Speaker 1: Hello",
+            "Axeinfo": [{"axisId": 1}],
+            "Codebook": ["Greeting"],
+        }
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(body),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "RemoteAPI") as remote_api:
+            remote_api.return_value.respond.return_value = "unchanged response"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content), {"response": "unchanged response"})
+        remote_api.assert_called_once_with(
+            transcriptContext="Speaker 1: Hello",
+            frameContext=["frame-1"],
+            codebookContext=["Greeting"],
+            timelineContext=[{"axisId": 1}],
+            APIKey=views.openai_api_key,
+        )
+        remote_api.return_value.respond.assert_called_once_with(
+            "Add an annotation", ""
+        )
+        self.assertEqual(
+            views.gpt_history, "Add an annotationunchanged response"
+        )
 import os
 import tempfile
 from unittest.mock import MagicMock, patch

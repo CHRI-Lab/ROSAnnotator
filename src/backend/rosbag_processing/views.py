@@ -9,9 +9,8 @@ from rest_framework import status
 from .serializers import BooklistSerializer, InputInspectionSerializer, TranscriptionRequestSerializer
 import csv
 from django.views.decorators.csrf import csrf_exempt
-import openai
-from openai import OpenAI
 from dotenv import load_dotenv
+from .ai_assistant import RemoteAPI
 
 load_dotenv()
 
@@ -210,100 +209,14 @@ def gpt_chat(request):
         if not audio_transcript:
             return JsonResponse({"error": "No audio transcript provided"}, status=400)
 
-        client = OpenAI(api_key=openai_api_key)
-
-        Axiinfo_str = json.dumps(Axiinfo, indent=2)
-
-
-        prompt = f"""
-        User want you based on the audio_transcript and video frames answer some qustion 
-        Now, based on this transcript and frames, answer the following question:
-
-        {message}
-        If the question not relative with audio and video, you dont need to watch the following data.
-        Here is the audio transcription:
-        {audio_transcript}
-        Here is the video frames
-        """
-
-        chat_completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": f"""
-                    You are an assistant that can manipulate timelines. Based on the audio transcript, here are the actions you can perform:
-                    
-                    1. Add a new `axi`: Method: `addAxi`, Parameters: `axisId` (integer),'axisName' (string),'axistype' (string).
-                    2. Add a new `block`: Method: `addBlock`, Parameters: `axisId` (integer), `start` (float), `end` (float), `text` (string).
-                    3. Delete a old 'block':Mthod:'deleteBlock', Parameters: `axisId` (integer), 'blockIndex' (integer).
-                    4. Delete a old 'axi':Mthod:'deleteAxi', Parameters: `axisId` (integer).
-                    When you need to perform multiple actions to complete the task, return the response in the following format:
-                    {{
-                      "type": "instruction",
-                      "steps": [
-                        {{
-                          "action": "addAxi",
-                          "parameters": 
-                          {{
-                            "axisId": 1,
-                            "axisName": Greeting
-                            "axistype": Topic annotate
-                            }}
-                        }},
-                        {{
-                          "action": "addBlock",
-                          "parameters": {{
-                            "axisId": 1,
-                            "start": 10,
-                            "end": 20,
-                            "text": "This is a new block"
-                          }}
-                        }}
-                        {{
-                          "action": "deleteBlock",
-                          "parameters": {{
-                            "axisId": 1,
-                            "blockIndex": 0
-                          }}
-                        }}
-                        {{
-                          "action": "deleteAxi",
-                          "parameters": {{
-                            "axisId": 1
-                          }}
-                        }}
-                      ]
-                    }}
-
-                    axis Name are normally the topic of this axi.
-                    Remove axi could remove all blocks in the axi.
-                    Axi type always equal "Type-in"
-                    Always create steps, even there only one step.
-                    The newest axi id will be current largest id+1.
-                    Overlap with other block in one axi will lead to error.
-                    If the response is a normal conversation, return the plain text as usual.
-                    Here is the current Axi information, you can consider axiId based on this:
-
-                    {Axiinfo_str}
-
-                    Here is the Codebook predefined by user:
-
-                    {Codebook}
-                    
-                    Here is previous chat history between you and user:
-
-                    {gpt_history}
-
-
-                    """,
-                    
-                },
-                {"role": "user", "content": [prompt,*map(lambda x: {"image": x}, video_frames[0::max(1, len(video_frames) // 50)][:50])]}
-            ],
+        assistant = RemoteAPI(
+            transcriptContext=audio_transcript,
+            frameContext=video_frames,
+            codebookContext=Codebook,
+            timelineContext=Axiinfo,
+            APIKey=openai_api_key,
         )
-        
-        response_text = chat_completion.choices[0].message.content
+        response_text = assistant.respond(message, gpt_history)
         gpt_history = gpt_history + message + response_text
         return JsonResponse({"response": response_text})
     
@@ -434,4 +347,3 @@ def get_annotation(request):
         return Response({'error': 'File not found'}, status=404)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
-
