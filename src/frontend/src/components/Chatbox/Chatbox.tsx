@@ -1,12 +1,22 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import Box from "@mui/material/Box";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
-import logo from "../../assets/rosannotator_logo.png";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-const Chatbox = ({ onSendMessage }) => {
+type ChatMessage = {
+  sender: "user" | "gpt";
+  text: string;
+};
+
+type ChatboxProps = {
+  onSendMessage: (message: string) => Promise<string>;
+};
+
+const Chatbox = ({ onSendMessage }: ChatboxProps) => {
   const [message, setMessage] = useState("");
-  const [chatHistory, setChatHistory] = useState([]);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
 
   const handleSendMessage = () => {
     if (message.trim() !== "") {
@@ -35,7 +45,59 @@ const Chatbox = ({ onSendMessage }) => {
       <Box flexGrow={1} overflow="auto" mb={2}>
         {chatHistory.map((msg, index) => (
           <Box key={index} mb={1} textAlign={msg.sender === "user" ? "right" : "left"}>
-            <strong>{msg.sender === "user" ? "You" : "ROSAnnotator"}:</strong> {msg.text}
+            <strong>{msg.sender === "user" ? "You" : "ROSAnnotator"}:</strong>
+            {msg.sender === "gpt" ? (
+              <Box
+                component="div"
+                sx={{
+                  overflowWrap: "anywhere",
+                  "& p": { my: 0.75 },
+                  "& p:first-of-type": { mt: 0 },
+                  "& p:last-child": { mb: 0 },
+                  "& ul, & ol": { my: 0.75, pl: 3 },
+                  "& li": { mb: 0.25 },
+                  "& pre": {
+                    overflowX: "auto",
+                    p: 1,
+                    borderRadius: 1,
+                    bgcolor: "action.hover",
+                    color: "text.primary",
+                  },
+                  "& code": {
+                    px: 0.5,
+                    borderRadius: 0.5,
+                    bgcolor: "action.hover",
+                  },
+                  "& pre code": { p: 0, bgcolor: "transparent" },
+                  "& blockquote": {
+                    my: 0.75,
+                    ml: 0,
+                    pl: 1.5,
+                    borderLeft: 3,
+                    borderColor: "grey.400",
+                    color: "text.secondary",
+                  },
+                  "& table": {
+                    width: "100%",
+                    my: 1,
+                    borderCollapse: "collapse",
+                  },
+                  "& th, & td": {
+                    p: 0.75,
+                    border: 1,
+                    borderColor: "divider",
+                    textAlign: "left",
+                  },
+                  "& a": { overflowWrap: "anywhere" },
+                }}
+              >
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {msg.text}
+                </ReactMarkdown>
+              </Box>
+            ) : (
+              <> {msg.text}</>
+            )}
           </Box>
         ))}
       </Box>

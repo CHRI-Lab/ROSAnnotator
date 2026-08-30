@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from django.test import RequestFactory, SimpleTestCase
 
-from .ai_assistant import LocalAI, RemoteAPI
+from .ai_assistant import AIAssistant, LocalAI, RemoteAPI
 
 
 class AIAssistantTests(SimpleTestCase):
@@ -52,6 +52,19 @@ class AIAssistantTests(SimpleTestCase):
         self.assertEqual(assistant.transcriptContext, "Speaker 1: Hello")
         with self.assertRaises(NotImplementedError):
             assistant.respond("Add an annotation")
+
+    def test_all_providers_use_parent_input_and_output_contract(self):
+        class ExampleAssistant(AIAssistant):
+            def _respond(self, message, chatHistory=""):
+                return f"{message}|{chatHistory}"
+
+        assistant = ExampleAssistant(**self.contexts)
+
+        self.assertEqual(
+            assistant.respond("new message", "existing history"),
+            "new message|existing history",
+        )
+        self.assertNotIn("respond", ExampleAssistant.__dict__)
 
 
 class GPTChatEndpointTests(SimpleTestCase):

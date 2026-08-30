@@ -5,7 +5,12 @@ from openai import OpenAI
 
 
 class AIAssistant(ABC):
-    """Common context required by an annotation AI assistant."""
+    """Common context and I/O contract for an annotation AI assistant.
+
+    Every provider receives the four annotation contexts at construction time.
+    Callers then pass a user message and the existing chat history to ``respond``.
+    Providers return the same raw response string used by the original GPT flow.
+    """
 
     def __init__(
         self,
@@ -19,9 +24,13 @@ class AIAssistant(ABC):
         self.codebookContext = codebookContext
         self.timelineContext = timelineContext
 
-    @abstractmethod
     def respond(self, message, chatHistory=""):
-        """Return the assistant's response text for a user message."""
+        """Return raw assistant text using the shared provider contract."""
+        return self._respond(message, chatHistory)
+
+    @abstractmethod
+    def _respond(self, message, chatHistory=""):
+        """Execute provider-specific inference and return raw response text."""
         raise NotImplementedError
 
 
@@ -44,7 +53,7 @@ class RemoteAPI(AIAssistant):
         )
         self.APIKey = APIKey
 
-    def respond(self, message, chatHistory=""):
+    def _respond(self, message, chatHistory=""):
         client = OpenAI(api_key=self.APIKey)
         timeline_context = json.dumps(self.timelineContext, indent=2)
 
@@ -168,7 +177,7 @@ class LocalAI(AIAssistant):
         )
         self.checkpointPath = checkpointPath
 
-    def respond(self, message, chatHistory=""):
+    def _respond(self, message, chatHistory=""):
         raise NotImplementedError(
             "LocalAI is a black box until a local model implementation is provided."
         )

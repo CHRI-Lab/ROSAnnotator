@@ -117,9 +117,11 @@ const Annotator = ({
             if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
               console.log("This is an instruction:", parsedObject);
               setInstruction(parsedObject);
-              
 
-              return responseString || "Done";
+              // Keep the model's machine-readable instruction internal. The
+              // Timeline executes it through the instruction state above,
+              // while the chat shows the concise confirmation used by the demo.
+              return "Done";
             }
           } catch (error) {
             console.error("Failed to parse JSON:", error);
