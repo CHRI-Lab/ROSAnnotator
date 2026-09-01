@@ -1,9 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
+import MenuItem from "@mui/material/MenuItem";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  ASSISTANT_CONTEXTS,
+  AssistantRouting,
+  AssistantTarget,
+  DEFAULT_ASSISTANT_ROUTING,
+  isAssistantRouting,
+} from "../../types/assistantRouting";
 
 type ChatMessage = {
   sender: "user" | "gpt";
@@ -11,20 +19,98 @@ type ChatMessage = {
 };
 
 type ChatboxProps = {
-  onSendMessage: (message: string) => Promise<string>;
+  onSendMessage: (
+    message: string,
+    assistantRouting: AssistantRouting,
+  ) => Promise<string>;
+};
+
+const ASSISTANT_ROUTING_STORAGE_KEY = "rosannotator-assistant-routing";
+
+const loadAssistantRouting = (): AssistantRouting | null => {
+  try {
+    const storedRouting = localStorage.getItem(ASSISTANT_ROUTING_STORAGE_KEY);
+    if (storedRouting) {
+      const parsedRouting: unknown = JSON.parse(storedRouting);
+      if (isAssistantRouting(parsedRouting)) {
+        return parsedRouting;
+      }
+    }
+  } catch {
+    // Ignore unavailable storage or invalid previous values and use the
+    // behavior-compatible remote default.
+  }
+
+  return null;
+};
+
+const upwardMenuProps = {
+  anchorOrigin: { vertical: "top", horizontal: "left" } as const,
+  transformOrigin: { vertical: "bottom", horizontal: "left" } as const,
 };
 
 const Chatbox = ({ onSendMessage }: ChatboxProps) => {
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [initialAssistantRouting] = useState(loadAssistantRouting);
+  const [assistantRouting, setAssistantRouting] = useState<AssistantRouting>(
+    initialAssistantRouting ?? DEFAULT_ASSISTANT_ROUTING,
+  );
+  const [hasAssistantSelection, setHasAssistantSelection] = useState(
+    initialAssistantRouting !== null,
+  );
+
+  useEffect(() => {
+    if (!hasAssistantSelection) {
+      return;
+    }
+
+    try {
+      localStorage.setItem(
+        ASSISTANT_ROUTING_STORAGE_KEY,
+        JSON.stringify(assistantRouting),
+      );
+    } catch {
+      // The in-memory selection still remains stable when storage is blocked.
+    }
+  }, [assistantRouting, hasAssistantSelection]);
+
+  const handleModeChange = (mode: AssistantRouting["mode"]) => {
+    setHasAssistantSelection(true);
+    setAssistantRouting((currentRouting) => ({
+      mode,
+      contextRoutes:
+        mode === "hybrid"
+          ? currentRouting.contextRoutes
+          : {
+              transcript: mode,
+              frames: mode,
+              codebook: mode,
+              timeline: mode,
+            },
+    }));
+  };
+
+  const handleContextRouteChange = (
+    context: keyof AssistantRouting["contextRoutes"],
+    target: AssistantTarget,
+  ) => {
+    setAssistantRouting((currentRouting) => ({
+      ...currentRouting,
+      contextRoutes: {
+        ...currentRouting.contextRoutes,
+        [context]: target,
+      },
+    }));
+  };
 
   const handleSendMessage = () => {
     if (message.trim() !== "") {
-      const newMessage = { sender: "user", text: message };
+      const newMessage: ChatMessage = { sender: "user", text: message };
       setChatHistory([...chatHistory, newMessage]);
 
-      onSendMessage(message).then((gptResponse) => {
-        const gptMessage = { sender: "gpt", text: gptResponse };
+      onSendMessage(message, assistantRouting).then((gptResponse) => {
+        const gptMessage: ChatMessage = { sender: "gpt", text: gptResponse };
         setChatHistory((prevChatHistory) => [...prevChatHistory, gptMessage]);
       });
 
@@ -102,7 +188,64 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
         ))}
       </Box>
 
-      <Box display="flex">
+      <Box mb={1}>
+        <TextField
+          select
+          size="small"
+          value={hasAssistantSelection ? assistantRouting.mode : ""}
+          onChange={(event) =>
+            handleModeChange(event.target.value as AssistantRouting["mode"])
+          }
+          SelectProps={{
+            MenuProps: upwardMenuProps,
+            displayEmpty: true,
+            renderValue: (selected) => {
+              if (!selected) {
+                return "AI Assistant";
+              }
+
+              return `${selected}`.charAt(0).toUpperCase() + `${selected}`.slice(1);
+            },
+          }}
+          inputProps={{ "aria-label": "AI Assistant" }}
+          sx={{ width: 128 }}
+        >
+          <MenuItem value="remote">Remote</MenuItem>
+          <MenuItem value="local">Local</MenuItem>
+          <MenuItem value="hybrid">Hybrid</MenuItem>
+        </TextField>
+      </Box>
+
+      {assistantRouting.mode === "hybrid" && (
+        <Box
+          display="grid"
+          gridTemplateColumns="repeat(2, minmax(0, 1fr))"
+          gap={1}
+          mb={1}
+        >
+          {ASSISTANT_CONTEXTS.map(({ key, label }) => (
+            <TextField
+              key={key}
+              select
+              size="small"
+              label={label}
+              value={assistantRouting.contextRoutes[key]}
+              onChange={(event) =>
+                handleContextRouteChange(
+                  key,
+                  event.target.value as AssistantTarget,
+                )
+              }
+              SelectProps={{ MenuProps: upwardMenuProps }}
+            >
+              <MenuItem value="local">Local</MenuItem>
+              <MenuItem value="remote">Remote</MenuItem>
+            </TextField>
+          ))}
+        </Box>
+      )}
+
+      <Box display="flex" gap={1}>
         <TextField
           value={message}
           onChange={(e) => setMessage(e.target.value)}
@@ -110,7 +253,7 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
           variant="outlined"
           placeholder="ROSAnnotator can help you annotate"
         />
-        <Button onClick={handleSendMessage} variant="contained" sx={{ ml: 1 }}>
+        <Button onClick={handleSendMessage} variant="contained">
           Send
         </Button>
       </Box>

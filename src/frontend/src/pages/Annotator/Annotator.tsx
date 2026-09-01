@@ -37,6 +37,7 @@ interface AnnotatorProps {
   autosaveEnabled?: boolean;
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
 }
+import { AssistantRouting } from "../../types/assistantRouting";
 
 const Annotator = ({
   rosBagFileName = "",
@@ -77,7 +78,10 @@ const Annotator = ({
     return updatedAxes;
   }, []);
 
-  const handleSendMessageToGPT = (message) => {
+  const handleSendMessageToGPT = (
+    message: string,
+    assistantRouting: AssistantRouting,
+  ) => {
     return fetch("http://localhost:8000/api/gpt_chat/", {
       method: "POST",
       headers: {
@@ -87,7 +91,9 @@ const Annotator = ({
         message: message, 
         audio_transcript: data.audio_transcript, 
         Axeinfo: axesData,
-        Codebook: bookList
+        Codebook: bookList,
+        assistant_mode: assistantRouting.mode,
+        context_routes: assistantRouting.contextRoutes,
       }),
     })
       .then((response) => {

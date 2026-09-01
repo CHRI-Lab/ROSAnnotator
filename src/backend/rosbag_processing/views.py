@@ -10,7 +10,7 @@ from .serializers import BooklistSerializer, InputInspectionSerializer, Transcri
 import csv
 from django.views.decorators.csrf import csrf_exempt
 from dotenv import load_dotenv
-from .ai_assistant import RemoteAPI
+from .ai_assistant import LocalAI, RemoteAPI
 
 load_dotenv()
 
@@ -202,21 +202,66 @@ def gpt_chat(request):
         audio_transcript = data.get("audio_transcript")
         Axiinfo = data.get("Axeinfo")
         Codebook = data.get("Codebook")
+        assistant_mode = data.get("assistant_mode", "remote")
+        context_routes = data.get("context_routes", {})
 
 
         if not message:
             return JsonResponse({"error": "No message provided"}, status=400)
         if not audio_transcript:
             return JsonResponse({"error": "No audio transcript provided"}, status=400)
+        if assistant_mode not in {"remote", "local", "hybrid"}:
+            return JsonResponse({"error": "Invalid assistant mode"}, status=400)
 
-        assistant = RemoteAPI(
-            transcriptContext=audio_transcript,
-            frameContext=video_frames,
-            codebookContext=Codebook,
-            timelineContext=Axiinfo,
-            APIKey=openai_api_key,
-        )
-        response_text = assistant.respond(message, gpt_history)
+        if assistant_mode == "hybrid":
+            required_contexts = {"transcript", "frames", "codebook", "timeline"}
+            if set(context_routes) != required_contexts or any(
+                target not in {"remote", "local"}
+                for target in context_routes.values()
+            ):
+                return JsonResponse(
+                    {"error": "Invalid hybrid context routes"}, status=400
+                )
+
+            # Do not silently send hybrid-selected data to the remote provider.
+            # The selection is ready for the future local/hybrid orchestrator.
+            return JsonResponse(
+                {
+                    "error": (
+                        "Hybrid AI routing is not available until the local "
+                        "model is implemented. No data was sent remotely."
+                    )
+                },
+                status=501,
+            )
+
+        common_context = {
+            "transcriptContext": audio_transcript,
+            "frameContext": video_frames,
+            "codebookContext": Codebook,
+            "timelineContext": Axiinfo,
+        }
+        if assistant_mode == "local":
+            assistant = LocalAI(
+                **common_context,
+                checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
+            )
+        else:
+            assistant = RemoteAPI(
+                **common_context,
+                APIKey=openai_api_key,
+            )
+
+        try:
+            response_text = assistant.respond(message, gpt_history)
+        except NotImplementedError as error:
+            return JsonResponse(
+                {
+                    "error": f"{error} No data was sent remotely.",
+                },
+                status=501,
+            )
+
         gpt_history = gpt_history + message + response_text
         return JsonResponse({"response": response_text})
     
