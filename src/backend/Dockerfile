@@ -5,6 +5,16 @@
 ARG BACKEND_BASE_IMAGE=ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v2@sha256:d3f12b214ef323eddc24f86a3e2c65148572c0ea45b47e453f14d23cda750c10
 FROM ${BACKEND_BASE_IMAGE}
 
+# Keep the existing published base image compatible with the versions tested
+# with ROSAnnotator. These pins should also be included in the next base image.
+RUN /root/conda/envs/ros_env/bin/python -m pip install \
+    --no-cache-dir \
+    "huggingface_hub==0.24.6" \
+    "speechbrain==1.0.0" \
+    "torch==2.5.1" \
+    "torchvision==0.20.1" \
+    "torchaudio==2.5.1"
+
 WORKDIR /app
 
 # COPY --link keeps the application layer independent from the large base
