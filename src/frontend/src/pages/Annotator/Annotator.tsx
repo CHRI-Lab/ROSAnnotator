@@ -38,6 +38,7 @@ interface AnnotatorProps {
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
 }
 import { AssistantRouting } from "../../types/assistantRouting";
+import { AssistantMode, AssistantRouting } from "../../types/assistantRouting";
 
 const Annotator = ({
   rosBagFileName = "",
@@ -96,16 +97,22 @@ const Annotator = ({
         context_routes: assistantRouting.contextRoutes,
       }),
     })
-      .then((response) => {
+      .then(async (response) => {
+        const responseData = await response.json().catch(() => ({}));
         if (!response.ok) {
-          return response.text().then((text) => {
-            throw new Error(`Error ${response.status}: ${text}`);
-          });
+          const error = new Error(
+            responseData.error || "The AI assistant could not complete the request.",
+          ) as Error & { assistantMode?: AssistantMode };
+          error.assistantMode =
+            responseData.assistant_mode ?? assistantRouting.mode;
+          throw error;
         }
-        return response.json();
+        return responseData;
       })
       .then((data) => {
         const responseString = data.response;
+        const assistantMode =
+          (data.assistant_mode as AssistantMode) ?? assistantRouting.mode;
   
 
         const jsonStartIndex = responseString.indexOf("{");
@@ -127,19 +134,25 @@ const Annotator = ({
               // Keep the model's machine-readable instruction internal. The
               // Timeline executes it through the instruction state above,
               // while the chat shows the concise confirmation used by the demo.
-              return "Done";
+              return { text: "Done", assistantMode };
             }
           } catch (error) {
             console.error("Failed to parse JSON:", error);
-            return normalMessage; 
+            return { text: normalMessage, assistantMode };
           }
-        } else {
-          return responseString;
+
+          return { text: normalMessage || responseString, assistantMode };
         }
+
+        return { text: responseString, assistantMode };
       })
       .catch((error) => {
         console.error("Error in GPT API call:", error);
-        return `Error: ${error.message}`;
+        return {
+          text: error.message || "The AI assistant could not complete the request.",
+          assistantMode: error.assistantMode ?? assistantRouting.mode,
+          isError: true,
+        };
       });
   };
   

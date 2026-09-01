@@ -7,6 +7,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ASSISTANT_CONTEXTS,
+  AssistantMode,
   AssistantRouting,
   AssistantTarget,
   DEFAULT_ASSISTANT_ROUTING,
@@ -16,13 +17,19 @@ import {
 type ChatMessage = {
   sender: "user" | "gpt";
   text: string;
+  assistantMode?: AssistantMode;
+  isError?: boolean;
 };
 
 type ChatboxProps = {
   onSendMessage: (
     message: string,
     assistantRouting: AssistantRouting,
-  ) => Promise<string>;
+  ) => Promise<{
+    text: string;
+    assistantMode: AssistantMode;
+    isError?: boolean;
+  }>;
 };
 
 const ASSISTANT_ROUTING_STORAGE_KEY = "rosannotator-assistant-routing";
@@ -47,6 +54,11 @@ const loadAssistantRouting = (): AssistantRouting | null => {
 const upwardMenuProps = {
   anchorOrigin: { vertical: "top", horizontal: "left" } as const,
   transformOrigin: { vertical: "bottom", horizontal: "left" } as const,
+};
+
+const formatAssistantMode = (mode: AssistantMode | undefined) => {
+  const value = mode ?? "remote";
+  return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
 const Chatbox = ({ onSendMessage }: ChatboxProps) => {
@@ -109,8 +121,13 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
       const newMessage: ChatMessage = { sender: "user", text: message };
       setChatHistory([...chatHistory, newMessage]);
 
-      onSendMessage(message, assistantRouting).then((gptResponse) => {
-        const gptMessage: ChatMessage = { sender: "gpt", text: gptResponse };
+      onSendMessage(message, assistantRouting).then((assistantResponse) => {
+        const gptMessage: ChatMessage = {
+          sender: "gpt",
+          text: assistantResponse.text,
+          assistantMode: assistantResponse.assistantMode,
+          isError: assistantResponse.isError,
+        };
         setChatHistory((prevChatHistory) => [...prevChatHistory, gptMessage]);
       });
 
@@ -130,8 +147,37 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
     >
       <Box flexGrow={1} overflow="auto" mb={2}>
         {chatHistory.map((msg, index) => (
-          <Box key={index} mb={1} textAlign={msg.sender === "user" ? "right" : "left"}>
-            <strong>{msg.sender === "user" ? "You" : "ROSAnnotator"}:</strong>
+          <Box
+            key={index}
+            mb={1.5}
+            display="flex"
+            justifyContent={msg.sender === "user" ? "flex-end" : "flex-start"}
+          >
+            <Box
+              sx={{
+                maxWidth: "85%",
+                px: 1.5,
+                py: 1,
+                borderRadius: 2,
+                bgcolor:
+                  msg.sender === "user"
+                    ? "primary.main"
+                    : msg.isError
+                      ? "error.dark"
+                      : "action.hover",
+                color:
+                  msg.sender === "user"
+                    ? "primary.contrastText"
+                    : msg.isError
+                      ? "error.contrastText"
+                      : "text.primary",
+              }}
+            >
+            {msg.sender === "gpt" && (
+              <Box component="div" sx={{ fontWeight: 700, mb: 0.5 }}>
+                {`ROSAnnotator (${formatAssistantMode(msg.assistantMode)})`}
+              </Box>
+            )}
             {msg.sender === "gpt" ? (
               <Box
                 component="div"
@@ -182,8 +228,9 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
                 </ReactMarkdown>
               </Box>
             ) : (
-              <> {msg.text}</>
+              <>{msg.text}</>
             )}
+            </Box>
           </Box>
         ))}
       </Box>

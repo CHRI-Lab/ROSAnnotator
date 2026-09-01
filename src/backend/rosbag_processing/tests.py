@@ -4,7 +4,12 @@ from unittest.mock import patch
 
 from django.test import RequestFactory, SimpleTestCase
 
-from .ai_assistant import AIAssistant, LocalAI, RemoteAPI
+from .ai_assistant import (
+    AIAssistant,
+    LocalAI,
+    RemoteAPI,
+    RemoteAuthenticationError,
+)
 
 
 class AIAssistantTests(SimpleTestCase):
@@ -88,18 +93,23 @@ class GPTChatEndpointTests(SimpleTestCase):
             content_type="application/json",
         )
 
-        with patch.object(views, "RemoteAPI") as remote_api:
+        with patch.object(views, "openai_api_key", "test-key"), patch.object(
+            views, "RemoteAPI"
+        ) as remote_api:
             remote_api.return_value.respond.return_value = "unchanged response"
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(json.loads(response.content), {"response": "unchanged response"})
+        self.assertEqual(
+            json.loads(response.content),
+            {"response": "unchanged response", "assistant_mode": "remote"},
+        )
         remote_api.assert_called_once_with(
             transcriptContext="Speaker 1: Hello",
             frameContext=["frame-1"],
             codebookContext=["Greeting"],
             timelineContext=[{"axisId": 1}],
-            APIKey=views.openai_api_key,
+            APIKey="test-key",
         )
         remote_api.return_value.respond.assert_called_once_with(
             "Add an annotation", ""
@@ -393,6 +403,97 @@ class ChunkApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data, {'error': 'Unable to process chunk.'})
 
+    def test_missing_remote_key_falls_back_to_local(self):
+        from . import views
+
+        views.gpt_history = ""
+        views.video_frames = ["frame-1"]
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Add an annotation",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "Axeinfo": [],
+                    "Codebook": [],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", None), patch.object(
+            views, "RemoteAPI"
+        ) as remote_api, patch.object(views, "LocalAI") as local_ai:
+            local_ai.return_value.respond.return_value = "local response"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            json.loads(response.content),
+            {"response": "local response", "assistant_mode": "local"},
+        )
+        remote_api.assert_not_called()
+        local_ai.return_value.respond.assert_called_once_with("Add an annotation", "")
+
+    def test_invalid_remote_key_falls_back_to_local(self):
+        from . import views
+
+        views.gpt_history = ""
+        views.video_frames = ["frame-1"]
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Add an annotation",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "Axeinfo": [],
+                    "Codebook": [],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", "invalid-key"), patch.object(
+            views, "RemoteAPI"
+        ) as remote_api, patch.object(views, "LocalAI") as local_ai:
+            remote_api.return_value.respond.side_effect = RemoteAuthenticationError()
+            local_ai.return_value.respond.return_value = "local response"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            json.loads(response.content),
+            {"response": "local response", "assistant_mode": "local"},
+        )
+        local_ai.return_value.respond.assert_called_once_with("Add an annotation", "")
+
+    def test_unavailable_remote_and_local_returns_clear_error(self):
+        from . import views
+
+        views.gpt_history = ""
+        views.video_frames = ["frame-1"]
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Add an annotation",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "Axeinfo": [],
+                    "Codebook": [],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", None), patch.object(
+            views, "LocalAI"
+        ) as local_ai:
+            local_ai.return_value.respond.side_effect = NotImplementedError()
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("local language model", response.content.decode())
+
     def test_local_mode_never_calls_remote_api(self):
         from . import views
 
@@ -422,7 +523,7 @@ class ChunkApiTests(SimpleTestCase):
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 501)
-        self.assertIn("No data was sent remotely", response.content.decode())
+        self.assertIn("local language model is not connected", response.content.decode())
         remote_api.assert_not_called()
 
     def test_hybrid_mode_never_calls_remote_until_orchestrator_exists(self):
@@ -454,5 +555,5 @@ class ChunkApiTests(SimpleTestCase):
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 501)
-        self.assertIn("No data was sent remotely", response.content.decode())
+        self.assertIn("Hybrid mode requires", response.content.decode())
         remote_api.assert_not_called()

@@ -1,7 +1,11 @@
 from abc import ABC, abstractmethod
 import json
 
-from openai import OpenAI
+from openai import AuthenticationError, OpenAI
+
+
+class RemoteAuthenticationError(RuntimeError):
+    """The remote provider rejected its configured credentials."""
 
 
 class AIAssistant(ABC):
@@ -54,6 +58,12 @@ class RemoteAPI(AIAssistant):
         self.APIKey = APIKey
 
     def _respond(self, message, chatHistory=""):
+        try:
+            return self._request_completion(message, chatHistory)
+        except AuthenticationError as error:
+            raise RemoteAuthenticationError from error
+
+    def _request_completion(self, message, chatHistory=""):
         client = OpenAI(api_key=self.APIKey)
         timeline_context = json.dumps(self.timelineContext, indent=2)
 

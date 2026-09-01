@@ -10,11 +10,12 @@ from .serializers import BooklistSerializer, InputInspectionSerializer, Transcri
 import csv
 from django.views.decorators.csrf import csrf_exempt
 from dotenv import load_dotenv
-from .ai_assistant import LocalAI, RemoteAPI
+from .ai_assistant import LocalAI, RemoteAPI, RemoteAuthenticationError
 
 load_dotenv()
 
 gpt_history = ""
+video_frames = []
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 ROSBAG_DATA_DIR = '/app/datas/rosbag-data/'
@@ -49,6 +50,36 @@ def inspect_input(request):
         'duration_minutes': round(duration_seconds / 60, 3),
         'supports_chunking': duration_seconds > 0,
     })
+
+
+class AssistantUnavailableError(RuntimeError):
+    """Neither the requested remote provider nor local fallback can respond."""
+
+
+def respond_with_remote_fallback(common_context, message, chat_history):
+    """Use RemoteAI when configured, falling back to LocalAI on auth failure."""
+    if openai_api_key:
+        remote_assistant = RemoteAPI(
+            **common_context,
+            APIKey=openai_api_key,
+        )
+        try:
+            return remote_assistant.respond(message, chat_history), "remote"
+        except RemoteAuthenticationError:
+            pass
+
+    local_assistant = LocalAI(
+        **common_context,
+        checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
+    )
+    try:
+        return local_assistant.respond(message, chat_history), "local"
+    except NotImplementedError as error:
+        raise AssistantUnavailableError(
+            "The remote model is unavailable, and the local language model "
+            "is not connected yet. Switch to Remote after adding a valid "
+            "OpenAI API key."
+        ) from error
 
 
 @api_view(['POST'])
@@ -227,10 +258,8 @@ def gpt_chat(request):
             # The selection is ready for the future local/hybrid orchestrator.
             return JsonResponse(
                 {
-                    "error": (
-                        "Hybrid AI routing is not available until the local "
-                        "model is implemented. No data was sent remotely."
-                    )
+                    "error": "Hybrid mode requires an available local model.",
+                    "assistant_mode": "hybrid",
                 },
                 status=501,
             )
@@ -246,24 +275,33 @@ def gpt_chat(request):
                 **common_context,
                 checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
             )
+            try:
+                response_text = assistant.respond(message, gpt_history)
+            except NotImplementedError:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "The local language model is not connected yet. "
+                            "Switch to Remote and use a valid OpenAI API key."
+                        ),
+                        "assistant_mode": "local",
+                    },
+                    status=501,
+                )
         else:
-            assistant = RemoteAPI(
-                **common_context,
-                APIKey=openai_api_key,
-            )
-
-        try:
-            response_text = assistant.respond(message, gpt_history)
-        except NotImplementedError as error:
-            return JsonResponse(
-                {
-                    "error": f"{error} No data was sent remotely.",
-                },
-                status=501,
-            )
+            try:
+                response_text, assistant_mode = respond_with_remote_fallback(
+                    common_context, message, gpt_history
+                )
+            except AssistantUnavailableError as error:
+                return JsonResponse(
+                    {"error": str(error), "assistant_mode": "local"}, status=503
+                )
 
         gpt_history = gpt_history + message + response_text
-        return JsonResponse({"response": response_text})
+        return JsonResponse(
+            {"response": response_text, "assistant_mode": assistant_mode}
+        )
     
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
