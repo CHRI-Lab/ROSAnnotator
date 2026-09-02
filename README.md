@@ -39,10 +39,22 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    The code has been tested by this combination: Ubuntu 20.04 LTS, ROS Noetic, Python 3.9, Chrome version:130.0.6723.117.
    
-3. **Prerequisites - Docker Installation**
+2. **Prerequisites - Docker Installation**
 
    - Before you begin, ensure that you have Docker installed on your machine. If not, download and install Docker from [Docker's official site](https://www.docker.com/get-started).
    - Verify that the **Docker daemon** is running by executing `docker info` in your terminal. This should return information about the Docker client and server. If not, please start the Docker daemon.
+
+3. **Configure Environment Variables**
+
+   Create `.env` in the **repository root**, next to `docker-compose.yml`:
+
+   ```dotenv
+   OPENAI_API_KEY=your_openai_api_key
+   HUGGINGFACE_AUTH_TOKEN=your_huggingface_read_token
+   ```
+
+   Do not commit this file. For gated Pyannote models, the Hugging Face account
+   associated with the token must have accepted the model terms.
 
 4. **Starting the Server**
 
@@ -51,42 +63,47 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    Run the following commands in the root directory of the project:
 
    ```bash
-   docker compose up --build
+   docker compose up --build -d
+   docker compose ps
    ```
 
    > _Note: The total image size is about 20 GB, so it may take a while for the first time to download and build the image. The speed depends on your computational resources and internet connection._
 
-   To stop the docker container:
+   Open <http://localhost:5173/> after both services report `Up`. To follow the
+   application logs:
+
+   ```bash
+   docker compose logs -f
+   ```
+
+   To stop the containers:
 
    ```bash
    docker compose down
    ```
 
-   To start the docker container again:
+   To start the existing containers again:
 
    ```bash
-   docker compose up
+   docker compose up -d
    ```
 
-   The `/datas` folder will be automatically generated after building the container. For Linux users, please check whether all users have read and write permission to this folder. If not, please run this command:
+   The `datas` folder is created automatically. If it is owned by root on
+   Linux, assign it to the current user:
 
    ```bash
-   sudo chmod -R 777 datas
+   sudo chown -R "$(id -u):$(id -g)" datas
    ```
 
-5. **Environment**
-
-    The application requires OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in the root path of **backend** and manually place two variables, **OPENAI_API_KEY** and **HUGGINGFACE_AUTH_TOKEN**, inside. Please restart the container after changing the .env file.
-
-6. **Access the Application**
+5. **Access the Application**
 
    Both the front end and the back end are hosted locally in a Docker container. Once the server is up and running, you can access the [web app](http://localhost:5173/) at `http://localhost:5173/`.
 
-7. **Sample Data**
+6. **Sample Data**
 
    We provided a sample ROSBag and a sample codebook in the folder `/data-samples`. The codebook needs to be in JSON format and put in the `/datas/booklist` folder. Please put the .bag file in the `/datas/rosbag-data` folder.
 
-8. **Customised Data**
+7. **Customised Data**
 
    The topics for video and audio data must be configured to match the corresponding topics in the ROSBag. In the sample ROSBag, the topic for video is `/xtion/rgb/image_raw_throttled`, and the topic for audio is `/audio`. Topic names can be modified in the `/src/backend/rosbag_processing/data_utils.py` file. If additional message types need to be extracted, they should also be defined within this file.
 
@@ -168,6 +185,85 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 We are dedicated to maintaining this project by addressing bugs, refining functionality, and keeping the documentation up to date. We encourage users to fork the repository for custom development and welcome contributions through pull requests, which we will review thoughtfully and collaboratively.
 
+### Manual deployment from GHCR
+
+Merging a pull request into `main` publishes frontend and backend images tagged
+with the full merge commit SHA. Deployment to a customer-managed server is
+currently manual; no workflow connects to or modifies the target server.
+
+The target Linux server needs Docker Engine and Docker Compose. A GPU deployment
+also needs a compatible NVIDIA driver and NVIDIA Container Toolkit. Create a
+deployment directory containing `.env` and `docker-compose.prod.yml`.
+
+Use the SHA of the exact `main` commit that was tested and approved:
+
+```dotenv
+RELEASE_SHA=0eb993440d93a28cd49de4417765846cc5d70416
+OPENAI_API_KEY=your_openai_api_key
+HUGGINGFACE_AUTH_TOKEN=your_huggingface_read_token
+```
+
+Do not commit this file. Create `docker-compose.prod.yml` as follows:
+
+```yaml
+services:
+  backend:
+    image: ghcr.io/samw314/hri-sim-group6-backend:sha-${RELEASE_SHA}
+    env_file:
+      - .env
+    gpus: all
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./datas/rosbag-data:/app/datas/rosbag-data
+      - ./datas/booklist:/app/datas/booklist
+      - ./datas/annotation:/app/datas/annotation
+      - ./datas/processed:/app/processed_data
+
+  frontend:
+    image: ghcr.io/samw314/hri-sim-group6-frontend:sha-${RELEASE_SHA}
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./datas/processed:/app/public/processed
+    depends_on:
+      - backend
+```
+
+If the application packages are private, authenticate with a classic personal
+access token that has only `read:packages` access:
+
+```bash
+docker login ghcr.io
+```
+
+Pull and start the pinned release:
+
+```bash
+mkdir -p datas/rosbag-data datas/booklist datas/annotation datas/processed
+docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml up -d
+docker compose --env-file .env -f docker-compose.prod.yml ps
+docker compose --env-file .env -f docker-compose.prod.yml logs -f
+```
+
+To deploy an update, replace `RELEASE_SHA` with the new tested `main` commit SHA
+and run `pull` followed by `up -d` again. To roll back, restore the previous SHA
+and run the same two commands. Never deploy an unqualified or moving tag when a
+commit-SHA tag is available.
+
+> **Current production limitation:** the frontend source calls
+> `http://localhost:8000` directly, and both images run development servers
+> (`npm start` and Django `runserver`). A browser on another computer interprets
+> `localhost` as that computer, not the deployment server. Before exposing this
+> deployment to customers, configure a deployable API base URL or reverse proxy,
+> serve the built frontend with a production web server, run Django through a
+> production WSGI server, and enable HTTPS. The Compose example above is suitable
+> for controlled validation on the server or through local port forwarding, not
+> yet for an Internet-facing production service.
+
 ### Backend container images
 
 The backend container is split into two images so the GitHub-hosted CI runner
@@ -177,15 +273,37 @@ for every change:
 - `src/backend/Dockerfile.base` builds the GPU/ROS dependency image.
 - `src/backend/Dockerfile` adds only the Django application code.
 
-Rebuild and publish the base image only when `requirements.txt`,
-`Dockerfile.base`, or `env_config/` changes:
+The normal `docker compose up --build` command downloads the base image pinned
+in `src/backend/Dockerfile`; it does not reinstall `requirements.txt`. Rebuild
+and publish the base image whenever `requirements.txt`, `Dockerfile.base`, or
+`env_config/` changes:
 
 ```bash
-docker build \
+docker buildx build \
+  --platform linux/amd64 \
   --file src/backend/Dockerfile.base \
   --tag ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v1 \
+  --push \
   src/backend
-docker push ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v1
+
+docker buildx imagetools inspect \
+  ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v1
+```
+
+Copy the resulting `sha256:...` digest into `BACKEND_BASE_IMAGE` in
+`src/backend/Dockerfile` and the matching base-image references in
+`.github/workflows/build-validation.yml`. Pinning the digest ensures local and
+CI builds use exactly the same dependency image.
+
+The currently tested audio-model dependency set is:
+
+```text
+huggingface_hub==0.24.6
+speechbrain==1.0.0
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1
+pyannote.audio==3.4.0
 ```
 
 The base package must remain public so pull request workflows can read it
