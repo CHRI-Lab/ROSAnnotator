@@ -2,7 +2,8 @@ from .data_utils import *
 import json
 import os
 from django.http import JsonResponse
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import uuid4
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -50,6 +51,7 @@ def inspect_input(request):
         'duration_minutes': round(duration_seconds / 60, 3),
         'supports_chunking': duration_seconds > 0,
     })
+ANNOTATION_PATH = "/app/datas/annotation/"
 
 
 class AssistantUnavailableError(RuntimeError):
@@ -64,7 +66,11 @@ def respond_with_remote_fallback(common_context, message, chat_history):
             APIKey=openai_api_key,
         )
         try:
-            return remote_assistant.respond(message, chat_history), "remote"
+            return (
+                remote_assistant.respond(message, chat_history),
+                "remote",
+                remote_assistant,
+            )
         except RemoteAuthenticationError:
             pass
 
@@ -73,13 +79,70 @@ def respond_with_remote_fallback(common_context, message, chat_history):
         checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
     )
     try:
-        return local_assistant.respond(message, chat_history), "local"
+        return (
+            local_assistant.respond(message, chat_history),
+            "local",
+            local_assistant,
+        )
     except NotImplementedError as error:
         raise AssistantUnavailableError(
             "The remote model is unavailable, and the local language model "
             "is not connected yet. Switch to Remote after adding a valid "
             "OpenAI API key."
         ) from error
+
+
+def build_ai_record(
+    assistant,
+    requested_mode,
+    actual_mode,
+    response_text,
+    context_routes,
+):
+    """Build a secret-free record of one successful model interaction."""
+    provider_metadata = assistant.get_run_metadata()
+    if not isinstance(provider_metadata, dict):
+        provider_metadata = {}
+
+    return {
+        "schema_version": 1,
+        "run_id": str(uuid4()),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "model_selection": {
+            "requested": requested_mode,
+            "used": actual_mode,
+            "context_routes": context_routes,
+        },
+        "model": provider_metadata.get("model", {
+            "provider": actual_mode,
+            "requested": None,
+            "resolved": None,
+        }),
+        "parameters": provider_metadata.get("parameters", {}),
+        "prompts": provider_metadata.get("prompts", {}),
+        "ai_response": response_text,
+    }
+
+
+def ai_records_file_path(annotation_name):
+    return os.path.join(ANNOTATION_PATH, f"ai_records_{annotation_name}.json")
+
+
+def load_ai_records(annotation_filename):
+    annotation_name = (
+        annotation_filename[:-4]
+        if annotation_filename.endswith(".csv")
+        else annotation_filename
+    )
+    file_path = ai_records_file_path(annotation_name)
+    if not os.path.exists(file_path):
+        return []
+
+    with open(file_path, "r") as record_file:
+        payload = json.load(record_file)
+    if isinstance(payload, dict):
+        return payload.get("ai_runs", [])
+    return payload if isinstance(payload, list) else []
 
 
 @api_view(['POST'])
@@ -123,6 +186,7 @@ def process_rosbag(request):
         booklist_data = {}
 
     annotation_data = None
+    ai_records = []
     if annotation_filename:
         annotation_path = os.path.join('/app/datas/annotation/', annotation_filename)
         if not os.path.exists(annotation_path):
@@ -130,6 +194,7 @@ def process_rosbag(request):
         
         try:
             annotation_data = load_annotation(annotation_filename)
+            ai_records = load_ai_records(annotation_filename)
         except Exception as e:
             return Response({'error': f'Error loading annotation data: {str(e)}'}, status=500)
 
@@ -168,6 +233,7 @@ def process_rosbag(request):
             'audio_transcript': transcript,
             'booklist_data': booklist_data,
             'annotation_data': annotation_data,
+            'ai_records': ai_records,
             'message': 'File already processed'
         })
     
@@ -216,6 +282,7 @@ def process_rosbag(request):
             'audio_transcript': transcript,
             'booklist_data': booklist_data,
             'annotation_data': annotation_data,
+            'ai_records': ai_records,
             'speaker_data': speaker_data,
             'message': 'Processing complete'
         })
@@ -235,6 +302,15 @@ def gpt_chat(request):
         Codebook = data.get("Codebook")
         assistant_mode = data.get("assistant_mode", "remote")
         context_routes = data.get("context_routes", {})
+        fallback_consent = data.get("fallback_consent")
+        requested_mode = assistant_mode
+        if (
+            isinstance(fallback_consent, dict)
+            and fallback_consent.get("from") == "local"
+            and fallback_consent.get("to") == "remote"
+            and fallback_consent.get("user_consented") is True
+        ):
+            requested_mode = "local"
 
 
         if not message:
@@ -296,17 +372,30 @@ def gpt_chat(request):
                 )
         else:
             try:
-                response_text, assistant_mode = respond_with_remote_fallback(
-                    common_context, message, gpt_history
-                )
+                (
+                    response_text,
+                    assistant_mode,
+                    assistant,
+                ) = respond_with_remote_fallback(common_context, message, gpt_history)
             except AssistantUnavailableError as error:
                 return JsonResponse(
                     {"error": str(error), "assistant_mode": "local"}, status=503
                 )
 
         gpt_history = gpt_history + message + response_text
+        ai_record = build_ai_record(
+            assistant=assistant,
+            requested_mode=requested_mode,
+            actual_mode=assistant_mode,
+            response_text=response_text,
+            context_routes=context_routes,
+        )
         return JsonResponse(
-            {"response": response_text, "assistant_mode": assistant_mode}
+            {
+                "response": response_text,
+                "assistant_mode": assistant_mode,
+                "ai_record": ai_record,
+            }
         )
     
     except Exception as e:
@@ -386,6 +475,10 @@ def save_annotation(request):
     if request.method == 'POST':
         annotation_name = request.data.get('annotation_name')
         annotation_data = request.data.get('annotation_data')
+        ai_records = request.data.get('ai_records', [])
+
+        if not isinstance(ai_records, list):
+            return JsonResponse({'error': 'Invalid AI records format'}, status=400)
 
         try:
             annotation_list_str = json.dumps(annotation_data)
@@ -394,8 +487,8 @@ def save_annotation(request):
             return JsonResponse({'error': 'Invalid JSON format'}, status=400)
 
         # Save annotation data to a new CSV file
-        annotation_path = '/app/datas/annotation/'
-        file_path = os.path.join(annotation_path, f'{annotation_name}.csv')
+        os.makedirs(ANNOTATION_PATH, exist_ok=True)
+        file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
 
         try:
             with open(file_path, 'w', newline='') as csvfile:
@@ -415,7 +508,21 @@ def save_annotation(request):
                             'text': block['text']
                         })
 
-            return JsonResponse({'message': 'Annotation data saved successfully'}, status=200)
+            with open(ai_records_file_path(annotation_name), 'w') as record_file:
+                json.dump(
+                    {
+                        'schema_version': 1,
+                        'annotation_name': annotation_name,
+                        'ai_runs': ai_records,
+                    },
+                    record_file,
+                    indent=2,
+                )
+
+            return JsonResponse(
+                {'message': 'Annotation data and AI records saved successfully'},
+                status=200,
+            )
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
     else:

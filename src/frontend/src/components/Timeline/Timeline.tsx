@@ -29,6 +29,7 @@ import {
   deleteAutosave,
   AutosaveScope,
 } from "../Autosave/autosaveUtils";
+import { AIInstruction, AIRecord } from "../../types/aiRecords";
 
 let globalAxisId = 1;
 
@@ -47,8 +48,104 @@ interface TimelineProps {
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
   switchingChunk?: boolean;
   onAxesUpdate: (axes: any) => void;
-  instruction: any;
+  instruction: AIInstruction | null;
+  aiRecords: AIRecord[];
 }
+
+type TimelineBlock = {
+  start: number;
+  end: number;
+  text?: string;
+};
+
+type TimelineAxis = {
+  id: number;
+  type: string;
+  axisName?: string;
+  typeName?: string;
+  shortcutKey?: string;
+  blocks: TimelineBlock[];
+};
+
+const cloneAxes = (axes: TimelineAxis[]) =>
+  JSON.parse(JSON.stringify(axes)) as TimelineAxis[];
+
+const applyAIInstruction = (
+  currentAxes: TimelineAxis[],
+  instruction: AIInstruction,
+) => {
+  const nextAxes = cloneAxes(currentAxes);
+  instruction.steps.forEach((step) => {
+    const parameters = step.parameters ?? {};
+    const axisId = Number(parameters.axisId);
+
+    if (step.action === "addAxi") {
+      if (!Number.isFinite(axisId) || nextAxes.some((axis) => axis.id === axisId)) {
+        return;
+      }
+      nextAxes.push({
+        id: axisId,
+        type: "Type-in",
+        axisName: String(parameters.axisName || `Axis ${axisId}`),
+        blocks: [],
+        typeName: "",
+        shortcutKey: "",
+      });
+      return;
+    }
+
+    const axisIndex = nextAxes.findIndex((axis) => axis.id === axisId);
+    if (step.action === "addBlock") {
+      if (axisIndex === -1) {
+        return;
+      }
+      const block = {
+        start: Number(parameters.start),
+        end: Number(parameters.end),
+        text: String(parameters.text ?? ""),
+      };
+      if (
+        !Number.isFinite(block.start) ||
+        !Number.isFinite(block.end) ||
+        block.end < block.start
+      ) {
+        return;
+      }
+      const overlaps = nextAxes[axisIndex].blocks.some(
+        (existingBlock) =>
+          block.start <= existingBlock.end && block.end >= existingBlock.start,
+      );
+      if (overlaps) {
+        return;
+      }
+      nextAxes[axisIndex].blocks.push(block);
+      return;
+    }
+
+    if (step.action === "deleteBlock") {
+      const blockIndex = Number(parameters.blockIndex);
+      if (
+        axisIndex === -1 ||
+        !Number.isInteger(blockIndex) ||
+        blockIndex < 0 ||
+        blockIndex >= nextAxes[axisIndex].blocks.length
+      ) {
+        return;
+      }
+      nextAxes[axisIndex].blocks.splice(blockIndex, 1);
+      return;
+    }
+
+    if (step.action === "deleteAxi") {
+      if (axisIndex === -1) {
+        return;
+      }
+      nextAxes.splice(axisIndex, 1);
+    }
+  });
+
+  return nextAxes;
+};
 
 const MainContainer = styled(Paper)(({ theme }) => ({
   display: "flex",
@@ -116,6 +213,7 @@ const Timeline: React.FC<TimelineProps> = ({
   autosaveScope,
   onAutosaveReady,
   switchingChunk = false,
+  aiRecords,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
@@ -126,6 +224,8 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState("");
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
+  const lastExecutedInstruction = useRef<AIInstruction | null>(null);
+
   const { axes, setAxes } = useContext(AxesContext)!;
 
   // SAVE FUNCTIONALITY
@@ -166,10 +266,11 @@ const Timeline: React.FC<TimelineProps> = ({
   }, [restoredAxes, markSynced]);
 
   useEffect(() => {
-    if (instruction) {
-      handleExecuteInstruction(instruction);
+    if (instruction && lastExecutedInstruction.current !== instruction) {
+      lastExecutedInstruction.current = instruction;
+      setAxes((currentAxes) => applyAIInstruction(currentAxes, instruction));
     }
-  }, [instruction]);
+  }, [instruction, setAxes]);
 
   useEffect(() => {
     if (onAxesUpdate) {
@@ -321,6 +422,24 @@ const Timeline: React.FC<TimelineProps> = ({
     setSeekTime(played);
   }, [played]);
 
+  // Save data through API
+  const handleSaveData = async () => {
+    const data = collectData();
+    console.log(JSON.stringify(data));
+    try {
+      const response = await fetch("http://localhost:8000/api/save_annotation/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          annotation_name: `${rosBagFileName}+${
+            bookListFileName ? bookListFileName : "noBookList"
+          }`,
+          annotation_data: data,
+          ai_records: aiRecords,
+        }),
+      });
 
   // Prompts user for annotation file name, with prefilled defined filename set.
   const handleOpenSaveDialog = () => {

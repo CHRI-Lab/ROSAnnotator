@@ -23,6 +23,16 @@ import { AxesProvider } from "../../components/AxesProvider/AxesContext";
 import StatisticsAnnotation from "../../components/StatisticsAnnotation";
 import StatisticsTier from "../../components/StatisticsTier";
 import type { ChunkManifest } from "../../api/chunks";
+import {
+  AssistantMode,
+  AssistantReply,
+  AssistantRouting,
+} from "../../types/assistantRouting";
+import {
+  AIInstruction,
+  AIRecord,
+  AssistantRequestOptions,
+} from "../../types/aiRecords";
 
 interface AnnotatorProps {
   rosBagFileName?: string;
@@ -37,8 +47,6 @@ interface AnnotatorProps {
   autosaveEnabled?: boolean;
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
 }
-import { AssistantRouting } from "../../types/assistantRouting";
-import { AssistantMode, AssistantRouting } from "../../types/assistantRouting";
 
 const Annotator = ({
   rosBagFileName = "",
@@ -60,15 +68,31 @@ const Annotator = ({
   const [bookList, setBookList] = useState(bookListData);
   const [selectedTab, setSelectedTab] = useState(0);
   const [axesData, setAxesData] = useState([]);
-  const [instruction, setInstruction] = useState(null);
+  const [instruction, setInstruction] = useState<AIInstruction | null>(null);
+  const [aiRecords, setAIRecords] = useState<AIRecord[]>(data.ai_records ?? []);
   useEffect(() => {
     if (bookListData) {
       setBookList(bookListData);
     } else {
       setBookList([]);
     }
+    setAIRecords(data.ai_records ?? []);
   }, [data, bookListData]);
-  
+
+  const upsertAIRecord = (record: AIRecord) => {
+    setAIRecords((currentRecords) => {
+      const existingIndex = currentRecords.findIndex(
+        (currentRecord) => currentRecord.run_id === record.run_id,
+      );
+      if (existingIndex === -1) {
+        return [...currentRecords, record];
+      }
+
+      return currentRecords.map((currentRecord, index) =>
+        index === existingIndex ? record : currentRecord,
+      );
+    });
+  };
 
   const handleTabChange = (_event, newValue) => {
     setSelectedTab(newValue);
@@ -82,6 +106,7 @@ const Annotator = ({
   const handleSendMessageToGPT = (
     message: string,
     assistantRouting: AssistantRouting,
+    options?: AssistantRequestOptions,
   ) => {
     return fetch("http://localhost:8000/api/gpt_chat/", {
       method: "POST",
@@ -95,6 +120,13 @@ const Annotator = ({
         Codebook: bookList,
         assistant_mode: assistantRouting.mode,
         context_routes: assistantRouting.contextRoutes,
+        fallback_consent: options?.fallbackConsent
+          ? {
+              from: options.fallbackConsent.from,
+              to: options.fallbackConsent.to,
+              user_consented: options.fallbackConsent.userConsented,
+            }
+          : undefined,
       }),
     })
       .then(async (response) => {
@@ -117,7 +149,10 @@ const Annotator = ({
         const responseString = data.response;
         const assistantMode =
           (data.assistant_mode as AssistantMode) ?? assistantRouting.mode;
-  
+        const aiRecord = data.ai_record as AIRecord | undefined;
+        if (aiRecord) {
+          upsertAIRecord(aiRecord);
+        }
 
         const jsonStartIndex = responseString.indexOf("{");
         const jsonEndIndex = responseString.lastIndexOf("}");
@@ -133,22 +168,27 @@ const Annotator = ({
   
             if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
               console.log("This is an instruction:", parsedObject);
-              setInstruction(parsedObject);
+              const parsedInstruction = parsedObject as AIInstruction;
+              setInstruction(parsedInstruction);
 
               // Keep the model's machine-readable instruction internal. The
               // Timeline executes it through the instruction state above,
               // while the chat shows the concise confirmation used by the demo.
-              return { text: "Done", assistantMode };
+              return { text: "Done", assistantMode, aiRecord };
             }
           } catch (error) {
             console.error("Failed to parse JSON:", error);
-            return { text: normalMessage, assistantMode };
+            return { text: normalMessage, assistantMode, aiRecord };
           }
 
-          return { text: normalMessage || responseString, assistantMode };
+          return {
+            text: normalMessage || responseString,
+            assistantMode,
+            aiRecord,
+          };
         }
 
-        return { text: responseString, assistantMode };
+        return { text: responseString, assistantMode, aiRecord };
       })
       .catch((error) => {
         console.error("Error in GPT API call:", error);
@@ -388,6 +428,7 @@ const Annotator = ({
               } : undefined}
               onAutosaveReady={onAutosaveReady}
               switchingChunk={switchingChunk}
+              aiRecords={aiRecords}
             />
           </Box>
         </Box>

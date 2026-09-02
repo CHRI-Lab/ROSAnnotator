@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -39,16 +41,39 @@ class AIAssistantTests(SimpleTestCase):
 
         request = openai_class.return_value.chat.completions.create.call_args.kwargs
         self.assertEqual(request["model"], "gpt-4o")
-        self.assertIn("Speaker 1: Hello", request["messages"][1]["content"][0])
-        self.assertIn("Add an annotation", request["messages"][1]["content"][0])
+        text_content = request["messages"][1]["content"][0]
+        self.assertEqual(text_content["type"], "text")
+        self.assertIn("Speaker 1: Hello", text_content["text"])
+        self.assertIn("Add an annotation", text_content["text"])
         self.assertIn("previous history", request["messages"][0]["content"])
         self.assertIn("Greeting", request["messages"][0]["content"])
         self.assertIn("Topics", request["messages"][0]["content"])
 
         sent_frames = request["messages"][1]["content"][1:]
         self.assertEqual(len(sent_frames), 50)
-        self.assertEqual(sent_frames[0], {"image": "frame-0"})
-        self.assertEqual(sent_frames[-1], {"image": "frame-98"})
+        self.assertEqual(
+            sent_frames[0],
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": "data:image/jpeg;base64,frame-0",
+                    "detail": "low",
+                },
+            },
+        )
+        self.assertEqual(
+            sent_frames[-1],
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": "data:image/jpeg;base64,frame-98",
+                    "detail": "low",
+                },
+            },
+        )
+        metadata = assistant.get_run_metadata()
+        self.assertEqual(metadata["model"]["requested"], "gpt-4o")
+        self.assertEqual(metadata["prompts"]["user"], "Add an annotation")
 
     def test_local_ai_is_a_black_box_with_checkpoint_path(self):
         assistant = LocalAI(checkpointPath="/models/local", **self.contexts)
@@ -100,10 +125,11 @@ class GPTChatEndpointTests(SimpleTestCase):
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            json.loads(response.content),
-            {"response": "unchanged response", "assistant_mode": "remote"},
-        )
+        response_data = json.loads(response.content)
+        self.assertEqual(response_data["response"], "unchanged response")
+        self.assertEqual(response_data["assistant_mode"], "remote")
+        self.assertEqual(response_data["ai_record"]["model_selection"]["used"], "remote")
+        self.assertEqual(response_data["ai_record"]["ai_response"], "unchanged response")
         remote_api.assert_called_once_with(
             transcriptContext="Speaker 1: Hello",
             frameContext=["frame-1"],
@@ -428,10 +454,10 @@ class ChunkApiTests(SimpleTestCase):
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            json.loads(response.content),
-            {"response": "local response", "assistant_mode": "local"},
-        )
+        response_data = json.loads(response.content)
+        self.assertEqual(response_data["response"], "local response")
+        self.assertEqual(response_data["assistant_mode"], "local")
+        self.assertEqual(response_data["ai_record"]["model_selection"]["used"], "local")
         remote_api.assert_not_called()
         local_ai.return_value.respond.assert_called_once_with("Add an annotation", "")
 
@@ -461,10 +487,10 @@ class ChunkApiTests(SimpleTestCase):
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            json.loads(response.content),
-            {"response": "local response", "assistant_mode": "local"},
-        )
+        response_data = json.loads(response.content)
+        self.assertEqual(response_data["response"], "local response")
+        self.assertEqual(response_data["assistant_mode"], "local")
+        self.assertEqual(response_data["ai_record"]["model_selection"]["used"], "local")
         local_ai.return_value.respond.assert_called_once_with("Add an annotation", "")
 
     def test_unavailable_remote_and_local_returns_clear_error(self):
@@ -493,6 +519,46 @@ class ChunkApiTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertIn("local language model", response.content.decode())
+
+    def test_consented_local_to_remote_fallback_is_recorded(self):
+        from . import views
+
+        views.gpt_history = ""
+        views.video_frames = ["frame-1"]
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Use remote with permission",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "Axeinfo": [],
+                    "Codebook": [],
+                    "assistant_mode": "remote",
+                    "context_routes": {
+                        "transcript": "remote",
+                        "frames": "remote",
+                        "codebook": "remote",
+                        "timeline": "remote",
+                    },
+                    "fallback_consent": {
+                        "from": "local",
+                        "to": "remote",
+                        "user_consented": True,
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", "test-key"), patch.object(
+            views, "RemoteAPI"
+        ) as remote_api:
+            remote_api.return_value.respond.return_value = "remote response"
+            response = views.gpt_chat(request)
+
+        record = json.loads(response.content)["ai_record"]
+        self.assertEqual(record["model_selection"]["requested"], "local")
+        self.assertEqual(record["model_selection"]["used"], "remote")
 
     def test_local_mode_never_calls_remote_api(self):
         from . import views
@@ -591,3 +657,49 @@ class ChunkApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 501)
         self.assertIn("Hybrid mode requires", response.content.decode())
         remote_api.assert_not_called()
+
+
+class AIRecordPersistenceTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_save_annotation_writes_named_ai_records_sidecar(self):
+        from . import views
+
+        ai_record = {
+            "schema_version": 1,
+            "run_id": "run-1",
+            "ai_response": "Done",
+        }
+        request = self.factory.post(
+            "/api/save_annotation/",
+            data=json.dumps(
+                {
+                    "annotation_name": "recording.bag+booklist.json",
+                    "annotation_data": [],
+                    "ai_records": [ai_record],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with TemporaryDirectory() as temp_directory, patch.object(
+            views, "ANNOTATION_PATH", temp_directory
+        ):
+            response = views.save_annotation(request)
+            sidecar_path = Path(temp_directory) / (
+                "ai_records_recording.bag+booklist.json.json"
+            )
+            saved_payload = json.loads(sidecar_path.read_text())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(saved_payload["schema_version"], 1)
+        self.assertEqual(saved_payload["ai_runs"], [ai_record])
+
+    def test_load_ai_records_is_backward_compatible_without_sidecar(self):
+        from . import views
+
+        with TemporaryDirectory() as temp_directory, patch.object(
+            views, "ANNOTATION_PATH", temp_directory
+        ):
+            self.assertEqual(views.load_ai_records("old-annotation.csv"), [])

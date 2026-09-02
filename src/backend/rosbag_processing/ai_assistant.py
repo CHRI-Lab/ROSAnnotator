@@ -27,10 +27,15 @@ class AIAssistant(ABC):
         self.frameContext = frameContext
         self.codebookContext = codebookContext
         self.timelineContext = timelineContext
+        self.last_run_metadata = {}
 
     def respond(self, message, chatHistory=""):
         """Return raw assistant text using the shared provider contract."""
         return self._respond(message, chatHistory)
+
+    def get_run_metadata(self):
+        """Return safe provider metadata for the most recent response."""
+        return self.last_run_metadata
 
     @abstractmethod
     def _respond(self, message, chatHistory=""):
@@ -66,6 +71,9 @@ class RemoteAPI(AIAssistant):
     def _request_completion(self, message, chatHistory=""):
         client = OpenAI(api_key=self.APIKey)
         timeline_context = json.dumps(self.timelineContext, indent=2)
+        selected_frames = self.frameContext[
+            0::max(1, len(self.frameContext) // 50)
+        ][:50]
 
         prompt = f"""
         User want you based on the audio_transcript and video frames answer some qustion 
@@ -78,12 +86,7 @@ class RemoteAPI(AIAssistant):
         Here is the video frames
         """
 
-        chat_completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": f"""
+        system_prompt = f"""
                     You are an assistant that can manipulate timelines. Based on the audio transcript, here are the actions you can perform:
                     
                     1. Add a new `axi`: Method: `addAxi`, Parameters: `axisId` (integer),'axisName' (string),'axistype' (string).
@@ -148,24 +151,50 @@ class RemoteAPI(AIAssistant):
                     {chatHistory}
 
 
-                    """,
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        prompt,
-                        *map(
-                            lambda frame: {"image": frame},
-                            self.frameContext[
-                                0::max(1, len(self.frameContext) // 50)
-                            ][:50],
-                        ),
-                    ],
-                },
-            ],
-        )
+                    """
+        request_parameters = {"model": "gpt-4o"}
+        messages = [
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    *map(
+                        lambda frame: {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{frame}",
+                                "detail": "low",
+                            },
+                        },
+                        selected_frames,
+                    ),
+                ],
+            },
+        ]
 
-        return chat_completion.choices[0].message.content
+        chat_completion = client.chat.completions.create(
+            **request_parameters,
+            messages=messages,
+        )
+        response_text = chat_completion.choices[0].message.content
+        self.last_run_metadata = {
+            "model": {
+                "provider": "openai",
+                "requested": request_parameters["model"],
+                "resolved": getattr(chat_completion, "model", None),
+            },
+            "parameters": request_parameters,
+            "prompts": {
+                "system": system_prompt,
+                "user": message,
+            },
+        }
+
+        return response_text
 
 
 class LocalAI(AIAssistant):

@@ -10,6 +10,7 @@ import DialogTitle from "@mui/material/DialogTitle";
 import MenuItem from "@mui/material/MenuItem";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { AssistantRequestOptions } from "../../types/aiRecords";
 import {
   ASSISTANT_CONTEXTS,
   AssistantMode,
@@ -31,6 +32,7 @@ type ChatboxProps = {
   onSendMessage: (
     message: string,
     assistantRouting: AssistantRouting,
+    options?: AssistantRequestOptions,
   ) => Promise<AssistantReply>;
 };
 
@@ -170,7 +172,13 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
     setPendingRemoteFallback(null);
     setHasAssistantSelection(true);
     setAssistantRouting(remoteRouting);
-    onSendMessage(fallbackMessage, remoteRouting).then((assistantResponse) => {
+    onSendMessage(fallbackMessage, remoteRouting, {
+      fallbackConsent: {
+        from: "local",
+        to: "remote",
+        userConsented: true,
+      },
+    }).then((assistantResponse) => {
       setChatHistory((history) => [
         ...history,
         {

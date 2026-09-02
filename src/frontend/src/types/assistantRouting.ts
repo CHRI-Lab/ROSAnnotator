@@ -1,3 +1,5 @@
+import { AIRecord } from "./aiRecords";
+
 export type AssistantMode = "remote" | "local" | "hybrid";
 export type AssistantTarget = "remote" | "local";
 
@@ -18,6 +20,7 @@ export type AssistantReply = {
   assistantMode: AssistantMode;
   isError?: boolean;
   canFallbackToRemote?: boolean;
+  aiRecord?: AIRecord;
 };
 
 export const ASSISTANT_CONTEXTS: Array<{
