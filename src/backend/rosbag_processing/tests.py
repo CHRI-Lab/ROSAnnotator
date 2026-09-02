@@ -519,12 +519,46 @@ class ChunkApiTests(SimpleTestCase):
             content_type="application/json",
         )
 
-        with patch.object(views, "RemoteAPI") as remote_api:
+        with patch.object(views, "openai_api_key", "test-key"), patch.object(
+            views, "RemoteAPI"
+        ) as remote_api:
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 501)
         self.assertIn("local language model is not connected", response.content.decode())
+        self.assertTrue(json.loads(response.content)["can_fallback_to_remote"])
         remote_api.assert_not_called()
+
+    def test_local_mode_does_not_offer_remote_without_api_key(self):
+        from . import views
+
+        views.gpt_history = ""
+        views.video_frames = ["frame-1"]
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Keep this local",
+                    "audio_transcript": "Sensitive transcript",
+                    "Axeinfo": [],
+                    "Codebook": [],
+                    "assistant_mode": "local",
+                    "context_routes": {
+                        "transcript": "local",
+                        "frames": "local",
+                        "codebook": "local",
+                        "timeline": "local",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", None):
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 501)
+        self.assertFalse(json.loads(response.content)["can_fallback_to_remote"])
 
     def test_hybrid_mode_never_calls_remote_until_orchestrator_exists(self):
         from . import views

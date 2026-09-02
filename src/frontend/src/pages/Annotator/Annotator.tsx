@@ -102,9 +102,13 @@ const Annotator = ({
         if (!response.ok) {
           const error = new Error(
             responseData.error || "The AI assistant could not complete the request.",
-          ) as Error & { assistantMode?: AssistantMode };
+          ) as Error & {
+            assistantMode?: AssistantMode;
+            canFallbackToRemote?: boolean;
+          };
           error.assistantMode =
             responseData.assistant_mode ?? assistantRouting.mode;
+          error.canFallbackToRemote = responseData.can_fallback_to_remote;
           throw error;
         }
         return responseData;
@@ -152,7 +156,8 @@ const Annotator = ({
           text: error.message || "The AI assistant could not complete the request.",
           assistantMode: error.assistantMode ?? assistantRouting.mode,
           isError: true,
-        };
+          canFallbackToRemote: error.canFallbackToRemote,
+        } as AssistantReply;
       });
   };
   

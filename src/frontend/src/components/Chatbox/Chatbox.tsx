@@ -2,12 +2,18 @@ import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import TextField from "@mui/material/TextField";
 import Button from "@mui/material/Button";
+import Dialog from "@mui/material/Dialog";
+import DialogActions from "@mui/material/DialogActions";
+import DialogContent from "@mui/material/DialogContent";
+import DialogContentText from "@mui/material/DialogContentText";
+import DialogTitle from "@mui/material/DialogTitle";
 import MenuItem from "@mui/material/MenuItem";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ASSISTANT_CONTEXTS,
   AssistantMode,
+  AssistantReply,
   AssistantRouting,
   AssistantTarget,
   DEFAULT_ASSISTANT_ROUTING,
@@ -25,11 +31,11 @@ type ChatboxProps = {
   onSendMessage: (
     message: string,
     assistantRouting: AssistantRouting,
-  ) => Promise<{
-    text: string;
-    assistantMode: AssistantMode;
-    isError?: boolean;
-  }>;
+  ) => Promise<AssistantReply>;
+};
+
+type PendingRemoteFallback = {
+  message: string;
 };
 
 const ASSISTANT_ROUTING_STORAGE_KEY = "rosannotator-assistant-routing";
@@ -71,6 +77,8 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
   const [hasAssistantSelection, setHasAssistantSelection] = useState(
     initialAssistantRouting !== null,
   );
+  const [pendingRemoteFallback, setPendingRemoteFallback] =
+    useState<PendingRemoteFallback | null>(null);
 
   useEffect(() => {
     if (!hasAssistantSelection) {
@@ -118,10 +126,18 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
 
   const handleSendMessage = () => {
     if (message.trim() !== "") {
+      const submittedMessage = message;
       const newMessage: ChatMessage = { sender: "user", text: message };
       setChatHistory([...chatHistory, newMessage]);
 
-      onSendMessage(message, assistantRouting).then((assistantResponse) => {
+      onSendMessage(submittedMessage, assistantRouting).then((assistantResponse) => {
+        if (assistantResponse.canFallbackToRemote) {
+          setPendingRemoteFallback({
+            message: submittedMessage,
+          });
+          return;
+        }
+
         const gptMessage: ChatMessage = {
           sender: "gpt",
           text: assistantResponse.text,
@@ -135,6 +151,55 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
     }
   };
 
+  const handleRemoteFallback = () => {
+    if (!pendingRemoteFallback) {
+      return;
+    }
+
+    const remoteRouting: AssistantRouting = {
+      mode: "remote",
+      contextRoutes: {
+        transcript: "remote",
+        frames: "remote",
+        codebook: "remote",
+        timeline: "remote",
+      },
+    };
+    const fallbackMessage = pendingRemoteFallback.message;
+
+    setPendingRemoteFallback(null);
+    setHasAssistantSelection(true);
+    setAssistantRouting(remoteRouting);
+    onSendMessage(fallbackMessage, remoteRouting).then((assistantResponse) => {
+      setChatHistory((history) => [
+        ...history,
+        {
+          sender: "gpt",
+          text: assistantResponse.text,
+          assistantMode: assistantResponse.assistantMode,
+          isError: assistantResponse.isError,
+        },
+      ]);
+    });
+  };
+
+  const handleDeclineRemoteFallback = () => {
+    if (!pendingRemoteFallback) {
+      return;
+    }
+
+    setChatHistory((history) => [
+      ...history,
+      {
+        sender: "gpt",
+        text: "The local model is unavailable.",
+        assistantMode: "local",
+        isError: true,
+      },
+    ]);
+    setPendingRemoteFallback(null);
+  };
+
   return (
     <Box
       display="flex"
@@ -145,6 +210,25 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
       overflow="auto"
       height="100%"
     >
+      <Dialog
+        open={pendingRemoteFallback !== null}
+        onClose={handleDeclineRemoteFallback}
+      >
+        <DialogTitle>Switch to Remote?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            The local language model is not connected. Continuing with Remote
+            will send the current transcript, video frames, codebook, and
+            timeline context to OpenAI.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeclineRemoteFallback}>Stay Local</Button>
+          <Button onClick={handleRemoteFallback} variant="contained" autoFocus>
+            Switch to Remote
+          </Button>
+        </DialogActions>
+      </Dialog>
       <Box flexGrow={1} overflow="auto" mb={2}>
         {chatHistory.map((msg, index) => (
           <Box

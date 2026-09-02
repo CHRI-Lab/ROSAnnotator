@@ -278,13 +278,19 @@ def gpt_chat(request):
             try:
                 response_text = assistant.respond(message, gpt_history)
             except NotImplementedError:
+                remote_configured = bool(openai_api_key)
                 return JsonResponse(
                     {
                         "error": (
                             "The local language model is not connected yet. "
-                            "Switch to Remote and use a valid OpenAI API key."
+                            + (
+                                "Would you like to switch to Remote?"
+                                if remote_configured
+                                else "Configure a valid OpenAI API key to use Remote."
+                            )
                         ),
                         "assistant_mode": "local",
+                        "can_fallback_to_remote": remote_configured,
                     },
                     status=501,
                 )

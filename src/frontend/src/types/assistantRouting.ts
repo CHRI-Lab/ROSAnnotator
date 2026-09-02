@@ -13,6 +13,13 @@ export type AssistantRouting = {
   contextRoutes: AssistantContextRoutes;
 };
 
+export type AssistantReply = {
+  text: string;
+  assistantMode: AssistantMode;
+  isError?: boolean;
+  canFallbackToRemote?: boolean;
+};
+
 export const ASSISTANT_CONTEXTS: Array<{
   key: keyof AssistantContextRoutes;
   label: string;
