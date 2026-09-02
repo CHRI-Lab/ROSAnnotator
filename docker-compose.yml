@@ -4,6 +4,8 @@ services:
   backend:
     build:
       context: ./src/backend # Path backend Dockerfile
+    env_file:
+      - .env
     volumes:
       - ./src/backend:/app
       - ./datas/rosbag-data:/app/datas/rosbag-data
