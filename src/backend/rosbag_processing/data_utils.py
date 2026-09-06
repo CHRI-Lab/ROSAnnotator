@@ -25,6 +25,17 @@ load_dotenv()
 
 huggingface_auth_token = os.getenv("HUGGINGFACE_AUTH_TOKEN")
 
+def get_rosbag_duration(bag_filename):
+    """Return the ROSBag duration in seconds without processing its messages."""
+    bag = Bag(bag_filename, 'r')
+    try:
+        start_time = bag.get_start_time()
+        end_time = bag.get_end_time()
+    finally:
+        bag.close()
+
+    return max(0.0, end_time - start_time)
+
 def extract_images_from_rosbag(bag_filename, output_folder):
     bag = Bag(bag_filename, 'r')
     bridge = CvBridge()

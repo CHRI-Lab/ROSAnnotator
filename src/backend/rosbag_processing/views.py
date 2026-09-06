@@ -6,7 +6,7 @@ from datetime import datetime
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .serializers import BooklistSerializer, TranscriptionRequestSerializer
+from .serializers import BooklistSerializer, InputInspectionSerializer, TranscriptionRequestSerializer
 import csv
 from django.views.decorators.csrf import csrf_exempt
 import openai
@@ -18,6 +18,38 @@ load_dotenv()
 gpt_history = ""
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
+ROSBAG_DATA_DIR = '/app/datas/rosbag-data/'
+
+
+@api_view(['POST'])
+def inspect_input(request):
+    """Return ROSBag duration before the user chooses a chunking strategy."""
+    serializer = InputInspectionSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    bag_filename = serializer.validated_data['bag_filename']
+    bag_filepath = os.path.join(ROSBAG_DATA_DIR, bag_filename)
+    if not os.path.isfile(bag_filepath):
+        return Response(
+            {'error': 'ROSBag file not found.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    try:
+        duration_seconds = round(get_rosbag_duration(bag_filepath), 3)
+    except Exception as exc:
+        return Response(
+            {'error': f'Unable to read ROSBag duration: {str(exc)}'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return Response({
+        'bag_filename': bag_filename,
+        'duration_seconds': duration_seconds,
+        'duration_minutes': round(duration_seconds / 60, 3),
+        'supports_chunking': duration_seconds > 0,
+    })
 
 
 @api_view(['POST'])
