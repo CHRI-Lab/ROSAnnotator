@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogContentText,
   Typography,
+  TextField,
 } from "@mui/material";
 import { styled } from "@mui/system";
 import Axis from "../Axis";
@@ -18,7 +19,6 @@ import AxisManager from "../AxisManager";
 import AxesContext from "../AxesProvider";
 
 let globalAxisId = 1;
-
 
 interface TimelineProps {
   rosBagFileName: string;
@@ -104,8 +104,10 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState("");
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
-
   const { axes, setAxes } = useContext(AxesContext)!;
+  
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false); // flag controlling whether the "name your annotation" popup is currently visible
+  const [annotationName, setAnnotationName] = useState(""); //container for annotation name text
 
   useEffect(() => {
     if (instruction) {
@@ -257,33 +259,67 @@ const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => {
     setSeekTime(played);
   }, [played]);
+  
+  //strips file ext from filename string (recording.bag -> recording)
+  const stripExtension = (filename: string) => filename.replace(/\.[^/.]+$/, ""); 
 
-  // Save data through API
-  const handleSaveData = async () => {
+  // Prompts user for annotation file name, with prefilled defined filename set.
+  const handleOpenSaveDialog = () => {
+  // Pre-fill with the existing auto-generated name as a sensible default
+  const defaultName = `${stripExtension(rosBagFileName)}+${bookListFileName ? stripExtension(bookListFileName) : "noBookList"}`;
+  setAnnotationName(defaultName);
+  setIsSaveDialogOpen(true);
+  };
+
+  // Checks if the given annotation name is sensible. 
+  // Checks if name is empty, or contains any invalid characters
+  // returns reason for invalid name for error handling
+  const isValidAnnotationName = (name: string): { valid: boolean; reason?: string } => {
+    const trimmed = name.trim();
+
+    if (!trimmed) {
+      return { valid: false, reason: "Name cannot be empty." };
+    }
+
+    if (/[\\/:*?"<>|]/.test(trimmed)) {
+      return { valid: false, reason: 'Name cannot contain any of: \\ / : * ? " < > |' };
+    }
+
+    if (/^\.+$/.test(trimmed)) {
+      return { valid: false, reason: "Name cannot consist of only dots." };
+    }
+
+    return { valid: true };
+  };
+
+  // ensures sensible name is provided by user (no whitespace, no invalid characters), 
+  // before gathering current annotation state via collectData() and sending it to backend.
+  const handleConfirmSave = async () => {
+    const validation = isValidAnnotationName(annotationName);
+    if (!validation.valid) {
+      setError(validation.reason || "Invalid name.");
+      setIsErrorDialogOpen(true);
+      return;
+    }
+
+    setIsSaveDialogOpen(false); // close the naming dialog
     const data = collectData();
-    console.log(JSON.stringify(data));
+
     try {
       const response = await fetch("http://localhost:8000/api/save_annotation/", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          annotation_name: `${rosBagFileName}+${
-            bookListFileName ? bookListFileName : "noBookList"
-          }`,
+          annotation_name: annotationName, // now uses the user's chosen name
           annotation_data: data,
         }),
       });
 
       if (!response.ok) {
         switch (response.status) {
-          case 500:
-            throw new Error("Internal server error");
-          case 400:
-            throw new Error("Invalid JSON format");
-          case 405:
-            throw new Error("Method not allowed");
+          case 500: throw new Error("Internal server error");
+          case 400: throw new Error("Invalid JSON format");
+          case 405: throw new Error("Method not allowed");
         }
       } else {
         alert("Data saved successfully.");
@@ -567,8 +603,29 @@ const Timeline: React.FC<TimelineProps> = ({
           <Button onClick={() => setIsErrorDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+    <Dialog open={isSaveDialogOpen} onClose={() => setIsSaveDialogOpen(false)}>
+      <DialogTitle>Name Your Annotation</DialogTitle>
+      <DialogContent>
+        <DialogContentText>
+          Enter a name to save this annotation under. You can reuse this name later to overwrite it, or choose a new one to save a separate version.
+        </DialogContentText>
+        <TextField
+          autoFocus
+          margin="dense"
+          label="Annotation Name"
+          fullWidth
+          variant="outlined"
+          value={annotationName}
+          onChange={(e) => setAnnotationName(e.target.value)}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setIsSaveDialogOpen(false)}>Cancel</Button>
+        <Button onClick={handleConfirmSave} variant="contained">Save</Button>
+      </DialogActions>
+    </Dialog>
       <ControlsContainer>
-        <Button onClick={handleSaveData} variant="contained">
+        <Button onClick={handleOpenSaveDialog} variant="contained">
           Save and Send Data
         </Button>
         <Button onClick={handleAddAxis} variant="contained">
