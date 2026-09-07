@@ -23,6 +23,8 @@ import {
   collectAnnotationData,
   postAnnotation,
 } from "./saveUtils"; 
+import useAutosave from "./useAutosave";
+import { deleteAutosave } from "./autosaveUtils";
 
 let globalAxisId = 1;
 
@@ -116,6 +118,14 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false); // flag controlling whether the "name your annotation" popup is currently visible
   const [annotationName, setAnnotationName] = useState(""); //container for annotation name text
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
+  const autosave = useAutosave({
+    enabled: Boolean(rosBagFileName),
+    bagFileName: rosBagFileName,
+    axes,
+    hasUnsavedEdits,
+    bookListFileName,
+    annotationName,
+  });
   const isLoadingData = useRef(true); //initialize true upon load
 
   useEffect(() => {
@@ -296,7 +306,11 @@ const Timeline: React.FC<TimelineProps> = ({
       await postAnnotation(annotationName, data);
       alert("Data saved successfully.");
       setHasUnsavedEdits(false);
-      console.log("Annotations Saved. No more unsaved changes.");
+      autosave.markSynced(axes);
+      deleteAutosave(rosBagFileName).catch((err) =>
+        console.warn("Could not clear autosave after save.", err)
+      );
+      
     } catch (error) {
       setError("Failed to save data. Please try again.\n" + error);
       setIsErrorDialogOpen(true);
