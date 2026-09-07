@@ -23,8 +23,8 @@ import {
   collectAnnotationData,
   postAnnotation,
 } from "./saveUtils"; 
-import useAutosave from "./useAutosave";
-import { deleteAutosave } from "./autosaveUtils";
+import useAutosave from "../Autosave/useAutosave";
+import { deleteAutosave } from "../Autosave/autosaveUtils";
 
 let globalAxisId = 1;
 
