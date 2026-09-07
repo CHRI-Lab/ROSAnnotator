@@ -17,6 +17,12 @@ import { styled } from "@mui/system";
 import Axis from "../Axis";
 import AxisManager from "../AxisManager";
 import AxesContext from "../AxesProvider";
+import {
+  buildDefaultAnnotationName,
+  isValidAnnotationName,
+  collectAnnotationData,
+  postAnnotation,
+} from "./saveUtils"; 
 
 let globalAxisId = 1;
 
@@ -263,98 +269,41 @@ const Timeline: React.FC<TimelineProps> = ({
   }, [played]);
   
   
-  //strips file ext from filename string (recording.bag -> recording)
-  const stripExtension = (filename: string) => filename.replace(/\.[^/.]+$/, ""); 
-
   // Prompts user for annotation file name, with prefilled defined filename set.
   const handleOpenSaveDialog = () => {
     // Pre-fill with the existing auto-generated name as a sensible default
-    const defaultName = `${stripExtension(rosBagFileName)}+${
-      bookListFileName ? stripExtension(bookListFileName) : "noBookList"
-    }`;
+    const defaultName = buildDefaultAnnotationName(rosBagFileName, bookListFileName);
     setAnnotationName(defaultName);
     setIsSaveDialogOpen(true);
   };
 
-  // Checks if the given annotation name is sensible. 
-  // Checks if name is empty, or contains any invalid characters
-  // returns reason for invalid name for error handling
-  const isValidAnnotationName = (name: string): { valid: boolean; reason?: string } => {
-    const trimmed = name.trim();
-
-    if (!trimmed) {
-      return { valid: false, reason: "Name cannot be empty." };
-    }
-
-    if (/[\\/:*?"<>|]/.test(trimmed)) {
-      return { valid: false, reason: 'Name cannot contain any of: \\ / : * ? " < > |' };
-    }
-
-    if (/^\.+$/.test(trimmed)) {
-      return { valid: false, reason: "Name cannot consist of only dots." };
-    }
-
-    return { valid: true };
-  };
+  
   
   // ensures sensible name is provided by user (no whitespace, no invalid characters), 
-  // before gathering current annotation state via collectData() and sending it to backend.
+  // before gathering current annotation state via collectAnnotationData() and sending it to backend.
   const handleConfirmSave = async () => {
-    const validation = isValidAnnotationName(annotationName);
+    const validation = isValidAnnotationName(annotationName); 
     if (!validation.valid) {
       setError(validation.reason || "Invalid name.");
       setIsErrorDialogOpen(true);
       return;
     }
 
-    setIsSaveDialogOpen(false); // close the naming dialog
-    const data = collectData();
+    setIsSaveDialogOpen(false);
+    const data = collectAnnotationData(axes); //collects axis data
 
     try {
-      const response = await fetch("http://localhost:8000/api/save_annotation/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          annotation_name: annotationName, // now uses the user's chosen name
-          annotation_data: data,
-        }),
-      });
-
-      if (!response.ok) {
-        switch (response.status) {
-          case 500: throw new Error("Internal server error");
-          case 400: throw new Error("Invalid JSON format");
-          case 405: throw new Error("Method not allowed");
-        }
-      } else {
-        alert("Data saved successfully.");
-        setHasUnsavedEdits(false); // changes flag to say there are no unsaved edits
-        console.log("Annotations Saved. No more unsaved changes.")//temp test for tracker
-
-      }
+      await postAnnotation(annotationName, data);
+      alert("Data saved successfully.");
+      setHasUnsavedEdits(false);
+      console.log("Annotations Saved. No more unsaved changes.");
     } catch (error) {
       setError("Failed to save data. Please try again.\n" + error);
       setIsErrorDialogOpen(true);
     }
   };
 
-  const collectData = () => {
-    const data = axes.map((axis) => ({
-      id: axis.id,
-      axisType: axis.type,
-      axisName: axis.axisName ? axis.axisName : "",
-      axisBooklistName: axis.typeName ? axis.typeName : "",
-      annotationBlocks: axis.blocks
-        ? axis.blocks.map((block) => ({
-            start: block.start,
-            end: block.end,
-            text: block.text,
-          }))
-        : [],
-    }));
-    console.log(data);
-    return data;
-  };
+
 
   const handleSliderChange = (_event: Event, newValue: number | number[]) => {
     setSeekTime(newValue as number);
@@ -415,7 +364,6 @@ const Timeline: React.FC<TimelineProps> = ({
     globalAxisId = globalAxisId++
   };
   
-
   const handleAddAxis = () => {
     setAxes((prev) => [
       ...prev,
@@ -457,7 +405,6 @@ const Timeline: React.FC<TimelineProps> = ({
       })
     );
   };
-
   const handleDeleteBlock = (axisId: number, blockIndex: number) => {
     setAxes(
       axes.map((axis) => {
