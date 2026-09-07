@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useRef } from "react";
 import { Droppable, Draggable, DragDropContext, DropResult } from 'react-beautiful-dnd';
 import {
   Box,
@@ -106,8 +106,11 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
   const { axes, setAxes } = useContext(AxesContext)!;
   
+  // SAVE FUNCTIONALITY
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false); // flag controlling whether the "name your annotation" popup is currently visible
   const [annotationName, setAnnotationName] = useState(""); //container for annotation name text
+  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
+  const isLoadingData = useRef(true); //initialize true upon load
 
   useEffect(() => {
     if (instruction) {
@@ -169,10 +172,22 @@ const Timeline: React.FC<TimelineProps> = ({
     );
   };
 
+  useEffect(() => { // marks when unsaved changes are detected
+    // Skip flagging unsaved edits on the first render / data load
+    if (isLoadingData.current) {
+      isLoadingData.current = false; // consume the flag, reset for next time
+      setHasUnsavedEdits(false); // a fresh load is always "in sync," regardless of prior state
+      console.log("Data loaded. No unsaved edits.");
+      return;
+    }
+    console.log("Annotations modified. You have unsaved changes.");
+    setHasUnsavedEdits(true);
+  }, [axes]);
 
-  useEffect(() => {
 
+  useEffect(() => { //load raw annotation data from backend & translates into the frontend for UI format
     if (annotationData) {
+      isLoadingData.current = true; //marks loading data- doesn't mark unsaved changes
       const newAxes = annotationData.map((axisData: any) => ({
         id: globalAxisId++,
         type: axisData.axisType,
@@ -184,8 +199,8 @@ const Timeline: React.FC<TimelineProps> = ({
     }
   
     if (speakerData) {
+      isLoadingData.current = true; //marks loading data- doesn't mark unsaved changes
       const speakerAxesMap = new Map<string, any>();
-  
       speakerData.forEach((segment) => {
         const speakerLabel = segment.speaker_label;
   
@@ -218,19 +233,6 @@ const Timeline: React.FC<TimelineProps> = ({
       setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
     }
   }, [annotationData, speakerData]);
-  useEffect(() => {
-    if (annotationData) {
-      //TODO check this code
-      const newAxes = annotationData.map((axisData: any) => ({
-        id: globalAxisId++,
-        type: axisData.axisType,
-        axisName: axisData.axisName,
-        typeName: axisData.axisBooklistName,
-        blocks: axisData.annotationBlocks,
-      }));
-      setAxes(newAxes);
-    }
-  }, []);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
@@ -260,15 +262,18 @@ const Timeline: React.FC<TimelineProps> = ({
     setSeekTime(played);
   }, [played]);
   
+  
   //strips file ext from filename string (recording.bag -> recording)
   const stripExtension = (filename: string) => filename.replace(/\.[^/.]+$/, ""); 
 
   // Prompts user for annotation file name, with prefilled defined filename set.
   const handleOpenSaveDialog = () => {
-  // Pre-fill with the existing auto-generated name as a sensible default
-  const defaultName = `${stripExtension(rosBagFileName)}+${bookListFileName ? stripExtension(bookListFileName) : "noBookList"}`;
-  setAnnotationName(defaultName);
-  setIsSaveDialogOpen(true);
+    // Pre-fill with the existing auto-generated name as a sensible default
+    const defaultName = `${stripExtension(rosBagFileName)}+${
+      bookListFileName ? stripExtension(bookListFileName) : "noBookList"
+    }`;
+    setAnnotationName(defaultName);
+    setIsSaveDialogOpen(true);
   };
 
   // Checks if the given annotation name is sensible. 
@@ -291,7 +296,7 @@ const Timeline: React.FC<TimelineProps> = ({
 
     return { valid: true };
   };
-
+  
   // ensures sensible name is provided by user (no whitespace, no invalid characters), 
   // before gathering current annotation state via collectData() and sending it to backend.
   const handleConfirmSave = async () => {
@@ -323,6 +328,9 @@ const Timeline: React.FC<TimelineProps> = ({
         }
       } else {
         alert("Data saved successfully.");
+        setHasUnsavedEdits(false); // changes flag to say there are no unsaved edits
+        console.log("Annotations Saved. No more unsaved changes.")//temp test for tracker
+
       }
     } catch (error) {
       setError("Failed to save data. Please try again.\n" + error);
