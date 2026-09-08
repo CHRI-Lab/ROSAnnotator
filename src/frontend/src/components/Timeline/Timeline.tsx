@@ -35,8 +35,6 @@ import { applyAIInstruction } from "./aiInstruction";
 let globalAxisId = 1;
 
 interface TimelineProps {
-  rosBagFileName: string;
-  bookListFileName: string;
   duration: number;
   played: number;
   onSeek: (time: number) => void;
@@ -50,7 +48,7 @@ interface TimelineProps {
   switchingChunk?: boolean;
   onAxesUpdate: (axes: any) => void;
   instruction: AIInstruction | null;
-  aiRecords: AIRecord[];
+  onSave: () => void;
 }
 
 const MainContainer = styled(Paper)(({ theme }) => ({
@@ -104,8 +102,6 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
 
 
 const Timeline: React.FC<TimelineProps> = ({
-  rosBagFileName,
-  bookListFileName,
   duration,
   played,
   onSeek,
@@ -120,6 +116,7 @@ const Timeline: React.FC<TimelineProps> = ({
   onAutosaveReady,
   switchingChunk = false,
   aiRecords,
+  onSave,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);

@@ -1,5 +1,3 @@
-import { useState, useCallback, useEffect } from "react";
-import ReactPlayer from "react-player";
 import { useCallback, useEffect, useState } from "react";
 import ReactPlayer from "react-player";
 import {
@@ -21,7 +19,11 @@ import {
 } from "@mui/material";
 
 import type { ChunkManifest } from "../../api/chunks";
-import { AxesProvider } from "../../components/AxesProvider/AxesContext";
+import AppHeader from "../../components/AppHeader";
+import {
+  AxesProvider,
+  type AxisData,
+} from "../../components/AxesProvider/AxesContext";
 import Booklist from "../../components/Booklist/Booklist";
 import Chatbox from "../../components/Chatbox";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
@@ -77,8 +79,9 @@ const Annotator = ({
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
   const [editMode, setEditMode] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [bookList, setBookList] = useState(bookListData);
-  const [axesData, setAxesData] = useState([]);
+  const [axesData, setAxesData] = useState<AxisData[]>([]);
   const [instruction, setInstruction] = useState<AIInstruction | null>(null);
   const [pendingAIChange, setPendingAIChange] = useState<{
     instruction: AIInstruction;
@@ -126,6 +129,44 @@ const Annotator = ({
   const resolveAIChangeConfirmation = (accepted: boolean) => {
     pendingAIChange?.resolve(accepted);
     setPendingAIChange(null);
+  };
+
+  const handleSaveAnnotations = async () => {
+    const annotationData = axesData.map((axis) => ({
+      id: axis.id,
+      axisType: axis.type,
+      axisName: axis.axisName || "",
+      axisBooklistName: axis.typeName || "",
+      annotationBlocks: (axis.blocks || []).map((block) => ({
+        start: block.start,
+        end: block.end,
+        text: block.text,
+      })),
+    }));
+
+    setIsSaving(true);
+    try {
+      const response = await fetch("http://localhost:8000/api/save_annotation/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          annotation_name: `${rosBagFileName}+${
+            bookListFileName || "noBookList"
+          }`,
+          annotation_data: annotationData,
+          ai_records: aiRecords,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Save failed (${response.status})`);
+      }
+      alert("Data saved successfully.");
+    } catch (error) {
+      alert(`Failed to save data. Please try again.\n${error}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSendMessageToGPT = (
@@ -320,30 +361,47 @@ const Annotator = ({
   };
 
   return (
-    <AxesProvider key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}>
-      <Dialog
-        open={pendingAIChange !== null}
-        onClose={() => resolveAIChangeConfirmation(false)}
+<AxesProvider
+  key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}
+>
+  <Dialog
+    open={pendingAIChange !== null}
+    onClose={() => resolveAIChangeConfirmation(false)}
+  >
+    <DialogTitle>Allow AI timeline changes?</DialogTitle>
+    <DialogContent>
+      <DialogContentText>
+        The AI instruction will delete or modify existing annotation
+        timelines or blocks. Do you want to apply these changes?
+      </DialogContentText>
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={() => resolveAIChangeConfirmation(false)}>
+        Cancel
+      </Button>
+      <Button
+        onClick={() => resolveAIChangeConfirmation(true)}
+        color="error"
+        variant="contained"
       >
-        <DialogTitle>Allow AI timeline changes?</DialogTitle>
-        <DialogContent>
-          <DialogContentText>
-            The AI instruction will delete or modify existing annotation
-            timelines or blocks. Do you want to apply these changes?
-          </DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => resolveAIChangeConfirmation(false)}>Cancel</Button>
-          <Button
-            onClick={() => resolveAIChangeConfirmation(true)}
-            color="error"
-            variant="contained"
-          >
-            Apply changes
-          </Button>
-        </DialogActions>
-      </Dialog>
-      <Box display="flex" height="100vh" overflow="hidden">
+        Apply changes
+      </Button>
+    </DialogActions>
+  </Dialog>
+
+  <Box
+    display="flex"
+    flexDirection="column"
+    height="100vh"
+    overflow="hidden"
+  >
+    <AppHeader
+      rosBagFileName={rosBagFileName}
+      isSaving={isSaving}
+      onSave={handleSaveAnnotations}
+    />
+
+    <Box display="flex" flex={1} minHeight={0} overflow="hidden">
         <Box
           display="flex"
           justifyContent="center"
@@ -446,6 +504,7 @@ const Annotator = ({
               onAutosaveReady={onAutosaveReady}
               switchingChunk={switchingChunk}
               aiRecords={aiRecords}
+              onSave={handleSaveAnnotations}
             />
           </Box>
         </Box>
@@ -469,6 +528,7 @@ const Annotator = ({
           }
           assistant={<Chatbox onSendMessage={handleSendMessageToGPT} />}
         />
+        </Box>
       </Box>
     </AxesProvider>
   );
