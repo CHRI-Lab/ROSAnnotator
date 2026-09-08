@@ -1,4 +1,5 @@
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
@@ -7,17 +8,41 @@ import { DataViewDefinition } from "./viewRegistry";
 
 type DataViewSelectorProps = {
   panelCount: number;
+  threePanelLargeSide: "left" | "right";
   selections: string[];
   views: DataViewDefinition[];
   onPanelCountChange: (count: number) => void;
+  onThreePanelLargeSideChange: (side: "left" | "right") => void;
   onSelectionChange: (panelIndex: number, viewId: string) => void;
 };
 
+const ThreePanelLayoutPreview = ({ side }: { side: "left" | "right" }) => (
+  <Box
+    width={42}
+    height={30}
+    display="grid"
+    gridTemplateColumns="repeat(2, 1fr)"
+    gridTemplateRows="repeat(2, 1fr)"
+    gap="2px"
+    aria-hidden="true"
+  >
+    <Box
+      border={1}
+      gridColumn={side === "left" ? 1 : 2}
+      gridRow="1 / span 2"
+    />
+    <Box border={1} gridColumn={side === "left" ? 2 : 1} gridRow={1} />
+    <Box border={1} gridColumn={side === "left" ? 2 : 1} gridRow={2} />
+  </Box>
+);
+
 const DataViewSelector = ({
   panelCount,
+  threePanelLargeSide,
   selections,
   views,
   onPanelCountChange,
+  onThreePanelLargeSideChange,
   onSelectionChange,
 }: DataViewSelectorProps) => (
   <Box
@@ -49,6 +74,29 @@ const DataViewSelector = ({
         </MenuItem>
       ))}
     </TextField>
+
+    {panelCount === 3 && (
+      <Box marginBottom={2}>
+        <Typography variant="caption" display="block" marginBottom={0.75}>
+          Layout
+        </Typography>
+        <Box display="flex" gap={1}>
+          {(["left", "right"] as const).map((side) => (
+            <Button
+              key={side}
+              size="small"
+              variant={threePanelLargeSide === side ? "contained" : "outlined"}
+              aria-label={`Large panel on the ${side}`}
+              aria-pressed={threePanelLargeSide === side}
+              onClick={() => onThreePanelLargeSideChange(side)}
+              sx={{ flex: 1, minWidth: 0, paddingY: 1 }}
+            >
+              <ThreePanelLayoutPreview side={side} />
+            </Button>
+          ))}
+        </Box>
+      </Box>
+    )}
 
     {selections.slice(0, panelCount).map((selection, panelIndex) => (
       <TextField

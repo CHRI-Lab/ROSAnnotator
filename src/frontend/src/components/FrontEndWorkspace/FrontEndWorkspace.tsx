@@ -32,8 +32,8 @@ const getGridLayout = (panelCount: number) => {
   }
   if (panelCount === 3) {
     return {
-      columns: "repeat(3, minmax(0, 1fr))",
-      rows: "minmax(0, 1fr)",
+      columns: "repeat(2, minmax(0, 1fr))",
+      rows: "repeat(2, minmax(0, 1fr))",
     };
   }
   return {
@@ -42,11 +42,34 @@ const getGridLayout = (panelCount: number) => {
   };
 };
 
+const getPanelPlacement = (
+  panelCount: number,
+  panelIndex: number,
+  largeSide: "left" | "right",
+) => {
+  if (panelCount !== 3) {
+    return undefined;
+  }
+
+  if (largeSide === "left") {
+    return panelIndex === 0
+      ? { gridColumn: 1, gridRow: "1 / span 2" }
+      : { gridColumn: 2, gridRow: panelIndex };
+  }
+
+  return panelIndex === 2
+    ? { gridColumn: 2, gridRow: "1 / span 2" }
+    : { gridColumn: 1, gridRow: panelIndex + 1 };
+};
+
 const findView = (viewId: string): DataViewDefinition =>
   availableViews.find((view) => view.id === viewId) ?? availableViews[0];
 
 const FrontEndWorkspace = ({ context }: FrontEndWorkspaceProps) => {
   const [panelCount, setPanelCount] = useState(2);
+  const [threePanelLargeSide, setThreePanelLargeSide] = useState<
+    "left" | "right"
+  >("left");
   const [selections, setSelections] = useState(initialSelections);
   const layout = getGridLayout(panelCount);
 
@@ -62,9 +85,11 @@ const FrontEndWorkspace = ({ context }: FrontEndWorkspaceProps) => {
     <Box display="flex" width="100%" flex={1} minHeight={0} overflow="hidden">
       <DataViewSelector
         panelCount={panelCount}
+        threePanelLargeSide={threePanelLargeSide}
         selections={selections}
         views={availableViews}
         onPanelCountChange={setPanelCount}
+        onThreePanelLargeSideChange={setThreePanelLargeSide}
         onSelectionChange={handleSelectionChange}
       />
       <Box
@@ -81,6 +106,11 @@ const FrontEndWorkspace = ({ context }: FrontEndWorkspaceProps) => {
             key={panelIndex}
             view={findView(selection)}
             context={context}
+            sx={getPanelPlacement(
+              panelCount,
+              panelIndex,
+              threePanelLargeSide,
+            )}
           />
         ))}
       </Box>
