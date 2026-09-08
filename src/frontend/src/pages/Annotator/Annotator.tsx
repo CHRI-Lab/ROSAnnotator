@@ -1,9 +1,10 @@
 import { useState, useCallback, useEffect } from "react";
 import ReactPlayer from "react-player";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
-
+import { useCallback, useEffect, useState } from "react";
+import ReactPlayer from "react-player";
 import {
+  Box,
+  Button,
   CircularProgress,
   Dialog,
   DialogActions,
@@ -19,20 +20,21 @@ import {
   Typography,
 } from "@mui/material";
 
+import type { ChunkManifest } from "../../api/chunks";
+import { AxesProvider } from "../../components/AxesProvider/AxesContext";
+import Booklist from "../../components/Booklist/Booklist";
 import Chatbox from "../../components/Chatbox";
+import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
+import FrontEndWorkspace from "../../components/FrontEndWorkspace";
+import RightAssistantPanel from "../../components/RightAssistantPanel";
+import StatisticsAnnotation from "../../components/StatisticsAnnotation";
+import StatisticsTier from "../../components/StatisticsTier";
 import Timeline from "../../components/Timeline";
 import {
   applyAIInstruction,
   requiresAIChangeConfirmation,
 } from "../../components/Timeline/aiInstruction";
 import Transcript from "../../components/Transcript";
-import Booklist from "../../components/Booklist/Booklist";
-import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
-import AnnotationTable from "../../components/AnnotationTable";
-import { AxesProvider } from "../../components/AxesProvider/AxesContext";
-import StatisticsAnnotation from "../../components/StatisticsAnnotation";
-import StatisticsTier from "../../components/StatisticsTier";
-import type { ChunkManifest } from "../../api/chunks";
 import {
   AssistantMode,
   AssistantReply,
@@ -76,7 +78,6 @@ const Annotator = ({
   const [played, setPlayed] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [bookList, setBookList] = useState(bookListData);
-  const [selectedTab, setSelectedTab] = useState(0);
   const [axesData, setAxesData] = useState([]);
   const [instruction, setInstruction] = useState<AIInstruction | null>(null);
   const [pendingAIChange, setPendingAIChange] = useState<{
@@ -290,7 +291,7 @@ const Annotator = ({
     setEditMode(true);
   };
 
-  const playerRef = useCallback((playerInstance: ReactPlayer) => {
+  const playerRef = useCallback((playerInstance: ReactPlayer | null) => {
     setPlayer(playerInstance);
   }, []);
 
@@ -343,7 +344,6 @@ const Annotator = ({
         </DialogActions>
       </Dialog>
       <Box display="flex" height="100vh" overflow="hidden">
-        {/* 左侧的主内容区域 */}
         <Box
           display="flex"
           justifyContent="center"
@@ -353,70 +353,17 @@ const Annotator = ({
           height="100%"  
           overflow="auto"
         >
-          <Box
-            display="flex"
-            justifyContent="center"
-            alignItems="center"
-            flexDirection="row"
-            flex="1 1 auto"
-            overflow="auto"
-          >
-            <Box width="100%" flexGrow={1} maxWidth={602} margin={1}>
-              <ReactPlayer
-                ref={playerRef}
-                width="100%"
-                height="auto"
-                url={`/public/processed/${data.video_path}`}
-                onDuration={setDuration}
-                onProgress={({ playedSeconds }) => setPlayed(playedSeconds)}
-                controls
-                playing
-              />
-            </Box>
-            <Box width={600} flexGrow={1} overflow="auto" margin={1} maxHeight="50vh">
-              <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-                <Tabs
-                  value={selectedTab}
-                  onChange={handleTabChange}
-                  aria-label="annotation tabs"
-                >
-                  <Tab label="Annotations" />
-                  <Tab label="Transcript" />
-                  <Tab label="Codebook" />
-                  <Tab label="Statistics (Annotations)" />
-                  <Tab label="Statistics (Tiers)" />
-                </Tabs>
-              </Box>
-              {selectedTab === 0 && <AnnotationTable />}
-              {selectedTab === 1 && (
-                <Transcript
-                  LRC={data.audio_transcript}
-                  played={played}
-                  setPlayed={handleSeek}
-                />
-              )}
-              {selectedTab === 2 &&
-                (editMode ? (
-                  <EditBooklistForm
-                    bookListData={bookList}
-                    onSave={handleSaveBooklist}
-                  />
-                ) : (
-                  <Box>
-                    <Button
-                      onClick={handleOnEdit}
-                      variant="contained"
-                      sx={{ marginTop: 2 }}
-                    >
-                      Edit
-                    </Button>
-                    <Booklist bookListData={bookList} />
-                  </Box>
-                ))}
-              {selectedTab === 3 && <StatisticsAnnotation />}
-              {selectedTab === 4 && <StatisticsTier />}
-            </Box>
-          </Box>
+          <FrontEndWorkspace
+            context={{
+              videoPath: data.video_path,
+              transcript: data.audio_transcript,
+              played,
+              onProgress: setPlayed,
+              onSeek: handleSeek,
+              onDurationChange: setDuration,
+              playerRef,
+            }}
+          />
   
 
           {chunkManifest?.chunking_enabled && (
@@ -504,19 +451,24 @@ const Annotator = ({
         </Box>
   
 
-        <Box
-          flex={0.3}
-          height="100%"
-          bgcolor="background.paper"
-          borderLeft={1}
-          borderColor="divider"
-          display="flex"
-          flexDirection="column"
-          justifyContent="space-between"
-          overflow="auto"
-        >
-          <Chatbox onSendMessage={handleSendMessageToGPT} />
-        </Box>
+        <RightAssistantPanel
+          codebook={
+            editMode ? (
+              <EditBooklistForm
+                bookListData={bookList}
+                onSave={handleSaveBooklist}
+              />
+            ) : (
+              <Box padding={2}>
+                <Button onClick={handleOnEdit} variant="contained">
+                  Edit
+                </Button>
+                <Booklist bookListData={bookList} />
+              </Box>
+            )
+          }
+          assistant={<Chatbox onSendMessage={handleSendMessageToGPT} />}
+        />
       </Box>
     </AxesProvider>
   );
