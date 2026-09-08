@@ -176,3 +176,25 @@ export const formatAutosaveTimestamp = (isoTimestamp?: string): string => {
 
     return sameDay ? `${time} today` : saved.toLocaleString();
 };
+
+// Converts a stored autosave back into the axis shape Timeline holds in state.
+// The shapes already match, so this is mostly a defensive copy with defaults.
+export const hydrateAutosaveAxes = (axes: AutosaveAxis[]): any[] =>
+    (axes || []).map((axis) => ({
+        id: axis.id,
+        type: axis.type ?? "type-in",
+        axisName: axis.axisName ?? "",
+        typeName: axis.typeName ?? "",
+        shortcutKey: axis.shortcutKey ?? "",
+        blocks: axis.blocks ?? [],
+    }));
+
+// Timeline's globalAxisId counter must resume above every restored id, or the
+// next "Add New Axis" produces a duplicate id and every handler that matches
+// axes by id starts hitting the wrong axis.
+export const highestAxisId = (axes: any[]): number =>
+    (axes || []).reduce(
+        (max, axis) =>
+            Number.isFinite(axis?.id) && axis.id > max ? axis.id : max,
+        0
+    );

@@ -24,7 +24,10 @@ import {
   postAnnotation,
 } from "./saveUtils"; 
 import useAutosave from "../Autosave/useAutosave";
-import { deleteAutosave } from "../Autosave/autosaveUtils";
+import {
+  highestAxisId,
+  deleteAutosave,
+} from "../Autosave/autosaveUtils";
 
 let globalAxisId = 1;
 
@@ -37,7 +40,8 @@ interface TimelineProps {
   booklist: any;
   annotationData: any;
   speakerData?: Array<any>;
-  onAxesUpdate: (axes: any) => void;//Send information to parent
+  restoredAxes?: any[] | null;
+  onAxesUpdate: (axes: any) => void;
   instruction: any;
 }
 
@@ -102,6 +106,7 @@ const Timeline: React.FC<TimelineProps> = ({
   speakerData,
   onAxesUpdate,
   instruction,
+  restoredAxes,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
@@ -118,6 +123,7 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false); // flag controlling whether the "name your annotation" popup is currently visible
   const [annotationName, setAnnotationName] = useState(""); //container for annotation name text
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
+
   const autosave = useAutosave({
     enabled: Boolean(rosBagFileName),
     bagFileName: rosBagFileName,
@@ -125,8 +131,23 @@ const Timeline: React.FC<TimelineProps> = ({
     hasUnsavedEdits,
     bookListFileName,
     annotationName,
+    onAutosaved: (savedAt) => {
+      const blockCount = axes.reduce(
+        (total, axis) => total + (axis.blocks?.length ?? 0),
+        0
+      );
+      console.log(
+        `[autosave] ${savedAt} — ${axes.length} axes, ${blockCount} blocks`
+      );
+    },
   });
   const isLoadingData = useRef(true); //initialize true upon load
+
+  useEffect(() => {
+  if (restoredAxes) {
+    autosave.markSynced(restoredAxes);
+  }
+}, [restoredAxes]);
 
   useEffect(() => {
     if (instruction) {
@@ -196,59 +217,68 @@ const Timeline: React.FC<TimelineProps> = ({
       console.log("Data loaded. No unsaved edits.");
       return;
     }
-    console.log("Annotations modified. You have unsaved changes.");
+    console.log(" Annotations modified. You have unsaved changes.");
     setHasUnsavedEdits(true);
   }, [axes]);
 
 
-  useEffect(() => { //load raw annotation data from backend & translates into the frontend for UI format
-    if (annotationData) {
-      isLoadingData.current = true; //marks loading data- doesn't mark unsaved changes
-      const newAxes = annotationData.map((axisData: any) => ({
-        id: globalAxisId++,
-        type: axisData.axisType,
-        axisName: axisData.axisName,
-        typeName: axisData.axisBooklistName,
-        blocks: axisData.annotationBlocks,
-      }));
-      setAxes(newAxes);
-    }
-  
-    if (speakerData) {
-      isLoadingData.current = true; //marks loading data- doesn't mark unsaved changes
-      const speakerAxesMap = new Map<string, any>();
-      speakerData.forEach((segment) => {
-        const speakerLabel = segment.speaker_label;
-  
-        if (speakerAxesMap.has(speakerLabel)) {
-          const existingAxis = speakerAxesMap.get(speakerLabel);
-          existingAxis.blocks.push({
-            start: segment.start_time,
-            end: segment.end_time,
-            text: segment.text,
-          });
-        } else {
-          // 如果 map 中没有该 speaker_label，创建新的 axis 并添加到 map 中
-          speakerAxesMap.set(speakerLabel, {
-            id: globalAxisId++,
-            type: "Type-in",
-            axisName: speakerLabel,
-            blocks: [
-              {
-                start: segment.start_time,
-                end: segment.end_time,
-                text: segment.text,
-              },
-            ],
-            shortcutKey: speakerLabel.charAt(0).toUpperCase(),
-          });
-        }
-      });
-  
-      const speakerAxes = Array.from(speakerAxesMap.values());
-      setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
-    }
-  }, [annotationData, speakerData]);
+  useEffect(() => {
+  // A restored autosave replaces the loaded state entirely. It already
+  // contains the speaker tiers from the session it was saved in, so the
+  // branches below must not run as well.
+  if (restoredAxes) {
+    isLoadingData.current = true;
+    globalAxisId = highestAxisId(restoredAxes) + 1;
+    setAxes(restoredAxes);
+    return;
+  }
+
+  if (annotationData) {
+    isLoadingData.current = true;
+    const newAxes = annotationData.map((axisData: any) => ({
+      id: globalAxisId++,
+      type: axisData.axisType,
+      axisName: axisData.axisName,
+      typeName: axisData.axisBooklistName,
+      blocks: axisData.annotationBlocks,
+    }));
+    setAxes(newAxes);
+  }
+
+  if (speakerData) {
+    isLoadingData.current = true;
+    const speakerAxesMap = new Map<string, any>();
+    speakerData.forEach((segment) => {
+      const speakerLabel = segment.speaker_label;
+
+      if (speakerAxesMap.has(speakerLabel)) {
+        const existingAxis = speakerAxesMap.get(speakerLabel);
+        existingAxis.blocks.push({
+          start: segment.start_time,
+          end: segment.end_time,
+          text: segment.text,
+        });
+      } else {
+        speakerAxesMap.set(speakerLabel, {
+          id: globalAxisId++,
+          type: "Type-in",
+          axisName: speakerLabel,
+          blocks: [
+            {
+              start: segment.start_time,
+              end: segment.end_time,
+              text: segment.text,
+            },
+          ],
+          shortcutKey: speakerLabel.charAt(0).toUpperCase(),
+        });
+      }
+    });
+
+    const speakerAxes = Array.from(speakerAxesMap.values());
+    setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
+  }
+}, [restoredAxes, annotationData, speakerData]);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
@@ -308,7 +338,7 @@ const Timeline: React.FC<TimelineProps> = ({
       setHasUnsavedEdits(false);
       autosave.markSynced(axes);
       deleteAutosave(rosBagFileName).catch((err) =>
-        console.warn("Could not clear autosave after save.", err)
+        console.warn(" [autosave] Could not clear autosave after save.", err)
       );
       
     } catch (error) {

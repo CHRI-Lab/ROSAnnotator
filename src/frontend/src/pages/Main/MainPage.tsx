@@ -1,15 +1,24 @@
 import React, { useEffect, useState } from "react";
 import LoadingPage from "../Loading";
 import Annotator from "../Annotator";
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 
 import { Dialog, DialogTitle, DialogContent, Typography } from "@mui/material";
 
+import {
+  fetchAutosave,
+  hydrateAutosaveAxes,
+} from "../../components/Autosave/autosaveUtils";
+
 const MainPage = () => {
   const { rosBagFile, bookListFile, annotationFile } = useParams();
+  const [searchParams] = useSearchParams();
+  const shouldRestore = searchParams.get("restore") === "autosave";
+
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [bookListData, setBookListData] = useState(null);
+  const [restoredAxes, setRestoredAxes] = useState(null);
   const [error, setError] = useState<unknown>(null);
   const [errorDisplay, setErrorDisplay] = useState(false);
 
@@ -45,6 +54,21 @@ const MainPage = () => {
               throw new Error("Method not allowed");
             default:
               throw new Error("Error resolving request");
+          }
+        }
+
+        // The user asked to restore, so pull the saved axes before the
+        // annotation interface mounts. A failure here is not fatal: the page
+        // still loads, just without the recovered work.
+        if (shouldRestore && rosBagFile) {
+          try {
+            const payload = await fetchAutosave(rosBagFile);
+            setRestoredAxes(hydrateAutosaveAxes(payload.axes || []));
+          } catch (autosaveError) {
+            console.warn(
+              "Could not load the autosave. Continuing without restoring.",
+              autosaveError
+            );
           }
         }
 
@@ -93,6 +117,7 @@ const MainPage = () => {
         bookListFileName={bookListFile}
         data={data}
         bookListData={bookListData}
+        restoredAxes={restoredAxes}
       />
     </div>
   );

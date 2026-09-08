@@ -20,6 +20,7 @@ const Annotator = ({
   bookListFileName,
   data,
   bookListData,
+  restoredAxes,
 }) => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
@@ -249,6 +250,7 @@ const Annotator = ({
               speakerData={data.speaker_data}
               onAxesUpdate={handleAxesUpdate}
               instruction={instruction}
+              restoredAxes={restoredAxes}
             />
           </Box>
         </Box>
