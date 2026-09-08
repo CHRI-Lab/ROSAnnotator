@@ -9,6 +9,7 @@ from django.test import RequestFactory, SimpleTestCase
 from .ai_assistant import (
     AIAssistant,
     LocalAI,
+    LocalInferenceError,
     RemoteAPI,
     RemoteAuthenticationError,
 )
@@ -75,13 +76,331 @@ class AIAssistantTests(SimpleTestCase):
         self.assertEqual(metadata["model"]["requested"], "gpt-4o")
         self.assertEqual(metadata["prompts"]["user"], "Add an annotation")
 
-    def test_local_ai_is_a_black_box_with_checkpoint_path(self):
-        assistant = LocalAI(checkpointPath="/models/local", **self.contexts)
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_ai_uses_local_text_only_service(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct",
+                choices=[SimpleNamespace(message=SimpleNamespace(content="Greeting"))],
+            )
+        )
+        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
 
-        self.assertEqual(assistant.checkpointPath, "/models/local")
-        self.assertEqual(assistant.transcriptContext, "Speaker 1: Hello")
-        with self.assertRaises(NotImplementedError):
-            assistant.respond("Add an annotation")
+        result = assistant.respond("Return the applicable code", "earlier chat")
+
+        self.assertEqual(result, "Greeting")
+        openai_class.assert_called_once_with(
+            base_url="http://local-llm:8080/v1", api_key="local", timeout=900
+        )
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["temperature"], 0)
+        self.assertEqual(request["max_tokens"], 256)
+        self.assertNotIn("response_format", request)
+        system_prompt = request["messages"][0]["content"]
+        self.assertIn("Speaker 1: Hello", system_prompt)
+        self.assertIn("Greeting", system_prompt)
+        self.assertNotIn("Topics", system_prompt)
+        self.assertIn("earlier chat", system_prompt)
+        self.assertNotIn("frame-0", system_prompt)
+        self.assertEqual(
+            assistant.get_run_metadata()["model"]["provider"], "local"
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_timeline_request_uses_instruction_schema(self, openai_class):
+        response_message = '{"type":"instruction","steps":[]}'
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct",
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=response_message))
+                ],
+            )
+        )
+        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+
+        result = assistant.respond("Create an annotation axis")
+
+        self.assertEqual(json.loads(result), json.loads(response_message))
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        response_format = request["response_format"]
+        self.assertEqual(response_format["type"], "json_schema")
+        schema = response_format["json_schema"]["schema"]
+        self.assertEqual(schema["properties"]["type"]["const"], "instruction")
+        self.assertEqual(request["max_tokens"], 768)
+        self.assertEqual(schema["properties"]["steps"]["maxItems"], 64)
+        self.assertEqual(
+            schema["properties"]["steps"]["items"]["required"],
+            ["action", "parameters"],
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_summary_request_uses_general_answer_prompt(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="The speaker says hello.")
+                    )
+                ],
+            )
+        )
+        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+
+        result = assistant.respond("Summarize the transcript")
+
+        self.assertEqual(result, "The speaker says hello.")
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertNotIn("response_format", request)
+        system_prompt = request["messages"][0]["content"]
+        self.assertIn("provide a concise factual summary", system_prompt)
+        self.assertIn("Speaker 1: Hello", system_prompt)
+        self.assertNotIn("Return only the matching label", system_prompt)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_timeline_request_replaces_duplicate_axis_id(
+        self, openai_class
+    ):
+        response_message = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addAxi",
+                        "parameters": {
+                            "axisId": 1,
+                            "axisName": "Transcript",
+                            "axistype": "Type-in",
+                        },
+                    },
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 1,
+                            "start": 0,
+                            "end": 1,
+                            "text": "Greeting",
+                        },
+                    },
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct",
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=response_message))
+                ],
+            )
+        )
+        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+
+        result = json.loads(assistant.respond("Add an axis for the transcript"))
+
+        self.assertEqual(result["steps"][0]["parameters"]["axisId"], 2)
+        self.assertEqual(result["steps"][1]["parameters"]["axisId"], 2)
+        system_prompt = (
+            openai_class.return_value.chat.completions.create.call_args.kwargs[
+                "messages"
+            ][0]["content"]
+        )
+        self.assertIn("next unused axisId is 2", system_prompt)
+        self.assertIn("return one addAxi step and do not add blocks", system_prompt)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_model_rejects_video_annotation_with_clear_reason(
+        self, openai_class
+    ):
+        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+
+        with self.assertRaisesRegex(LocalInferenceError, "text-only"):
+            assistant.respond("Annotate participant gestures in the video")
+
+        openai_class.assert_not_called()
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_auto_annotation_requires_annotation_blocks(self, openai_class):
+        response_message = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addAxi",
+                        "parameters": {
+                            "axisId": 2,
+                            "axisName": "Requests",
+                            "axistype": "Type-in",
+                        },
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct",
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=response_message))
+                ],
+            )
+        )
+        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+
+        with self.assertRaisesRegex(LocalInferenceError, "annotation blocks"):
+            assistant.respond(
+                "Annotate all request utterances made by participants in a new axis"
+            )
+
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        schema = request["response_format"]["json_schema"]["schema"]
+        self.assertEqual(schema["properties"]["steps"]["minItems"], 2)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_auto_annotation_grounds_blocks_to_transcript_times(
+        self, openai_class
+    ):
+        response_message = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addAxi",
+                        "parameters": {
+                            "axisId": 1,
+                            "axisName": "Requests",
+                            "axistype": "Type-in",
+                        },
+                    },
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 1,
+                            "start": 0,
+                            "end": 0,
+                            "text": "Could you move the camera closer?",
+                        },
+                    },
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct",
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=response_message))
+                ],
+            )
+        )
+        contexts = {
+            **self.contexts,
+            "transcriptContext": (
+                "[00:07] Speaker SPEAKER_00: Could you move the camera closer? "
+                "[00:09]"
+            ),
+        }
+        assistant = LocalAI(checkpointPath="/models/local.gguf", **contexts)
+
+        result = json.loads(
+            assistant.respond(
+                "Annotate all participant speech according to the codebook in a new axis"
+            )
+        )
+
+        block = result["steps"][1]["parameters"]
+        self.assertEqual(block["start"], 7.0)
+        self.assertEqual(block["end"], 9.0)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_long_auto_annotation_is_chunked_and_merged(self, openai_class):
+        transcript_lines = [
+            f"[00:{index:02d}] Speaker: {'word ' * 120}request {index}? "
+            f"[00:{index + 1:02d}]"
+            for index in range(7)
+        ]
+        responses = [
+            {
+                "annotations": [
+                    {"segmentId": 0, "label": "request"},
+                ]
+            },
+            {
+                "annotations": [
+                    {"segmentId": 6, "label": "request"},
+                ]
+            },
+        ]
+        openai_class.return_value.chat.completions.create.side_effect = [
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content=json.dumps(response))
+                    )
+                ],
+            )
+            for response in responses
+        ]
+        contexts = {**self.contexts, "transcriptContext": "\n".join(transcript_lines)}
+        assistant = LocalAI(checkpointPath="/models/local.gguf", **contexts)
+
+        result = json.loads(
+            assistant.respond(
+                "Annotate all participant speech according to the codebook in a new axis"
+            )
+        )
+
+        self.assertEqual(
+            [step["action"] for step in result["steps"]],
+            ["addAxi", "addBlock", "addBlock"],
+        )
+        self.assertEqual(result["steps"][0]["parameters"]["axisId"], 2)
+        self.assertEqual(result["steps"][1]["parameters"]["start"], 0.0)
+        self.assertEqual(result["steps"][2]["parameters"]["start"], 6.0)
+        self.assertEqual(
+            assistant.get_run_metadata()["parameters"]["chunk_count"], 2
+        )
+        self.assertEqual(
+            openai_class.return_value.chat.completions.create.call_count, 2
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_request_annotation_falls_back_to_prefiltered_candidates(
+        self, openai_class
+    ):
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps({"annotations": []})
+                        )
+                    )
+                ],
+            )
+        )
+        contexts = {
+            **self.contexts,
+            "transcriptContext": (
+                "[00:07] Speaker SPEAKER_00: Could you move the camera closer? "
+                + ("context " * 600)
+                + "[00:09]"
+            ),
+        }
+        assistant = LocalAI(checkpointPath="/models/local.gguf", **contexts)
+
+        result = json.loads(
+            assistant.respond(
+                "Annotate all request utterances made by participants in a new axis"
+            )
+        )
+
+        self.assertEqual(
+            [step["action"] for step in result["steps"]],
+            ["addAxi", "addBlock"],
+        )
+        self.assertEqual(result["steps"][1]["parameters"]["start"], 7.0)
+        self.assertEqual(result["steps"][1]["parameters"]["end"], 9.0)
 
     def test_all_providers_use_parent_input_and_output_contract(self):
         class ExampleAssistant(AIAssistant):
@@ -514,7 +833,7 @@ class ChunkApiTests(SimpleTestCase):
         with patch.object(views, "openai_api_key", None), patch.object(
             views, "LocalAI"
         ) as local_ai:
-            local_ai.return_value.respond.side_effect = NotImplementedError()
+            local_ai.return_value.respond.side_effect = LocalInferenceError()
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 503)
@@ -587,7 +906,8 @@ class ChunkApiTests(SimpleTestCase):
 
         with patch.object(views, "openai_api_key", "test-key"), patch.object(
             views, "RemoteAPI"
-        ) as remote_api:
+        ) as remote_api, patch.object(views, "LocalAI") as local_ai:
+            local_ai.return_value.respond.side_effect = LocalInferenceError()
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 501)
@@ -620,7 +940,10 @@ class ChunkApiTests(SimpleTestCase):
             content_type="application/json",
         )
 
-        with patch.object(views, "openai_api_key", None):
+        with patch.object(views, "openai_api_key", None), patch.object(
+            views, "LocalAI"
+        ) as local_ai:
+            local_ai.return_value.respond.side_effect = LocalInferenceError()
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 501)

@@ -11,7 +11,12 @@ from .serializers import BooklistSerializer, InputInspectionSerializer, Transcri
 import csv
 from django.views.decorators.csrf import csrf_exempt
 from dotenv import load_dotenv
-from .ai_assistant import LocalAI, RemoteAPI, RemoteAuthenticationError
+from .ai_assistant import (
+    LocalAI,
+    LocalInferenceError,
+    RemoteAPI,
+    RemoteAuthenticationError,
+)
 
 load_dotenv()
 
@@ -84,7 +89,7 @@ def respond_with_remote_fallback(common_context, message, chat_history):
             "local",
             local_assistant,
         )
-    except NotImplementedError as error:
+    except LocalInferenceError as error:
         raise AssistantUnavailableError(
             "The remote model is unavailable, and the local language model "
             "is not connected yet. Switch to Remote after adding a valid "
@@ -353,17 +358,14 @@ def gpt_chat(request):
             )
             try:
                 response_text = assistant.respond(message, gpt_history)
-            except NotImplementedError:
+            except LocalInferenceError as error:
                 remote_configured = bool(openai_api_key)
+                error_message = str(error) or "The local language model is not connected."
                 return JsonResponse(
                     {
                         "error": (
-                            "The local language model is not connected yet. "
-                            + (
-                                "Would you like to switch to Remote?"
-                                if remote_configured
-                                else "Configure a valid OpenAI API key to use Remote."
-                            )
+                            f"{error_message} "
+                            + ("Would you like to switch to Remote?" if remote_configured else "")
                         ),
                         "assistant_mode": "local",
                         "can_fallback_to_remote": remote_configured,

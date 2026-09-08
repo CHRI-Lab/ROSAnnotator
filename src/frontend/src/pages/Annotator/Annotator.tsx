@@ -15,6 +15,7 @@ import {
 
 import Chatbox from "../../components/Chatbox";
 import Timeline from "../../components/Timeline";
+import { applyAIInstruction } from "../../components/Timeline/aiInstruction";
 import Transcript from "../../components/Transcript";
 import Booklist from "../../components/Booklist/Booklist";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
@@ -169,6 +170,15 @@ const Annotator = ({
             if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
               console.log("This is an instruction:", parsedObject);
               const parsedInstruction = parsedObject as AIInstruction;
+              const updatedAxes = applyAIInstruction(axesData, parsedInstruction);
+              if (JSON.stringify(updatedAxes) === JSON.stringify(axesData)) {
+                return {
+                  text: "The model returned a timeline instruction, but none of its steps could be applied.",
+                  assistantMode,
+                  aiRecord,
+                  isError: true,
+                };
+              }
               setInstruction(parsedInstruction);
 
               // Keep the model's machine-readable instruction internal. The

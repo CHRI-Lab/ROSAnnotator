@@ -1,4 +1,24 @@
 services:
+  local-llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    volumes:
+      - ./models:/models:ro
+    command:
+      - -m
+      - /models/qwen2.5-0.5b-instruct-q4_k_m.gguf
+      - -c
+      - "8192"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -n
+      - "1024"
+      - --parallel
+      - "1"
+    expose:
+      - "8080"
+
   backend:
     platform: linux/amd64
     build:
@@ -17,6 +37,12 @@ services:
     image: backend:ros-annotator
     container_name: annotator-back
     command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      LOCAL_AI_BASE_URL: http://local-llm:8080/v1
+      LOCAL_AI_MODEL: qwen2.5-0.5b-instruct
+    depends_on:
+      local-llm:
+        condition: service_healthy
 
   frontend:
     build:

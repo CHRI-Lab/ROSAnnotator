@@ -38,6 +38,7 @@ type ChatboxProps = {
 
 type PendingRemoteFallback = {
   message: string;
+  reason: string;
 };
 
 const ASSISTANT_ROUTING_STORAGE_KEY = "rosannotator-assistant-routing";
@@ -136,6 +137,7 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
         if (assistantResponse.canFallbackToRemote) {
           setPendingRemoteFallback({
             message: submittedMessage,
+            reason: assistantResponse.text,
           });
           return;
         }
@@ -200,7 +202,7 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
       ...history,
       {
         sender: "gpt",
-        text: "The local model is unavailable.",
+        text: pendingRemoteFallback.reason,
         assistantMode: "local",
         isError: true,
       },
@@ -225,9 +227,9 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
         <DialogTitle>Switch to Remote?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            The local language model is not connected. Continuing with Remote
-            will send the current transcript, video frames, codebook, and
-            timeline context to OpenAI.
+            {pendingRemoteFallback?.reason} Continuing with Remote will send
+            the current transcript, video frames, codebook, and timeline
+            context to OpenAI.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
