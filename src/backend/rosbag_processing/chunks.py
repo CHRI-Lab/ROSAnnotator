@@ -35,6 +35,7 @@ def build_chunks(duration_seconds, chunk_seconds):
 def save_manifest(
     directory, bag_filename, duration_seconds, chunk_seconds,
     chunking_enabled=True, source_size=None, source_mtime_ns=None,
+    booklist_filename=None, annotation_filename=None,
 ):
     chunks = build_chunks(duration_seconds, chunk_seconds)
     manifest = {
@@ -46,6 +47,8 @@ def save_manifest(
         'chunk_seconds': chunk_seconds,
         'chunk_count': len(chunks),
         'chunks': chunks,
+        'booklist_filename': booklist_filename,
+        'annotation_filename': annotation_filename,
     }
     if source_size is not None:
         manifest['source_size'] = source_size

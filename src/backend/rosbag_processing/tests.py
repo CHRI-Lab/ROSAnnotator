@@ -6,7 +6,7 @@ from django.test import SimpleTestCase
 from rest_framework.test import APIClient
 
 from .chunks import build_chunks, load_manifest, save_manifest
-from .data_utils import get_rosbag_duration
+from .data_utils import configure_huggingface_compatibility, get_rosbag_duration
 
 
 class GetRosbagDurationTests(SimpleTestCase):
@@ -31,6 +31,21 @@ class GetRosbagDurationTests(SimpleTestCase):
 
         self.assertEqual(get_rosbag_duration('/tmp/example.bag'), 0.0)
         bag.close.assert_called_once_with()
+
+
+class HuggingFaceCompatibilityTests(SimpleTestCase):
+    @patch('rosbag_processing.data_utils.hf_hub_download')
+    def test_maps_legacy_auth_argument_to_token(self, download_mock):
+        configure_huggingface_compatibility()
+
+        from pyannote.audio.core import pipeline as pipeline_module
+        pipeline_module.hf_hub_download(
+            'owner/model', 'config.yaml', use_auth_token='secret-token'
+        )
+
+        download_mock.assert_called_once_with(
+            'owner/model', 'config.yaml', token='secret-token'
+        )
 
 
 class InspectInputApiTests(SimpleTestCase):
