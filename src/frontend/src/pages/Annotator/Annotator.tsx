@@ -2,7 +2,16 @@ import { useState, useCallback, useEffect } from "react";
 import ReactPlayer from "react-player";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import { Tabs, Tab } from "@mui/material";
+import {
+  CircularProgress,
+  FormControl,
+  MenuItem,
+  Paper,
+  Select,
+  Tab,
+  Tabs,
+  Typography,
+} from "@mui/material";
 
 import Chatbox from "../../components/Chatbox";
 import Timeline from "../../components/Timeline";
@@ -13,13 +22,16 @@ import AnnotationTable from "../../components/AnnotationTable";
 import { AxesProvider } from "../../components/AxesProvider/AxesContext";
 import StatisticsAnnotation from "../../components/StatisticsAnnotation";
 import StatisticsTier from "../../components/StatisticsTier";
-import Axis from "../../components/Axis/Axis";
 
 const Annotator = ({
   rosBagFileName,
   bookListFileName,
   data,
   bookListData,
+  chunkManifest = null,
+  currentChunkIndex = 0,
+  switchingChunk = false,
+  onChunkChange = () => {},
 }) => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
@@ -27,7 +39,6 @@ const Annotator = ({
   const [editMode, setEditMode] = useState(false);
   const [bookList, setBookList] = useState(bookListData);
   const [selectedTab, setSelectedTab] = useState(0);
-  const [axes, setAxes] = useState([]);
   const [axesData, setAxesData] = useState([]);
   const [instruction, setInstruction] = useState(null);
   useEffect(() => {
@@ -70,7 +81,7 @@ const Annotator = ({
         return response.json();
       })
       .then((data) => {
-        let responseString = data.response;
+        const responseString = data.response;
   
 
         const jsonStartIndex = responseString.indexOf("{");
@@ -158,8 +169,16 @@ const Annotator = ({
     }
   }, [player]);
 
+  const formatChunkTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+  };
+
+  const currentChunk = chunkManifest?.chunks?.[currentChunkIndex];
+
   return (
-    <AxesProvider>
+    <AxesProvider key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}>
       <Box display="flex" height="100vh" overflow="hidden">
         {/* 左侧的主内容区域 */}
         <Box
@@ -237,8 +256,67 @@ const Annotator = ({
           </Box>
   
 
+          {chunkManifest?.chunking_enabled && (
+            <Paper
+              elevation={1}
+              sx={{
+                width: "calc(100% - 16px)",
+                maxWidth: 1200,
+                mx: 1,
+                mb: 1,
+                px: 1.5,
+                py: 1,
+                display: "grid",
+                gridTemplateColumns: "1fr auto 1fr",
+                alignItems: "center",
+                gap: 2,
+              }}
+            >
+              <Button
+                variant="outlined"
+                onClick={() => onChunkChange(currentChunk?.previous_index)}
+                disabled={switchingChunk || currentChunk?.previous_index == null}
+                sx={{ justifySelf: "start" }}
+              >
+                ← Previous
+              </Button>
+
+              <Box display="flex" alignItems="center" gap={1.5}>
+                <Typography fontWeight={600}>Chunk</Typography>
+                <FormControl size="small" sx={{ minWidth: 210 }}>
+                  <Select
+                    value={currentChunkIndex}
+                    onChange={(event) => onChunkChange(Number(event.target.value))}
+                    disabled={switchingChunk}
+                    aria-label="Select video chunk"
+                  >
+                    {chunkManifest.chunks.map((chunk) => (
+                      <MenuItem key={chunk.index} value={chunk.index}>
+                        {`Chunk ${chunk.index + 1} · ${formatChunkTime(chunk.start_seconds)}–${formatChunkTime(chunk.end_seconds)}`}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                {switchingChunk && <CircularProgress size={22} />}
+                <Typography color="text.secondary" whiteSpace="nowrap">
+                  {`${currentChunkIndex + 1} / ${chunkManifest.chunk_count}`}
+                </Typography>
+              </Box>
+
+              <Button
+                variant="outlined"
+                onClick={() => onChunkChange(currentChunk?.next_index)}
+                disabled={switchingChunk || currentChunk?.next_index == null}
+                sx={{ justifySelf: "end" }}
+              >
+                Next →
+              </Button>
+            </Paper>
+          )}
+
           <Box width="100%" maxWidth={1200} overflow="auto" maxHeight="50vh">
             <Timeline
+              key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}
               rosBagFileName={rosBagFileName}
               bookListFileName={bookListFileName}
               duration={duration}

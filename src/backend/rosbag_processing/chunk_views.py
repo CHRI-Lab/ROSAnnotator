@@ -1,3 +1,5 @@
+import json
+import logging
 from pathlib import Path
 
 from django.conf import settings
@@ -7,12 +9,40 @@ from rest_framework.response import Response
 
 from .chunks import load_manifest, save_manifest
 from .chunk_processing import process_chunk
+from .data_utils import load_annotation
 from .serializers import InputInspectionSerializer
+
+logger = logging.getLogger(__name__)
+
+
+def annotations_for_chunk(annotation_data, chunk):
+    """Return annotations overlapping a chunk, rebased to chunk-local time."""
+    chunk_start = chunk['start_seconds']
+    chunk_end = chunk['end_seconds']
+    chunk_annotations = []
+
+    for axis in annotation_data or []:
+        blocks = []
+        for block in axis.get('annotationBlocks', []):
+            block_start = block['start']
+            block_end = block['end']
+            if block_end <= chunk_start or block_start >= chunk_end:
+                continue
+            blocks.append({
+                **block,
+                'start': max(block_start, chunk_start) - chunk_start,
+                'end': min(block_end, chunk_end) - chunk_start,
+            })
+        chunk_annotations.append({**axis, 'annotationBlocks': blocks})
+
+    return chunk_annotations
 
 
 class ChunkRequestSerializer(InputInspectionSerializer):
     chunking_enabled = serializers.BooleanField(default=True)
     chunk_seconds = serializers.FloatField(min_value=0.001, required=False)
+    booklist_filename = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    annotation_filename = serializers.CharField(required=False, allow_blank=True, max_length=255)
 
     def validate(self, values):
         if values['chunking_enabled'] and 'chunk_seconds' not in values:
@@ -24,6 +54,21 @@ class ChunkRequestSerializer(InputInspectionSerializer):
         if any(character in value for character in ('/', '\\', ':', '\x00')):
             raise serializers.ValidationError('A .bag filename without a path is required.')
         return value
+
+    def _validate_optional_filename(self, value, extension):
+        if value and (
+            value != Path(value).name
+            or any(character in value for character in ('/', '\\', ':', '\x00'))
+            or not value.lower().endswith(extension)
+        ):
+            raise serializers.ValidationError(f'A valid {extension} filename is required.')
+        return value or None
+
+    def validate_booklist_filename(self, value):
+        return self._validate_optional_filename(value, '.json')
+
+    def validate_annotation_filename(self, value):
+        return self._validate_optional_filename(value, '.csv')
 
 
 def manifest_directory():
@@ -57,6 +102,13 @@ def create_chunks(request):
     bag_path = (root / values['bag_filename']).resolve()
     if bag_path.parent != root or not bag_path.is_file():
         return Response({'error': 'ROSBag file not found.'}, status=404)
+    for field, directory, label in (
+        ('booklist_filename', '/app/datas/booklist', 'Booklist'),
+        ('annotation_filename', '/app/datas/annotation', 'Annotation'),
+    ):
+        filename = values.get(field)
+        if filename and not (Path(directory) / filename).is_file():
+            return Response({'error': f'{label} file not found.'}, status=404)
     try:
         duration = read_duration(bag_path)
     except Exception:
@@ -74,6 +126,8 @@ def create_chunks(request):
             chunking_enabled=chunking_enabled,
             source_size=bag_path.stat().st_size,
             source_mtime_ns=bag_path.stat().st_mtime_ns,
+            booklist_filename=values.get('booklist_filename'),
+            annotation_filename=values.get('annotation_filename'),
         )
     except ValueError as exc:
         return Response({'error': str(exc)}, status=400)
@@ -141,10 +195,34 @@ def process_chunk_view(request, manifest_id, chunk_index):
         status_code = status.HTTP_409_CONFLICT if 'already being processed' in str(exc) else 400
         return Response({'error': str(exc)}, status=status_code)
     except Exception:
+        logger.exception('Unable to process chunk %s from manifest %s', chunk_index, manifest_id)
         return Response({'error': 'Unable to process chunk.'}, status=500)
+
+    booklist_data = {}
+    booklist_filename = manifest.get('booklist_filename')
+    if booklist_filename:
+        booklist_path = Path('/app/datas/booklist') / booklist_filename
+        try:
+            with booklist_path.open(encoding='utf-8') as stream:
+                booklist_data = json.load(stream)
+        except (OSError, ValueError):
+            return Response({'error': 'Unable to read booklist.'}, status=400)
+
+    annotation_data = None
+    annotation_filename = manifest.get('annotation_filename')
+    if annotation_filename:
+        try:
+            annotation_data = annotations_for_chunk(
+                load_annotation(annotation_filename),
+                manifest['chunks'][chunk_index],
+            )
+        except (OSError, ValueError):
+            return Response({'error': 'Unable to read annotation.'}, status=400)
     return Response({
         'manifest_id': manifest['id'],
         'bag_filename': manifest['bag_filename'],
         'time_reference': manifest['time_reference'],
+        'booklist_data': booklist_data,
+        'annotation_data': annotation_data,
         **result,
     })
