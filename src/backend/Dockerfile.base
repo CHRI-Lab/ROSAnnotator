@@ -28,6 +28,8 @@ RUN /root/conda/envs/ros_env/bin/python -m pip install \
         --upgrade pip setuptools wheel \
     && /root/conda/envs/ros_env/bin/python -m pip install \
         --no-cache-dir -r /tmp/requirements.txt \
+    && /root/conda/envs/ros_env/bin/python -c \
+        "import huggingface_hub, speechbrain, torch, torchaudio, torchvision; assert huggingface_hub.__version__ == '0.24.6'; assert speechbrain.__version__ == '1.0.0'; assert torch.__version__.split('+')[0] == '2.5.1'; assert torchaudio.__version__.split('+')[0] == '2.5.1'; assert torchvision.__version__.split('+')[0] == '0.20.1'" \
     && rm -f /tmp/requirements.txt
 
 RUN /env_config/backend.sh \
