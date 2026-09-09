@@ -83,16 +83,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Free disk space for GPU image build
-        shell: bash
-        run: |
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache
-          docker system prune --all --force
-          df -h
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -105,17 +95,55 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify published GPU base image
-        run: docker buildx imagetools inspect ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v1@sha256:5e41f697df35b67f74f48c1fab6974df0388bd1fc6c9102e5515220ef4c80261
+        run: docker buildx imagetools inspect ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v2@sha256:d3f12b214ef323eddc24f86a3e2c65148572c0ea45b47e453f14d23cda750c10
 
-      - name: Build backend image
+      - name: Build backend application layer for pull request
+        if: github.event_name != 'push'
         uses: docker/build-push-action@v6
         with:
           context: ./src/backend
           file: ./src/backend/Dockerfile
-          push: ${{ github.event_name == 'push' }}
-          tags: ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
-          cache-from: type=gha,scope=backend
-          cache-to: type=gha,mode=min,scope=backend
+          build-args: BACKEND_BASE_IMAGE=python:3.9-slim
+          push: false
+          tags: backend-ci:${{ github.sha }}
+
+      - name: Build and publish backend application image
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          BASE_IMAGE: ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v2@sha256:d3f12b214ef323eddc24f86a3e2c65148572c0ea45b47e453f14d23cda750c10
+          TARGET_IMAGE: ${{ env.BACKEND_IMAGE }}:sha-${{ github.sha }}
+        run: |
+          tar \
+            --directory src/backend \
+            --transform='s,^,app/,' \
+            --create \
+            --file backend-app.tar \
+            manage.py ros_annotator rosbag_processing public
+
+          docker run --rm \
+            --volume "$HOME/.docker/config.json:/root/.docker/config.json:ro" \
+            --volume "$PWD:/workspace" \
+            --workdir /workspace \
+            gcr.io/go-containerregistry/crane:debug \
+            append \
+            --platform linux/amd64 \
+            --base "$BASE_IMAGE" \
+            --new_layer backend-app.tar \
+            --new_tag "$TARGET_IMAGE"
+
+          docker run --rm \
+            --volume "$HOME/.docker/config.json:/root/.docker/config.json:ro" \
+            gcr.io/go-containerregistry/crane:debug \
+            mutate \
+            --platform linux/amd64 \
+            "$TARGET_IMAGE" \
+            --workdir /app \
+            --cmd python \
+            --cmd manage.py \
+            --cmd runserver \
+            --cmd 0.0.0.0:8000 \
+            --tag "$TARGET_IMAGE"
 
   validation:
     name: All image builds successful
