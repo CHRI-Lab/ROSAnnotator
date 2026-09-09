@@ -178,7 +178,7 @@ const Annotator = ({
   const currentChunk = chunkManifest?.chunks?.[currentChunkIndex];
 
   return (
-    <AxesProvider>
+    <AxesProvider key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}>
       <Box display="flex" height="100vh" overflow="hidden">
         {/* 左侧的主内容区域 */}
         <Box

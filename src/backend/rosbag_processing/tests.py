@@ -6,6 +6,7 @@ from django.test import SimpleTestCase
 from rest_framework.test import APIClient
 
 from .chunks import build_chunks, load_manifest, save_manifest
+from .chunk_views import annotations_for_chunk
 from .data_utils import configure_huggingface_compatibility, get_rosbag_duration
 
 
@@ -153,6 +154,33 @@ class ChunkManifestTests(SimpleTestCase):
 
         self.assertEqual(loaded, saved)
         self.assertEqual(loaded['chunk_count'], 3)
+
+
+class ChunkAnnotationTests(SimpleTestCase):
+    def test_filters_clips_and_rebases_annotations(self):
+        annotations = [{
+            'id': 1,
+            'axisType': 'Type-in',
+            'axisName': 'Notes',
+            'axisBooklistName': '',
+            'annotationBlocks': [
+                {'start': 290, 'end': 310, 'text': 'crosses start'},
+                {'start': 320, 'end': 330, 'text': 'inside'},
+                {'start': 590, 'end': 620, 'text': 'crosses end'},
+                {'start': 700, 'end': 710, 'text': 'outside'},
+            ],
+        }]
+
+        result = annotations_for_chunk(annotations, {
+            'start_seconds': 300,
+            'end_seconds': 600,
+        })
+
+        self.assertEqual(result[0]['annotationBlocks'], [
+            {'start': 0, 'end': 10, 'text': 'crosses start'},
+            {'start': 20, 'end': 30, 'text': 'inside'},
+            {'start': 290, 'end': 300, 'text': 'crosses end'},
+        ])
 
 
 class ChunkApiTests(SimpleTestCase):

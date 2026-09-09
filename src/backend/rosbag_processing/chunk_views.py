@@ -15,6 +15,29 @@ from .serializers import InputInspectionSerializer
 logger = logging.getLogger(__name__)
 
 
+def annotations_for_chunk(annotation_data, chunk):
+    """Return annotations overlapping a chunk, rebased to chunk-local time."""
+    chunk_start = chunk['start_seconds']
+    chunk_end = chunk['end_seconds']
+    chunk_annotations = []
+
+    for axis in annotation_data or []:
+        blocks = []
+        for block in axis.get('annotationBlocks', []):
+            block_start = block['start']
+            block_end = block['end']
+            if block_end <= chunk_start or block_start >= chunk_end:
+                continue
+            blocks.append({
+                **block,
+                'start': max(block_start, chunk_start) - chunk_start,
+                'end': min(block_end, chunk_end) - chunk_start,
+            })
+        chunk_annotations.append({**axis, 'annotationBlocks': blocks})
+
+    return chunk_annotations
+
+
 class ChunkRequestSerializer(InputInspectionSerializer):
     chunking_enabled = serializers.BooleanField(default=True)
     chunk_seconds = serializers.FloatField(min_value=0.001, required=False)
@@ -189,7 +212,10 @@ def process_chunk_view(request, manifest_id, chunk_index):
     annotation_filename = manifest.get('annotation_filename')
     if annotation_filename:
         try:
-            annotation_data = load_annotation(annotation_filename)
+            annotation_data = annotations_for_chunk(
+                load_annotation(annotation_filename),
+                manifest['chunks'][chunk_index],
+            )
         except (OSError, ValueError):
             return Response({'error': 'Unable to read annotation.'}, status=400)
     return Response({

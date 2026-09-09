@@ -137,6 +137,7 @@ const MainPage = () => {
   return (
     <div>
       <Annotator
+        key={manifestId ? `${manifestId}-chunk-${currentChunkIndex}` : "whole-input"}
         rosBagFileName={rosBagFile}
         bookListFileName={bookListFile}
         data={data}
