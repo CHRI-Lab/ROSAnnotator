@@ -169,16 +169,17 @@ const Timeline: React.FC<TimelineProps> = ({
 
 
   useEffect(() => {
-    const newAxes = Array.isArray(annotationData)
-      ? annotationData.map((axisData: any) => ({
+
+    if (annotationData) {
+      const newAxes = annotationData.map((axisData: any) => ({
         id: globalAxisId++,
         type: axisData.axisType,
         axisName: axisData.axisName,
         typeName: axisData.axisBooklistName,
         blocks: axisData.annotationBlocks,
-      }))
-      : [];
-    setAxes(newAxes);
+      }));
+      setAxes(newAxes);
+    }
   
     if (speakerData) {
       const speakerAxesMap = new Map<string, any>();
@@ -215,6 +216,19 @@ const Timeline: React.FC<TimelineProps> = ({
       setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
     }
   }, [annotationData, speakerData]);
+  useEffect(() => {
+    if (annotationData) {
+      //TODO check this code
+      const newAxes = annotationData.map((axisData: any) => ({
+        id: globalAxisId++,
+        type: axisData.axisType,
+        axisName: axisData.axisName,
+        typeName: axisData.axisBooklistName,
+        blocks: axisData.annotationBlocks,
+      }));
+      setAxes(newAxes);
+    }
+  }, []);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {

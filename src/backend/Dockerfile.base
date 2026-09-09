@@ -2,7 +2,7 @@
 
 # GPU/ROS base image. Rebuild this image only when the runtime dependencies
 # or the ROS environment change.
-FROM ubuntu:focal@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
+FROM ubuntu:focal
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends wget dos2unix python3-pip \
@@ -32,6 +32,7 @@ RUN /root/conda/envs/ros_env/bin/python -m pip install \
         "import huggingface_hub, speechbrain, torch, torchaudio, torchvision; assert huggingface_hub.__version__ == '0.24.6'; assert speechbrain.__version__ == '1.0.0'; assert torch.__version__.split('+')[0] == '2.5.1'; assert torchaudio.__version__.split('+')[0] == '2.5.1'; assert torchvision.__version__.split('+')[0] == '0.20.1'" \
     && rm -f /tmp/requirements.txt
 
-RUN cat /env_config/bashrc >> "${HOME}/.bashrc"
+RUN /env_config/backend.sh \
+    && cat /env_config/bashrc >> "${HOME}/.bashrc"
 
 ENTRYPOINT ["/bin/bash", "/env_config/entrypoint.sh"]
