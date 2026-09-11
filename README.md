@@ -39,7 +39,16 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    The code has been tested by this combination: Ubuntu 20.04 LTS, ROS Noetic, Python 3.9, Chrome version:130.0.6723.117.
    
-2. **Prerequisites - Docker Installation**
+2. **Clone the Repository**
+
+   Clone this repository and enter its root directory:
+
+   ```bash
+   git clone <repository-url>
+   cd ROSAnnotator-Group6
+   ```
+
+3. **Prerequisite — Docker Installation**
 
    - Before you begin, ensure that you have Docker installed on your machine. If not, download and install Docker from [Docker's official site](https://www.docker.com/get-started).
    - Verify that the **Docker daemon** is running by executing `docker info` in your terminal. This should return information about the Docker client and server. If not, please start the Docker daemon.
@@ -56,52 +65,79 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    Do not commit this file. For gated Pyannote models, the Hugging Face account
    associated with the token must have accepted the model terms.
 
-4. **Starting the Server**
+4. **Download a Local AI Model**
 
-   First, clone this repo to your local device of any system (Windows, OS, Linux).
+   Before starting Docker, create the local model directory and download **one**
+   of the following model options. Model files are intentionally excluded from
+   Git because they are large, so every new clone needs this step.
 
-   Select the local model before the first run by copying the example configuration:
+   **Option A — Qwen (text only)**
+
+   Use Qwen based on text files (e.g. request-utterance and speech-attitude annotation based on transcript). It does not
+   accept video frames and therefore cannot perform actions such as gesture annotation.
+
+   ```bash
+   mkdir -p models
+   curl -L --fail --progress-bar \
+     -o models/qwen2.5-0.5b-instruct-q4_k_m.gguf \
+     https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
+   ```
+
+   **Option B — SmolVLM2 (text and visual input)**
+
+   Use SmolVLM2 when annotation from video frames is required (e.g. gesture annotation). This
+   option needs both the model and its multimodal projector.
+
+   ```bash
+   mkdir -p models
+   curl -L --fail --progress-bar \
+     -o models/SmolVLM2-500M-Video-Instruct-Q8_0.gguf \
+     https://huggingface.co/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/main/SmolVLM2-500M-Video-Instruct-Q8_0.gguf
+   curl -L --fail --progress-bar \
+     -o models/mmproj-SmolVLM2-500M-Video-Instruct-f16.gguf \
+     https://huggingface.co/ggml-org/SmolVLM2-500M-Video-Instruct-GGUF/resolve/main/mmproj-SmolVLM2-500M-Video-Instruct-f16.gguf
+   ```
+
+   Confirm that the selected files were downloaded successfully:
+
+   ```bash
+   ls -lh models/
+   ```
+
+5. **Select the Local AI Model**
+
+   Copy the example configuration before the first run:
 
    ```bash
    cp .env.example .env
    ```
 
-   Put the selected GGUF file in `./models`, then set `LOCAL_AI_MODEL` in the
-   root `.env` file to its filename **without** the `.gguf` suffix. This is the
-   single configuration point used by both llama.cpp and the backend. For example:
+   Set `LOCAL_AI_MODEL` in the root `.env` file to the downloaded model's
+   filename **without** the `.gguf` suffix. This is the single configuration
+   point used by both llama.cpp and the backend.
+
+   For Qwen:
 
    ```dotenv
    LOCAL_AI_MODEL=qwen2.5-0.5b-instruct-q4_k_m
    ```
 
-   To use `models/llama-3.2-1b-instruct-q4_k_m.gguf` instead, change only that line:
-
-   ```dotenv
-   LOCAL_AI_MODEL=llama-3.2-1b-instruct-q4_k_m
-   ```
-
-   Alternatively, select it for one run from the command line (this overrides
-   the value in `.env`):
-
-   ```bash
-   LOCAL_AI_MODEL=llama-3.2-1b-instruct-q4_k_m docker compose up --build
-   ```
-
-   To enable local gesture and video-frame analysis with SmolVLM2, download
-   these two files from the official llama.cpp GGUF repository into `./models`:
-
-   - `SmolVLM2-500M-Video-Instruct-Q8_0.gguf`
-   - `mmproj-SmolVLM2-500M-Video-Instruct-f16.gguf`
-
-   Then select it in `.env`:
+   For SmolVLM2:
 
    ```dotenv
    LOCAL_AI_MODEL=SmolVLM2-500M-Video-Instruct-Q8_0
    ```
 
-   The startup script detects SmolVLM2 and loads its multimodal projector
-   automatically. Text-only Qwen and Llama models continue to reject gesture
-   annotation requests with a clear error.
+   The startup script automatically loads SmolVLM2's multimodal projector.
+   You do not include the projector filename in `.env`.
+
+   To override `.env` for one run, put the selection before the Docker command:
+
+   ```bash
+   LOCAL_AI_MODEL=SmolVLM2-500M-Video-Instruct-Q8_0 docker compose up --build
+   ```
+
+6. **Starting the Server**
 
    Run the following commands in the root directory of the project:
 
@@ -138,15 +174,19 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    sudo chown -R "$(id -u):$(id -g)" datas
    ```
 
-5. **Access the Application**
+7. **Environment**
+
+    The application requires OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please create a .env file in the root path of **backend** and manually place two variables, **OPENAI_API_KEY** and **HUGGINGFACE_AUTH_TOKEN**, inside. Please restart the container after changing the .env file.
+
+8. **Access the Application**
 
    Both the front end and the back end are hosted locally in a Docker container. Once the server is up and running, you can access the [web app](http://localhost:5173/) at `http://localhost:5173/`.
 
-6. **Sample Data**
+9. **Sample Data**
 
    We provided a sample ROSBag and a sample codebook in the folder `/data-samples`. The codebook needs to be in JSON format and put in the `/datas/booklist` folder. Please put the .bag file in the `/datas/rosbag-data` folder.
 
-7. **Customised Data**
+10. **Customised Data**
 
    The topics for video and audio data must be configured to match the corresponding topics in the ROSBag. In the sample ROSBag, the topic for video is `/xtion/rgb/image_raw_throttled`, and the topic for audio is `/audio`. Topic names can be modified in the `/src/backend/rosbag_processing/data_utils.py` file. If additional message types need to be extracted, they should also be defined within this file.
 
