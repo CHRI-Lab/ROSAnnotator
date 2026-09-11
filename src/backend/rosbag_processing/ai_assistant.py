@@ -1,9 +1,13 @@
 from abc import ABC, abstractmethod
 import json
+import logging
 import os
 import re
 
 from openai import APIConnectionError, APIStatusError, AuthenticationError, OpenAI
+
+
+logger = logging.getLogger(__name__)
 
 
 class RemoteAuthenticationError(RuntimeError):
@@ -213,6 +217,7 @@ class LocalAI(AIAssistant):
 
     model_name = None
     supports_visual_annotation = False
+    max_visual_frames = 8
 
     def __init__(
         self,
@@ -236,22 +241,31 @@ class LocalAI(AIAssistant):
             raise ValueError("A local model subclass must define model_name.")
 
     def _respond(self, message, chatHistory=""):
-        if (
-            not self.supports_visual_annotation
-            and self._requests_visual_analysis(message)
-        ):
+        requests_visual_analysis = self._requests_visual_analysis(message)
+        if not self.supports_visual_annotation and requests_visual_analysis:
             raise LocalInferenceError(
                 f"The selected local model ({self.model}) is text-only and cannot "
                 "perform gesture annotation or inspect video frames. Select a "
                 "vision-capable model or Remote for video-based annotation."
             )
+        if requests_visual_analysis and not self.frameContext:
+            raise LocalInferenceError(
+                "No video frames are available for visual annotation. Process "
+                "a video before requesting gesture annotation."
+            )
 
         is_timeline_request = self._requests_timeline_change(message)
         is_auto_annotation = self._requests_auto_annotation(message)
-        if is_auto_annotation and len(str(self.transcriptContext or "")) > 4000:
+        if requests_visual_analysis and is_timeline_request:
+            return self._respond_visual_annotation(message, chatHistory)
+        if (
+            is_auto_annotation
+            and not requests_visual_analysis
+            and len(str(self.transcriptContext or "")) > 4000
+        ):
             return self._respond_chunked_auto_annotation(message)
 
-        system_prompt = self._build_system_prompt(message, chatHistory)
+        system_prompt = self._build_request_system_prompt(message, chatHistory)
         request_parameters = {
             "model": self.model,
             "temperature": 0,
@@ -275,7 +289,7 @@ class LocalAI(AIAssistant):
                 **request_parameters,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": message},
+                    {"role": "user", "content": self._user_content(message)},
                 ],
             )
         except (APIConnectionError, APIStatusError) as error:
@@ -288,7 +302,15 @@ class LocalAI(AIAssistant):
             raise LocalInferenceError("The local language model returned no text.")
 
         if is_timeline_request:
-            response_text = self._normalize_timeline_instruction(response_text)
+            try:
+                response_text = self._normalize_timeline_instruction(response_text)
+            except LocalInferenceError:
+                logger.error(
+                    "Invalid local timeline response from model %s: %r",
+                    self.model,
+                    response_text,
+                )
+                raise
             if is_auto_annotation:
                 instruction = json.loads(response_text)
                 if not any(
@@ -314,6 +336,253 @@ class LocalAI(AIAssistant):
             },
         }
         return response_text
+
+    def _respond_visual_annotation(self, message, chatHistory=""):
+        """Classify sampled frames, then build a safe timeline in code."""
+        codebook = self._codebook_for_message(message)
+        labels = self._codebook_labels(codebook)
+        if not labels:
+            raise LocalInferenceError(
+                "The codebook has no gesture labels for visual annotation."
+            )
+
+        frames = list(self.frameContext or [])
+        stride = max(1, len(frames) // self.max_visual_frames)
+        selected = [
+            (index, frames[index])
+            for index in range(0, len(frames), stride)
+        ][:self.max_visual_frames]
+        segments = self._transcript_segments()
+        duration = max(
+            (float(segment.get("end", 0)) for segment in segments),
+            default=float(max(1, len(selected))),
+        )
+        allowed_labels = [*labels, "NO_GESTURE"]
+        schema = {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "enum": allowed_labels}
+            },
+            "required": ["label"],
+            "additionalProperties": False,
+        }
+        request_parameters = {
+            "model": self.model,
+            "temperature": 0,
+            "max_tokens": 32,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "gesture_classification",
+                    "strict": True,
+                    "schema": schema,
+                },
+            },
+        }
+        system_prompt = (
+            "Classify the visible participant gesture in one video frame. "
+            "Return exactly one supplied gesture label. Return NO_GESTURE when "
+            "no listed gesture is clearly visible. Do not return timeline "
+            "actions, explanations, or additional fields.\n\n"
+            f"GESTURE LABELS:\n{json.dumps(labels, ensure_ascii=False)}"
+        )
+        client = OpenAI(base_url=self.baseURL, api_key="local", timeout=900)
+        classifications = []
+        failed_frames = 0
+        resolved_model = self.model
+        for source_index, frame in selected:
+            raw_response = None
+            try:
+                completion = client.chat.completions.create(
+                    **request_parameters,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "Classify the gesture in this frame.",
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{frame}"
+                                    },
+                                },
+                            ],
+                        },
+                    ],
+                )
+                resolved_model = getattr(completion, "model", self.model)
+                raw_response = completion.choices[0].message.content
+                label = json.loads(raw_response).get("label")
+                if label not in allowed_labels:
+                    raise ValueError("response label is not in the codebook")
+                if label != "NO_GESTURE" and not self._is_none_label(label):
+                    timestamp = (
+                        duration * source_index / max(1, len(frames) - 1)
+                    )
+                    classifications.append((timestamp, label))
+            except (APIConnectionError, APIStatusError) as error:
+                raise LocalInferenceError(
+                    "The local language model service is unavailable."
+                ) from error
+            except (TypeError, ValueError, json.JSONDecodeError, AttributeError) as error:
+                failed_frames += 1
+                logger.error(
+                    "Invalid local visual classification from model %s: "
+                    "error=%s raw=%r",
+                    self.model,
+                    error,
+                    raw_response,
+                )
+
+        if not classifications:
+            detail = (
+                f" ({failed_frames} frame responses were invalid)"
+                if failed_frames
+                else ""
+            )
+            raise LocalInferenceError(
+                "The local visual model found no codebook gestures in the "
+                f"sampled frames{detail}."
+            )
+
+        sample_spacing = duration / max(1, len(selected) - 1)
+        half_window = max(0.05, sample_spacing / 2)
+        axis_id = max(self._current_axis_ids(), default=0) + 1
+        steps = [
+            {
+                "action": "addAxi",
+                "parameters": {
+                    "axisId": axis_id,
+                    "axisName": self._auto_annotation_axis_name(message),
+                    "axistype": "Type-in",
+                },
+            }
+        ]
+        for timestamp, label in classifications:
+            start = max(0, timestamp - half_window)
+            end = min(duration, timestamp + half_window)
+            if end <= start:
+                end = start + 0.1
+            steps.append(
+                {
+                    "action": "addBlock",
+                    "parameters": {
+                        "axisId": axis_id,
+                        "start": round(start, 3),
+                        "end": round(end, 3),
+                        "text": label,
+                    },
+                }
+            )
+
+        response_text = json.dumps(
+            {"type": "instruction", "steps": steps}, ensure_ascii=False
+        )
+        self.last_run_metadata = {
+            "model": {
+                "provider": "local",
+                "requested": self.model,
+                "resolved": resolved_model,
+            },
+            "parameters": {
+                **request_parameters,
+                "sampled_frame_count": len(selected),
+                "failed_frame_count": failed_frames,
+                "classification_count": len(classifications),
+            },
+            "prompts": {"system": system_prompt, "user": message},
+        }
+        return response_text
+
+    @staticmethod
+    def _codebook_labels(codebook):
+        if isinstance(codebook, dict):
+            values = codebook.values()
+        elif isinstance(codebook, list):
+            values = (codebook,)
+        else:
+            return []
+        return list(
+            dict.fromkeys(
+                str(label).strip()
+                for labels in values
+                if isinstance(labels, list)
+                for label in labels
+                if str(label).strip()
+            )
+        )
+
+    @staticmethod
+    def _is_none_label(label):
+        normalized_label = str(label).casefold()
+        return normalized_label in {"none", "no gesture", "gesture_none"} or (
+            normalized_label.endswith("_none")
+        )
+
+    def _user_content(self, message):
+        """Build text-only or multimodal content from model capabilities."""
+        if (
+            not self.supports_visual_annotation
+            or not self._requests_visual_analysis(message)
+        ):
+            return message
+
+        frames = list(self.frameContext or [])
+        stride = max(1, len(frames) // self.max_visual_frames)
+        selected_frames = frames[::stride][:self.max_visual_frames]
+        segments = self._transcript_segments()
+        duration = max(
+            (float(segment.get("end", 0)) for segment in segments),
+            default=0,
+        )
+        content = [
+            {
+                "type": "text",
+                "text": (
+                    f"{message}\n\nThe following images are chronological samples "
+                    "from the video. Use visible evidence to identify gestures. "
+                    "Frame timestamps are approximate."
+                ),
+            }
+        ]
+        for index, frame in enumerate(selected_frames):
+            approximate_time = (
+                duration * index / max(1, len(selected_frames) - 1)
+            )
+            content.extend(
+                [
+                    {
+                        "type": "text",
+                        "text": f"Video sample near {approximate_time:.2f} seconds:",
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{frame}"
+                        },
+                    },
+                ]
+            )
+        return content
+
+    def _build_request_system_prompt(self, message, chatHistory=""):
+        """Add capability-specific guidance to the shared local prompt."""
+        prompt = self._build_system_prompt(message, chatHistory)
+        if (
+            not self.supports_visual_annotation
+            or not self._requests_visual_analysis(message)
+        ):
+            return prompt
+        return (
+            f"{prompt}\n\nUse the supplied chronological video samples as "
+            "visual evidence. For gesture annotation, label only gestures that "
+            "are visibly supported. Use the approximate sample timestamps for "
+            "block times and acknowledge uncertainty in ordinary text answers."
+        )
 
     def _respond_chunked_auto_annotation(self, message):
         """Annotate long transcripts without producing one truncated JSON reply."""
@@ -341,13 +610,16 @@ class LocalAI(AIAssistant):
 
         client = OpenAI(base_url=self.baseURL, api_key="local", timeout=900)
         codebook_context = json.dumps(
-            self.codebookContext, ensure_ascii=False, indent=2
+            self._codebook_for_message(message), ensure_ascii=False, indent=2
         )
-        chunk_size = 24 if is_request_task else 6
+        # Keep each classification response small enough for compact local
+        # models to finish valid JSON. Request batches used to contain up to
+        # 24 items, which regularly exhausted the output budget mid-object.
+        chunk_size = 8 if is_request_task else 6
         request_parameters = {
             "model": self.model,
             "temperature": 0,
-            "max_tokens": 128,
+            "max_tokens": 256,
             "response_format": {
                 "type": "json_schema",
                 "json_schema": {
@@ -372,6 +644,7 @@ class LocalAI(AIAssistant):
             for phrase in ("according to", "attitude", "codebook")
         )
         for chunk in chunks:
+            chunk_response = None
             chunk_context = json.dumps(chunk, ensure_ascii=False, indent=2)
             system_prompt = f"""Select matching segments from this transcript chunk.
 Apply the user's task to every segment, not only the first match. Return one
@@ -430,8 +703,14 @@ TIMESTAMPED SEGMENTS:
                 raise LocalInferenceError(
                     "The local language model service is unavailable."
                 ) from error
-            except (TypeError, json.JSONDecodeError, AttributeError):
+            except (TypeError, json.JSONDecodeError, AttributeError) as error:
                 failed_chunks += 1
+                logger.error(
+                    "Invalid local annotation chunk from model %s: error=%s raw=%r",
+                    self.model,
+                    error,
+                    chunk_response,
+                )
 
         unique_blocks = []
         seen_blocks = set()
@@ -569,7 +848,39 @@ TIMESTAMPED SEGMENTS:
             return "Participant Requests"
         if "attitude" in normalized_message:
             return "Participant Attitudes"
+        if any(
+            word in normalized_message
+            for word in ("gesture", "body language", "visual")
+        ):
+            return "Participant Gestures"
         return "Auto Annotation"
+
+    def _codebook_for_message(self, message):
+        """Select relevant categories while retaining combined codebook support."""
+        if not isinstance(self.codebookContext, dict):
+            return self.codebookContext
+
+        normalized_message = str(message or "").casefold()
+        category_terms = ()
+        if "attitude" in normalized_message:
+            category_terms = ("attitude",)
+        elif any(
+            term in normalized_message
+            for term in ("gesture", "body language", "visual")
+        ):
+            category_terms = ("gesture", "body language", "visual")
+        elif "request" in normalized_message:
+            category_terms = ("request",)
+
+        if not category_terms:
+            return self.codebookContext
+
+        selected_categories = {
+            category: labels
+            for category, labels in self.codebookContext.items()
+            if any(term in str(category).casefold() for term in category_terms)
+        }
+        return selected_categories or self.codebookContext
 
     @staticmethod
     def _is_request_candidate(text):
@@ -776,7 +1087,7 @@ TIMESTAMPED SEGMENTS:
 
     def _build_system_prompt(self, message, chatHistory=""):
         codebook_context = json.dumps(
-            self.codebookContext, ensure_ascii=False, indent=2
+            self._codebook_for_message(message), ensure_ascii=False, indent=2
         )
         history = str(chatHistory or "")[-2000:]
         transcript_prompt = f"""TRANSCRIPT:
@@ -855,8 +1166,21 @@ class LlamaLocalAI(LocalAI):
     model_name = "llama-3.2-1b-instruct-q4_k_m"
 
 
+class SmolVLM2LocalAI(LocalAI):
+    """Configuration for local SmolVLM2 multimodal inference."""
+
+    model_name = "SmolVLM2-500M-Video-Instruct-Q8_0"
+    supports_visual_annotation = True
+
+
 def create_local_ai(**kwargs):
     """Build the appropriate local-model child from ``LOCAL_AI_MODEL``."""
     model = os.getenv("LOCAL_AI_MODEL", QwenLocalAI.model_name)
-    model_class = LlamaLocalAI if "llama" in model.casefold() else QwenLocalAI
+    normalized_model = model.casefold()
+    if "smolvlm2" in normalized_model:
+        model_class = SmolVLM2LocalAI
+    elif "llama" in normalized_model:
+        model_class = LlamaLocalAI
+    else:
+        model_class = QwenLocalAI
     return model_class(model=model, **kwargs)

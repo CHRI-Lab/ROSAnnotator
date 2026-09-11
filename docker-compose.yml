@@ -1,11 +1,13 @@
 services:
   local-llm:
     image: ghcr.io/ggml-org/llama.cpp:server
+    entrypoint: /usr/local/bin/start-local-llm
     volumes:
       - ./models:/models:ro
+      - ./scripts/start-local-llm.sh:/usr/local/bin/start-local-llm:ro
+    environment:
+      LOCAL_AI_MODEL: ${LOCAL_AI_MODEL:-qwen2.5-0.5b-instruct-q4_k_m}
     command:
-      - -m
-      - /models/${LOCAL_AI_MODEL:-qwen2.5-0.5b-instruct-q4_k_m}.gguf
       - -c
       - "8192"
       - --host

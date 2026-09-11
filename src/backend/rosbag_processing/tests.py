@@ -9,10 +9,13 @@ from django.test import RequestFactory, SimpleTestCase
 from .ai_assistant import (
     AIAssistant,
     LlamaLocalAI,
+    LocalAI,
     LocalInferenceError,
     QwenLocalAI,
     RemoteAPI,
     RemoteAuthenticationError,
+    SmolVLM2LocalAI,
+    create_local_ai,
 )
 
 
@@ -136,6 +139,32 @@ class AIAssistantTests(SimpleTestCase):
         )
 
     @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_invalid_local_timeline_response_is_logged(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct-q4_k_m",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="not valid json")
+                    )
+                ],
+            )
+        )
+        assistant = QwenLocalAI(
+            checkpointPath="/models/local.gguf", **self.contexts
+        )
+
+        with self.assertLogs(
+            "rosbag_processing.ai_assistant", level="ERROR"
+        ) as captured_logs:
+            with self.assertRaisesRegex(
+                LocalInferenceError, "invalid timeline instruction"
+            ):
+                assistant.respond("Create an annotation axis")
+
+        self.assertIn("not valid json", "\n".join(captured_logs.output))
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
     def test_local_summary_request_uses_general_answer_prompt(self, openai_class):
         openai_class.return_value.chat.completions.create.return_value = (
             SimpleNamespace(
@@ -219,6 +248,153 @@ class AIAssistantTests(SimpleTestCase):
             assistant.respond("Annotate participant gestures in the video")
 
         openai_class.assert_not_called()
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_smolvlm2_sends_sampled_frames_for_visual_requests(
+        self, openai_class
+    ):
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="SmolVLM2-500M-Video-Instruct-Q8_0",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="The participant waves.")
+                    )
+                ],
+            )
+        )
+        assistant = SmolVLM2LocalAI(
+            checkpointPath="/models/smolvlm2.gguf", **self.contexts
+        )
+
+        result = assistant.respond("Describe the gestures in the video")
+
+        self.assertEqual(result, "The participant waves.")
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        user_content = request["messages"][1]["content"]
+        images = [item for item in user_content if item["type"] == "image_url"]
+        self.assertEqual(len(images), 8)
+        self.assertEqual(
+            images[0]["image_url"]["url"],
+            "data:image/jpeg;base64,frame-0",
+        )
+        self.assertIn("visual evidence", request["messages"][0]["content"])
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_smolvlm2_classifies_frames_and_parent_builds_timeline(
+        self, openai_class
+    ):
+        labels = ["GESTURE_WAVING", "NO_GESTURE", "GESTURE_NODDING"]
+        openai_class.return_value.chat.completions.create.side_effect = [
+            SimpleNamespace(
+                model="SmolVLM2-500M-Video-Instruct-Q8_0",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps({"label": label})
+                        )
+                    )
+                ],
+            )
+            for label in labels
+        ]
+        contexts = {
+            **self.contexts,
+            "transcriptContext": "[00:00] Speaker: Hello [00:10]",
+            "frameContext": ["frame-0", "frame-1", "frame-2"],
+            "codebookContext": {
+                "Speech attitude": ["ATTITUDE_NEUTRAL"],
+                "Visible gesture": [
+                    "GESTURE_WAVING",
+                    "GESTURE_NODDING",
+                    "GESTURE_NONE",
+                ],
+            },
+        }
+        assistant = SmolVLM2LocalAI(
+            checkpointPath="/models/smolvlm2.gguf", **contexts
+        )
+
+        result = json.loads(
+            assistant.respond(
+                "Annotate participant gestures according to the codebook "
+                "in a new timeline axis"
+            )
+        )
+
+        self.assertEqual(
+            [step["action"] for step in result["steps"]],
+            ["addAxi", "addBlock", "addBlock"],
+        )
+        self.assertEqual(
+            [step["parameters"]["text"] for step in result["steps"][1:]],
+            ["GESTURE_WAVING", "GESTURE_NODDING"],
+        )
+        self.assertEqual(
+            result["steps"][0]["parameters"]["axisName"],
+            "Participant Gestures",
+        )
+        self.assertEqual(
+            openai_class.return_value.chat.completions.create.call_count, 3
+        )
+        first_request = (
+            openai_class.return_value.chat.completions.create.call_args_list[0].kwargs
+        )
+        schema = first_request["response_format"]["json_schema"]["schema"]
+        self.assertEqual(list(schema["properties"]), ["label"])
+        self.assertNotIn("GESTURE_NONE", [
+            step["parameters"].get("text") for step in result["steps"]
+        ])
+
+    def test_factory_selects_smolvlm2_child(self):
+        with patch.dict(
+            "os.environ",
+            {"LOCAL_AI_MODEL": "SmolVLM2-500M-Video-Instruct-Q8_0"},
+        ):
+            assistant = create_local_ai(
+                checkpointPath="/models/smolvlm2.gguf", **self.contexts
+            )
+
+        self.assertIsInstance(assistant, SmolVLM2LocalAI)
+        self.assertTrue(assistant.supports_visual_annotation)
+
+    def test_local_model_children_only_declare_configuration(self):
+        for model_class in (QwenLocalAI, LlamaLocalAI, SmolVLM2LocalAI):
+            with self.subTest(model_class=model_class.__name__):
+                self.assertIs(model_class._respond, LocalAI._respond)
+                self.assertIs(model_class._user_content, LocalAI._user_content)
+                self.assertIs(
+                    model_class._build_request_system_prompt,
+                    LocalAI._build_request_system_prompt,
+                )
+
+    def test_combined_codebook_routes_only_attitude_labels(self):
+        contexts = {
+            **self.contexts,
+            "codebookContext": {
+                "Request utterance": ["REQUEST_DIRECT"],
+                "Speech attitude": ["ATTITUDE_COOPERATIVE"],
+                "Visible gesture": ["GESTURE_WAVING"],
+            },
+        }
+        assistant = QwenLocalAI(
+            checkpointPath="/models/local.gguf", **contexts
+        )
+        message = (
+            "Annotate participant attitudes in speech according to the "
+            "codebook in a new axis"
+        )
+
+        selected_codebook = assistant._codebook_for_message(message)
+        system_prompt = assistant._build_system_prompt(message)
+
+        self.assertEqual(
+            selected_codebook,
+            {"Speech attitude": ["ATTITUDE_COOPERATIVE"]},
+        )
+        self.assertIn("ATTITUDE_COOPERATIVE", system_prompt)
+        self.assertNotIn("REQUEST_DIRECT", system_prompt)
+        self.assertNotIn("GESTURE_WAVING", system_prompt)
 
     @patch("rosbag_processing.ai_assistant.OpenAI")
     def test_text_only_guard_is_inherited_by_each_local_model(
@@ -375,6 +551,9 @@ class AIAssistantTests(SimpleTestCase):
         self.assertEqual(result["steps"][2]["parameters"]["start"], 6.0)
         self.assertEqual(
             assistant.get_run_metadata()["parameters"]["chunk_count"], 2
+        )
+        self.assertEqual(
+            assistant.get_run_metadata()["parameters"]["max_tokens"], 256
         )
         self.assertEqual(
             openai_class.return_value.chat.completions.create.call_count, 2
