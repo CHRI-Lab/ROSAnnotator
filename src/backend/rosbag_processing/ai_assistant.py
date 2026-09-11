@@ -204,7 +204,15 @@ class RemoteAPI(AIAssistant):
 
 
 class LocalAI(AIAssistant):
-    """Local text-only annotation assistant backed by llama.cpp."""
+    """Base class for local annotation assistants backed by llama.cpp.
+
+    Local models are text-only unless a subclass explicitly declares visual
+    support. Keeping the capability check here prevents each model adapter
+    from having to implement (and potentially forget) the same guard.
+    """
+
+    model_name = None
+    supports_visual_annotation = False
 
     def __init__(
         self,
@@ -213,6 +221,7 @@ class LocalAI(AIAssistant):
         codebookContext,
         timelineContext,
         checkpointPath,
+        model=None,
     ):
         super().__init__(
             transcriptContext=transcriptContext,
@@ -222,13 +231,19 @@ class LocalAI(AIAssistant):
         )
         self.checkpointPath = checkpointPath
         self.baseURL = os.getenv("LOCAL_AI_BASE_URL", "http://local-llm:8080/v1")
-        self.model = os.getenv("LOCAL_AI_MODEL", "qwen2.5-0.5b-instruct")
+        self.model = model or self.model_name
+        if not self.model:
+            raise ValueError("A local model subclass must define model_name.")
 
     def _respond(self, message, chatHistory=""):
-        if self._requests_visual_analysis(message):
+        if (
+            not self.supports_visual_annotation
+            and self._requests_visual_analysis(message)
+        ):
             raise LocalInferenceError(
-                "The selected local Qwen model is text-only and cannot inspect "
-                "video gestures. Select Remote for video-based annotation."
+                f"The selected local model ({self.model}) is text-only and cannot "
+                "perform gesture annotation or inspect video frames. Select a "
+                "vision-capable model or Remote for video-based annotation."
             )
 
         is_timeline_request = self._requests_timeline_change(message)
@@ -826,3 +841,22 @@ transcript and do not answer None unless the user explicitly requests codebook
 classification and no code applies. Plain text is required.
 
 {transcript_prompt}"""
+
+
+class QwenLocalAI(LocalAI):
+    """Local Qwen text model."""
+
+    model_name = "qwen2.5-0.5b-instruct-q4_k_m"
+
+
+class LlamaLocalAI(LocalAI):
+    """Local Llama text model."""
+
+    model_name = "llama-3.2-1b-instruct-q4_k_m"
+
+
+def create_local_ai(**kwargs):
+    """Build the appropriate local-model child from ``LOCAL_AI_MODEL``."""
+    model = os.getenv("LOCAL_AI_MODEL", QwenLocalAI.model_name)
+    model_class = LlamaLocalAI if "llama" in model.casefold() else QwenLocalAI
+    return model_class(model=model, **kwargs)

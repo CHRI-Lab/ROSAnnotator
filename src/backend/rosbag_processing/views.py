@@ -12,10 +12,10 @@ import csv
 from django.views.decorators.csrf import csrf_exempt
 from dotenv import load_dotenv
 from .ai_assistant import (
-    LocalAI,
     LocalInferenceError,
     RemoteAPI,
     RemoteAuthenticationError,
+    create_local_ai,
 )
 
 load_dotenv()
@@ -79,7 +79,7 @@ def respond_with_remote_fallback(common_context, message, chat_history):
         except RemoteAuthenticationError:
             pass
 
-    local_assistant = LocalAI(
+    local_assistant = create_local_ai(
         **common_context,
         checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
     )
@@ -352,7 +352,7 @@ def gpt_chat(request):
             "timelineContext": Axiinfo,
         }
         if assistant_mode == "local":
-            assistant = LocalAI(
+            assistant = create_local_ai(
                 **common_context,
                 checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
             )

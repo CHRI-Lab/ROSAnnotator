@@ -8,8 +8,9 @@ from django.test import RequestFactory, SimpleTestCase
 
 from .ai_assistant import (
     AIAssistant,
-    LocalAI,
+    LlamaLocalAI,
     LocalInferenceError,
+    QwenLocalAI,
     RemoteAPI,
     RemoteAuthenticationError,
 )
@@ -84,7 +85,7 @@ class AIAssistantTests(SimpleTestCase):
                 choices=[SimpleNamespace(message=SimpleNamespace(content="Greeting"))],
             )
         )
-        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **self.contexts)
 
         result = assistant.respond("Return the applicable code", "earlier chat")
 
@@ -117,7 +118,7 @@ class AIAssistantTests(SimpleTestCase):
                 ],
             )
         )
-        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **self.contexts)
 
         result = assistant.respond("Create an annotation axis")
 
@@ -146,7 +147,7 @@ class AIAssistantTests(SimpleTestCase):
                 ],
             )
         )
-        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **self.contexts)
 
         result = assistant.respond("Summarize the transcript")
 
@@ -194,7 +195,7 @@ class AIAssistantTests(SimpleTestCase):
                 ],
             )
         )
-        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **self.contexts)
 
         result = json.loads(assistant.respond("Add an axis for the transcript"))
 
@@ -212,10 +213,26 @@ class AIAssistantTests(SimpleTestCase):
     def test_local_model_rejects_video_annotation_with_clear_reason(
         self, openai_class
     ):
-        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **self.contexts)
 
         with self.assertRaisesRegex(LocalInferenceError, "text-only"):
             assistant.respond("Annotate participant gestures in the video")
+
+        openai_class.assert_not_called()
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_text_only_guard_is_inherited_by_each_local_model(
+        self, openai_class
+    ):
+        for model_class in (QwenLocalAI, LlamaLocalAI):
+            with self.subTest(model_class=model_class.__name__):
+                assistant = model_class(
+                    checkpointPath="/models/local.gguf", **self.contexts
+                )
+                with self.assertRaisesRegex(
+                    LocalInferenceError, "gesture annotation"
+                ):
+                    assistant.respond("Create gesture annotations from the frames")
 
         openai_class.assert_not_called()
 
@@ -244,7 +261,7 @@ class AIAssistantTests(SimpleTestCase):
                 ],
             )
         )
-        assistant = LocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **self.contexts)
 
         with self.assertRaisesRegex(LocalInferenceError, "annotation blocks"):
             assistant.respond(
@@ -298,7 +315,7 @@ class AIAssistantTests(SimpleTestCase):
                 "[00:09]"
             ),
         }
-        assistant = LocalAI(checkpointPath="/models/local.gguf", **contexts)
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **contexts)
 
         result = json.loads(
             assistant.respond(
@@ -341,7 +358,7 @@ class AIAssistantTests(SimpleTestCase):
             for response in responses
         ]
         contexts = {**self.contexts, "transcriptContext": "\n".join(transcript_lines)}
-        assistant = LocalAI(checkpointPath="/models/local.gguf", **contexts)
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **contexts)
 
         result = json.loads(
             assistant.respond(
@@ -387,7 +404,7 @@ class AIAssistantTests(SimpleTestCase):
                 + "[00:09]"
             ),
         }
-        assistant = LocalAI(checkpointPath="/models/local.gguf", **contexts)
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **contexts)
 
         result = json.loads(
             assistant.respond(
@@ -768,7 +785,7 @@ class ChunkApiTests(SimpleTestCase):
 
         with patch.object(views, "openai_api_key", None), patch.object(
             views, "RemoteAPI"
-        ) as remote_api, patch.object(views, "LocalAI") as local_ai:
+        ) as remote_api, patch.object(views, "create_local_ai") as local_ai:
             local_ai.return_value.respond.return_value = "local response"
             response = views.gpt_chat(request)
 
@@ -800,7 +817,7 @@ class ChunkApiTests(SimpleTestCase):
 
         with patch.object(views, "openai_api_key", "invalid-key"), patch.object(
             views, "RemoteAPI"
-        ) as remote_api, patch.object(views, "LocalAI") as local_ai:
+        ) as remote_api, patch.object(views, "create_local_ai") as local_ai:
             remote_api.return_value.respond.side_effect = RemoteAuthenticationError()
             local_ai.return_value.respond.return_value = "local response"
             response = views.gpt_chat(request)
@@ -831,7 +848,7 @@ class ChunkApiTests(SimpleTestCase):
         )
 
         with patch.object(views, "openai_api_key", None), patch.object(
-            views, "LocalAI"
+            views, "create_local_ai"
         ) as local_ai:
             local_ai.return_value.respond.side_effect = LocalInferenceError()
             response = views.gpt_chat(request)
@@ -906,7 +923,7 @@ class ChunkApiTests(SimpleTestCase):
 
         with patch.object(views, "openai_api_key", "test-key"), patch.object(
             views, "RemoteAPI"
-        ) as remote_api, patch.object(views, "LocalAI") as local_ai:
+        ) as remote_api, patch.object(views, "create_local_ai") as local_ai:
             local_ai.return_value.respond.side_effect = LocalInferenceError()
             response = views.gpt_chat(request)
 
@@ -941,7 +958,7 @@ class ChunkApiTests(SimpleTestCase):
         )
 
         with patch.object(views, "openai_api_key", None), patch.object(
-            views, "LocalAI"
+            views, "create_local_ai"
         ) as local_ai:
             local_ai.return_value.respond.side_effect = LocalInferenceError()
             response = views.gpt_chat(request)
