@@ -5,6 +5,13 @@
 ARG BACKEND_BASE_IMAGE=ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v2@sha256:d3f12b214ef323eddc24f86a3e2c65148572c0ea45b47e453f14d23cda750c10
 FROM ${BACKEND_BASE_IMAGE}
 
+# Video extraction, audio decoding through pydub, and video/audio muxing invoke
+# the ffmpeg command-line tools at runtime. Install them in the application
+# image so local and tester builds do not depend on the host machine.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 # Keep the existing published base image compatible with the versions tested
 # with ROSAnnotator. These pins should also be included in the next base image.
 RUN /root/conda/envs/ros_env/bin/python -m pip install \
