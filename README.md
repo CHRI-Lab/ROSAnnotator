@@ -60,6 +60,33 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    First, clone this repo to your local device of any system (Windows, OS, Linux).
 
+   Select the local model before the first run by copying the example configuration:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Put the selected GGUF file in `./models`, then set `LOCAL_AI_MODEL` in the
+   root `.env` file to its filename **without** the `.gguf` suffix. This is the
+   single configuration point used by both llama.cpp and the backend. For example:
+
+   ```dotenv
+   LOCAL_AI_MODEL=qwen2.5-0.5b-instruct-q4_k_m
+   ```
+
+   To use `models/llama-3.2-1b-instruct-q4_k_m.gguf` instead, change only that line:
+
+   ```dotenv
+   LOCAL_AI_MODEL=llama-3.2-1b-instruct-q4_k_m
+   ```
+
+   Alternatively, select it for one run from the command line (this overrides
+   the value in `.env`):
+
+   ```bash
+   LOCAL_AI_MODEL=llama-3.2-1b-instruct-q4_k_m docker compose up --build
+   ```
+
    Run the following commands in the root directory of the project:
 
    ```bash
@@ -325,6 +352,4 @@ If you use our code or paper in your work, please cite the following:
 ## License
 
 This repository is licensed under the MIT License with a [Commons Clause](https://commonsclause.com).
-
-
 

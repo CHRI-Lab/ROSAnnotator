@@ -5,7 +5,7 @@ services:
       - ./models:/models:ro
     command:
       - -m
-      - /models/qwen2.5-0.5b-instruct-q4_k_m.gguf
+      - /models/${LOCAL_AI_MODEL:-qwen2.5-0.5b-instruct-q4_k_m}.gguf
       - -c
       - "8192"
       - --host
@@ -39,7 +39,8 @@ services:
     command: python manage.py runserver 0.0.0.0:8000
     environment:
       LOCAL_AI_BASE_URL: http://local-llm:8080/v1
-      LOCAL_AI_MODEL: qwen2.5-0.5b-instruct
+      LOCAL_AI_MODEL: ${LOCAL_AI_MODEL:-qwen2.5-0.5b-instruct-q4_k_m}
+      LOCAL_AI_CHECKPOINT_PATH: /models/${LOCAL_AI_MODEL:-qwen2.5-0.5b-instruct-q4_k_m}.gguf
     depends_on:
       local-llm:
         condition: service_healthy
