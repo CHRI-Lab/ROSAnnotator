@@ -22,7 +22,7 @@ import {
   isValidAnnotationName,
   collectAnnotationData,
   postAnnotation,
-} from "./saveUtils"; 
+} from "./saveUtils";
 import useAutosave from "../Autosave/useAutosave";
 import {
   highestAxisId,
@@ -41,6 +41,8 @@ interface TimelineProps {
   annotationData: any;
   speakerData?: Array<any>;
   restoredAxes?: any[] | null;
+  // Disable for split chunks: recovery currently stores whole-bag timelines.
+  autosaveEnabled?: boolean;
   onAxesUpdate: (axes: any) => void;
   instruction: any;
 }
@@ -107,6 +109,7 @@ const Timeline: React.FC<TimelineProps> = ({
   onAxesUpdate,
   instruction,
   restoredAxes,
+  autosaveEnabled = true,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
@@ -118,14 +121,14 @@ const Timeline: React.FC<TimelineProps> = ({
   const [error, setError] = useState("");
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
   const { axes, setAxes } = useContext(AxesContext)!;
-  
+
   // SAVE FUNCTIONALITY
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false); // flag controlling whether the "name your annotation" popup is currently visible
   const [annotationName, setAnnotationName] = useState(""); //container for annotation name text
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
 
   const autosave = useAutosave({
-    enabled: Boolean(rosBagFileName),
+    enabled: autosaveEnabled && Boolean(rosBagFileName),
     bagFileName: rosBagFileName,
     axes,
     hasUnsavedEdits,
@@ -142,16 +145,17 @@ const Timeline: React.FC<TimelineProps> = ({
     },
   });
   const isLoadingData = useRef(true); //initialize true upon load
+  const { markSynced } = autosave;
 
   useEffect(() => {
-  if (restoredAxes) {
-    autosave.markSynced(restoredAxes);
-  }
-}, [restoredAxes]);
+    if (restoredAxes) {
+      markSynced(restoredAxes);
+    }
+  }, [restoredAxes, markSynced]);
 
   useEffect(() => {
     if (instruction) {
-      handleExecuteInstruction(instruction); 
+      handleExecuteInstruction(instruction);
     }
   }, [instruction]);
 
@@ -160,22 +164,22 @@ const Timeline: React.FC<TimelineProps> = ({
       onAxesUpdate(axes);
     }
   }, [axes, onAxesUpdate]);
-  
+
   const handleExecuteInstruction = (instruction) => {
     instruction.steps.forEach((step) => {
       const { action, parameters } = step;
-  
+
       switch (action) {
         case "addAxi":
           const { axisId, axisName, axistype } = parameters;
-          handleAddAxis_gpt(axisId, axisName, axistype); 
+          handleAddAxis_gpt(axisId, axisName, axistype);
           break;
-  
+
         case "addBlock":
           const { axisId: blockAxisId, start, end, text } = parameters;
           handleCreateBlockFromInstruction(blockAxisId, start, end, text);
           break;
-        
+
         case "deleteBlock":
           const {axisId: deleteAxisId, blockIndex } = parameters;
           handleDeleteBlock(deleteAxisId, blockIndex);
@@ -185,7 +189,7 @@ const Timeline: React.FC<TimelineProps> = ({
           const {axisId: deleteAxiId } = parameters;
           handleDeleteAxis(deleteAxiId);
           break
-          
+
         default:
           console.error(`Unknown action: ${action}`);
       }
@@ -194,10 +198,10 @@ const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => {
     console.log("booklist passed to Timeline:", booklist);
   }, [booklist]);
-  
+
   const handleCreateBlockFromInstruction = (axisId, start, end, text) => {
     const newBlock = { start, end, text };
-  
+
     setAxes((prevAxes) =>
       prevAxes.map((axis) => {
         if (axis.id === axisId) {
@@ -223,62 +227,58 @@ const Timeline: React.FC<TimelineProps> = ({
 
 
   useEffect(() => {
-  // A restored autosave replaces the loaded state entirely. It already
-  // contains the speaker tiers from the session it was saved in, so the
-  // branches below must not run as well.
-  if (restoredAxes) {
-    isLoadingData.current = true;
-    globalAxisId = highestAxisId(restoredAxes) + 1;
-    setAxes(restoredAxes);
-    return;
-  }
+    // A restored autosave replaces the loaded state entirely. It already
+    // contains the speaker tiers from the session it was saved in, so the
+    // branches below must not run as well.
+    if (restoredAxes) {
+      isLoadingData.current = true;
+      globalAxisId = highestAxisId(restoredAxes) + 1;
+      setAxes(restoredAxes);
+      return;
+    }
 
-  if (annotationData) {
     isLoadingData.current = true;
-    const newAxes = annotationData.map((axisData: any) => ({
+    const newAxes = (Array.isArray(annotationData) ? annotationData : []).map((axisData: any) => ({
       id: globalAxisId++,
       type: axisData.axisType,
       axisName: axisData.axisName,
       typeName: axisData.axisBooklistName,
       blocks: axisData.annotationBlocks,
     }));
+    if (speakerData) {
+      const speakerAxesMap = new Map<string, any>();
+      speakerData.forEach((segment) => {
+        const speakerLabel = segment.speaker_label;
+
+        if (speakerAxesMap.has(speakerLabel)) {
+          const existingAxis = speakerAxesMap.get(speakerLabel);
+          existingAxis.blocks.push({
+            start: segment.start_time,
+            end: segment.end_time,
+            text: segment.text,
+          });
+        } else {
+          speakerAxesMap.set(speakerLabel, {
+            id: globalAxisId++,
+            type: "Type-in",
+            axisName: speakerLabel,
+            blocks: [
+              {
+                start: segment.start_time,
+                end: segment.end_time,
+                text: segment.text,
+              },
+            ],
+            shortcutKey: speakerLabel.charAt(0).toUpperCase(),
+          });
+        }
+      });
+
+      const speakerAxes = Array.from(speakerAxesMap.values());
+      newAxes.push(...speakerAxes);
+    }
     setAxes(newAxes);
-  }
-
-  if (speakerData) {
-    isLoadingData.current = true;
-    const speakerAxesMap = new Map<string, any>();
-    speakerData.forEach((segment) => {
-      const speakerLabel = segment.speaker_label;
-
-      if (speakerAxesMap.has(speakerLabel)) {
-        const existingAxis = speakerAxesMap.get(speakerLabel);
-        existingAxis.blocks.push({
-          start: segment.start_time,
-          end: segment.end_time,
-          text: segment.text,
-        });
-      } else {
-        speakerAxesMap.set(speakerLabel, {
-          id: globalAxisId++,
-          type: "Type-in",
-          axisName: speakerLabel,
-          blocks: [
-            {
-              start: segment.start_time,
-              end: segment.end_time,
-              text: segment.text,
-            },
-          ],
-          shortcutKey: speakerLabel.charAt(0).toUpperCase(),
-        });
-      }
-    });
-
-    const speakerAxes = Array.from(speakerAxesMap.values());
-    setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
-  }
-}, [restoredAxes, annotationData, speakerData]);
+  }, [restoredAxes, annotationData, speakerData]);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
@@ -307,8 +307,8 @@ const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => {
     setSeekTime(played);
   }, [played]);
-  
-  
+
+
   // Prompts user for annotation file name, with prefilled defined filename set.
   const handleOpenSaveDialog = () => {
     // Pre-fill with the existing auto-generated name as a sensible default
@@ -317,12 +317,12 @@ const Timeline: React.FC<TimelineProps> = ({
     setIsSaveDialogOpen(true);
   };
 
-  
-  
-  // ensures sensible name is provided by user (no whitespace, no invalid characters), 
+
+
+  // ensures sensible name is provided by user (no whitespace, no invalid characters),
   // before gathering current annotation state via collectAnnotationData() and sending it to backend.
   const handleConfirmSave = async () => {
-    const validation = isValidAnnotationName(annotationName); 
+    const validation = isValidAnnotationName(annotationName);
     if (!validation.valid) {
       setError(validation.reason || "Invalid name.");
       setIsErrorDialogOpen(true);
@@ -337,10 +337,12 @@ const Timeline: React.FC<TimelineProps> = ({
       alert("Data saved successfully.");
       setHasUnsavedEdits(false);
       autosave.markSynced(axes);
-      deleteAutosave(rosBagFileName).catch((err) =>
-        console.warn(" [autosave] Could not clear autosave after save.", err)
-      );
-      
+      if (autosaveEnabled) {
+        deleteAutosave(rosBagFileName).catch((err) =>
+          console.warn(" [autosave] Could not clear autosave after save.", err)
+        );
+      }
+
     } catch (error) {
       setError("Failed to save data. Please try again.\n" + error);
       setIsErrorDialogOpen(true);
@@ -356,26 +358,26 @@ const Timeline: React.FC<TimelineProps> = ({
 
   const handleDragEnd = (result: DropResult) => {
     const { source, destination } = result;
-  
+
 
     if (!destination) return;
-  
+
 
     const sourceAxis = axes.find((axis) => String(axis.id) === source.droppableId);
     const destinationAxis = axes.find((axis) => String(axis.id) === destination.droppableId);
-  
- 
+
+
     if (sourceAxis && destinationAxis) {
       if (sourceAxis == destinationAxis) return;
       const sourceBlocks = [...sourceAxis.blocks];
       const destinationBlocks = [...destinationAxis.blocks];
-  
+
 
       const [movedBlock] = sourceBlocks.splice(source.index, 1);
-  
+
 
       destinationBlocks.splice(destination.index, 0, movedBlock);
-  
+
 
       setAxes((prevAxes) =>
         prevAxes.map((axis) => {
@@ -402,12 +404,12 @@ const Timeline: React.FC<TimelineProps> = ({
       typeName: "",  // 初始化时可以是空字符串，稍后可以赋值
       shortcutKey: "",  // 如果有需要可以设置快捷键
     };
-  
+
     // 将 GPT 指令创建的 axis 添加到 axes 状态中
     setAxes((prev) => [...prev, newAxis]);
     globalAxisId = globalAxisId++
   };
-  
+
   const handleAddAxis = () => {
     setAxes((prev) => [
       ...prev,
@@ -537,13 +539,13 @@ const Timeline: React.FC<TimelineProps> = ({
       end: startTime + 5,
       text: "New Block",
     };
-  
+
     const axis = axes.find((axis) => axis.id === axisId);
     if (axis) {
       const overlap = axis.blocks.some(
         (block) => newBlock.start <= block.end && newBlock.end >= block.start
       );
-  
+
       if (overlap) {
         setError(
           "Error: Block overlaps with an existing block. Create a new axis or adjust the range."
@@ -552,7 +554,7 @@ const Timeline: React.FC<TimelineProps> = ({
         return;
       }
     }
-  
+
     setError("");
     setIsErrorDialogOpen(false);
     setAxes((prevAxes) =>
