@@ -1,12 +1,32 @@
+"""
+Complete autosave test suite based on functional requirements.
+
+API contract notes (verified against rosbag_processing/autosave.py):
+  - check_autosave returns: exists, bag_filename, booklist_filename,
+    annotation_filename, annotation_name, saved_at, axis_count,
+    block_count, recovered_from_backup
+  - 'saved_at' is the save timestamp. It prefers the client-supplied value
+    (browser-stamped, carries a local offset) and falls back to a
+    timezone-aware server value. It is NOT a naive local string.
+  - Idempotency lives in the save_autosave view, not in write_autosave().
+    Unchanged state returns {'saved': False, 'unchanged': True}.
+
+Part A: Autosave Writing
+Part B: Detection and Restore
+Part C: Clearing on Real Save
+Part D: Failure Handling
+Part E: Crash Recovery
+"""
+
 import json
 import os
 import tempfile
 import time
-from unittest.mock import patch, MagicMock
+from datetime import datetime
+from unittest.mock import patch
 
 import pytest
 from django.test import TestCase, Client
-from rest_framework import status
 
 from rosbag_processing.autosave import (
     write_autosave,
@@ -17,6 +37,10 @@ from rosbag_processing.autosave import (
     AutosaveNameError,
 )
 
+
+# ============================================================================
+# Core Functional Tests
+# ============================================================================
 
 class Test1_ModifyAndWait(TestCase):
     """Scenario 1: Modify annotation, wait for interval, autosave writes latest state."""
@@ -30,14 +54,8 @@ class Test1_ModifyAndWait(TestCase):
         initial_payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
-            'axes': [
-                {
-                    'name': 'Speech Acts',
-                    'type': 'select',
-                    'blocks': []
-                }
-            ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'axes': [{'name': 'Speech Acts', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
@@ -55,7 +73,7 @@ class Test1_ModifyAndWait(TestCase):
                 'code': 'greeting'
             })
 
-            path = write_autosave('test.bag', modified_payload)
+            write_autosave('test.bag', modified_payload)
             updated = read_autosave('test.bag')
 
             self.assertEqual(len(updated['axes'][0]['blocks']), 1)
@@ -63,31 +81,44 @@ class Test1_ModifyAndWait(TestCase):
 
 
 class Test2_IdempotentSave(TestCase):
-    """Scenario 2: No changes during interval - save remains idempotent."""
+    """Scenario 2: No changes during interval - save remains idempotent.
+
+    Idempotency is enforced by the save_autosave view, which compares the
+    incoming state against the stored primary before writing.
+    """
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
+        self.client = Client()
 
-    def test_identical_saves_dont_duplicate_data(self):
-        """Saving identical state twice should not create duplicates."""
-        payload = {
-            'schema_version': 1,
+    def test_identical_save_reports_unchanged(self):
+        """Posting identical state twice should be reported as unchanged."""
+        body = {
             'bag_filename': 'test.bag',
+            'annotation_name': 'Session 1',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
-            path1 = write_autosave('test.bag', payload)
-            stat1 = os.stat(path1).st_size
+            first = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json',
+            )
+            second = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json',
+            )
 
-            time.sleep(0.1)
+        self.assertEqual(first.status_code, 200)
+        self.assertTrue(first.json()['saved'])
+        self.assertFalse(first.json()['unchanged'])
 
-            path2 = write_autosave('test.bag', payload)
-            stat2 = os.stat(path2).st_size
-
-            self.assertEqual(path1, path2)
-            self.assertEqual(stat1, stat2)
+        self.assertEqual(second.status_code, 200)
+        self.assertFalse(second.json()['saved'], "Identical state must not be rewritten")
+        self.assertTrue(second.json()['unchanged'])
 
 
 class Test3_RapidEditsLatestWins(TestCase):
@@ -101,7 +132,7 @@ class Test3_RapidEditsLatestWins(TestCase):
         base_payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
@@ -145,17 +176,15 @@ class Test4_RecoveryDetectionOnReopen(TestCase):
                     'blocks': [{'start': 0.0, 'end': 5.0, 'code': 'request'}]
                 }
             ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             write_autosave('test.bag', payload)
-
             response = self.client.get('/api/autosave/check/', {'bag_filename': 'test.bag'})
 
         self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data.get('exists', False))
+        self.assertTrue(response.json().get('exists', False))
 
 
 class Test5_RecoveryPromptNoSilentOverwrite(TestCase):
@@ -181,7 +210,7 @@ class Test5_RecoveryPromptNoSilentOverwrite(TestCase):
                     ]
                 }
             ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
@@ -225,7 +254,7 @@ class Test6_SelectRestoreRestoresAllFields(TestCase):
                     ]
                 }
             ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
@@ -246,7 +275,6 @@ class Test7_SelectDiscardRemovesRecovery(TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-        self.client = Client()
 
     def test_discard_removes_autosave(self):
         """Discard should completely remove autosave file."""
@@ -254,7 +282,7 @@ class Test7_SelectDiscardRemovesRecovery(TestCase):
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'axes': [],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
@@ -274,7 +302,7 @@ class Test8_WriteFailureNoDataLoss(TestCase):
 
     def test_write_failure_returns_error(self):
         """Failed autosave write should return 500 error."""
-        payload = {
+        body = {
             'bag_filename': 'test.bag',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
         }
@@ -282,7 +310,7 @@ class Test8_WriteFailureNoDataLoss(TestCase):
         with patch('rosbag_processing.autosave.write_autosave', side_effect=OSError('Disk full')):
             response = self.client.post(
                 '/api/autosave/save/',
-                data=json.dumps(payload),
+                data=json.dumps(body),
                 content_type='application/json'
             )
 
@@ -302,16 +330,16 @@ class Test9_AtomicWriteProtection(TestCase):
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             path = write_autosave('test.bag', original)
-            backup_path = path + '.bak'
+            _, backup_path = _autosave_paths('test.bag')
 
             self.assertFalse(os.path.exists(backup_path))
 
-            updated = original.copy()
+            updated = dict(original)
             updated['axes'] = [{'name': 'axis2', 'type': 'select', 'blocks': []}]
             write_autosave('test.bag', updated)
 
@@ -365,17 +393,31 @@ class Test10_MalformedFileHandling(TestCase):
 class Test11_ProjectIsolation(TestCase):
     """Scenario 11: Recovery file for different project - not offered."""
 
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.client = Client()
+
     def test_different_bag_recovery_not_offered(self):
-        """Recovery for bag1 should not appear when loading bag2."""
-        client = Client()
+        """An autosave for one bag must not be offered for another bag."""
+        payload = {
+            'schema_version': 1,
+            'bag_filename': 'project-a.bag',
+            'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
 
-        response = client.get(
-            '/api/autosave/check/',
-            {'bag_filename': 'nonexistent.bag'}
-        )
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('project-a.bag', payload)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json().get('exists', False))
+            own = self.client.get('/api/autosave/check/',
+                                  {'bag_filename': 'project-a.bag'})
+            other = self.client.get('/api/autosave/check/',
+                                    {'bag_filename': 'project-b.bag'})
+
+        self.assertTrue(own.json().get('exists', False),
+                        "Bag with an autosave should report exists=True")
+        self.assertFalse(other.json().get('exists', False),
+                         "A different bag must not be offered project-a's autosave")
 
 
 class Test12_SpecialCharactersPreserved(TestCase):
@@ -384,8 +426,39 @@ class Test12_SpecialCharactersPreserved(TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
 
+    def test_unicode_content_preserved(self):
+        """Non-ASCII text should survive a write/read round trip."""
+        payload = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'axes': [
+                {
+                    'name': 'Speech',
+                    'type': 'select',
+                    'blocks': [
+                        {
+                            'start': 0.0,
+                            'end': 5.0,
+                            'code': 'greeting',
+                            'text': 'Hello - Bonjour - Gruezi - Ola'
+                        }
+                    ]
+                }
+            ],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('test.bag', payload)
+            retrieved = read_autosave('test.bag')
+
+        self.assertEqual(
+            retrieved['axes'][0]['blocks'][0]['text'],
+            'Hello - Bonjour - Gruezi - Ola'
+        )
+
     def test_special_characters_in_text(self):
-        """Commas, quotes, newlines should be preserved exactly."""
+        """Commas, quotes, newlines, tabs should be preserved exactly."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
@@ -403,7 +476,7 @@ class Test12_SpecialCharactersPreserved(TestCase):
                     ]
                 }
             ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
@@ -414,12 +487,12 @@ class Test12_SpecialCharactersPreserved(TestCase):
         self.assertEqual(retrieved['axes'][0]['blocks'][0]['text'], expected)
 
     def test_empty_axes_preserved(self):
-        """Empty axes should be preserved."""
+        """Empty axes list should be preserved."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'axes': [],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
@@ -429,14 +502,53 @@ class Test12_SpecialCharactersPreserved(TestCase):
         self.assertEqual(len(retrieved['axes']), 0)
 
 
-class Test13_IntervalValidation(TestCase):
-    """Scenario 13: Invalid interval - use safe default."""
+class Test13_MissingTimestampFallback(TestCase):
+    """Scenario 13: Missing/invalid timestamp - replaced with a safe default."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.client = Client()
 
     def test_schema_version_constant(self):
         """Schema version should be defined."""
         from rosbag_processing.autosave import SCHEMA_VERSION
-
         self.assertEqual(SCHEMA_VERSION, 1)
+
+    def test_missing_saved_at_gets_server_fallback(self):
+        """A save with no saved_at must still produce a usable timestamp."""
+        body = {
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            response = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 200)
+        saved_at = response.json().get('saved_at', '')
+
+        self.assertTrue(saved_at, "saved_at must never be empty")
+        try:
+            datetime.fromisoformat(saved_at)
+        except ValueError:
+            self.fail(f"Fallback saved_at is not ISO 8601: {saved_at}")
+
+    def test_rejects_non_list_axes(self):
+        """axes must be a list; anything else is a 400."""
+        body = {'bag_filename': 'test.bag', 'axes': 'not-a-list'}
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            response = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json',
+            )
+
+        self.assertEqual(response.status_code, 400)
 
 
 class Test14_ManualSaveClearsRecovery(TestCase):
@@ -446,26 +558,30 @@ class Test14_ManualSaveClearsRecovery(TestCase):
         self.temp_dir = tempfile.mkdtemp()
         self.client = Client()
 
-    def test_manual_save_deletes_autosave(self):
-        """After manual save, autosave should be cleared."""
+    def test_discard_endpoint_clears_autosave(self):
+        """The discard endpoint should clear the autosave after a real save."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
 
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             write_autosave('test.bag', payload)
             self.assertIsNotNone(read_autosave('test.bag'))
 
-            delete_autosave('test.bag')
+            response = self.client.delete(
+                '/api/autosave/delete/?bag_filename=test.bag'
+            )
 
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json().get('deleted', False))
             self.assertIsNone(read_autosave('test.bag'))
 
 
 class TestPathHandleSecurityValidation(TestCase):
-    """Additional security tests for path handling."""
+    """Path handling and filename validation."""
 
     def test_valid_stem_extraction(self):
         """Valid bag filename should extract stem."""
@@ -487,35 +603,49 @@ class TestPathHandleSecurityValidation(TestCase):
         with self.assertRaises(AutosaveNameError):
             _autosave_stem('file@#$.bag')
 
+    def test_empty_filename_rejected(self):
+        """Empty or None filename should be rejected."""
+        with self.assertRaises(AutosaveNameError):
+            _autosave_stem('')
+        with self.assertRaises(AutosaveNameError):
+            _autosave_stem(None)
+
+    def test_traversal_rejected_at_api_layer(self):
+        """A traversal attempt through the API should return 400, not 500."""
+        client = Client()
+        response = client.get('/api/autosave/check/',
+                              {'bag_filename': '../../etc/passwd.bag'})
+        self.assertEqual(response.status_code, 400)
+
 
 # ============================================================================
-# Part A: Autosave Writing - Integration/Manual Tests
+# Part A: Autosave Writing
 # ============================================================================
 
 class TestA1_AutosaveAfterPause(TestCase):
     """A1: An autosave appears after a pause
-    
+
     Manual Test:
     1. Load a bag from the import page with no autosave present
     2. Click "Add New Axis" and add one block
     3. Wait five seconds without touching anything
     4. Pass: datas/annotation/<stem>.autosave.json exists
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
+
     def test_autosave_file_exists_after_write(self):
-        """Verify autosave file is created after writing."""
+        """Verify autosave file is created with the expected name."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'axes': [{'name': 'Test Axis', 'type': 'select', 'blocks': [
                 {'start': 0.0, 'end': 5.0, 'code': 'test'}
             ]}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             path = write_autosave('test.bag', payload)
             self.assertTrue(os.path.exists(path))
@@ -524,54 +654,54 @@ class TestA1_AutosaveAfterPause(TestCase):
 
 class TestA2_BurstsOfEditsDebounce(TestCase):
     """A2: Bursts of edits produce one write, not many
-    
+
     Manual Test:
     1. Drag a block back and forth rapidly for about ten seconds
     2. Watch the file's modification time
     3. Pass: the timestamp updates roughly once per pause, not continuously
-    4. Fail: it updates several times per second (no debounce)
+
+    Backend scope: every distinct state that arrives must land on disk, and the
+    latest one must win. Debounce itself is frontend timing and is verified
+    manually.
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
-    def test_rapid_writes_in_succession(self):
-        """Multiple writes in rapid succession should all reach storage."""
+
+    def test_latest_state_wins_after_burst(self):
+        """After a burst of distinct states, the last one is what persists."""
         base_payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
-            path = None
             for i in range(10):
                 payload = base_payload.copy()
                 payload['axes'] = [{'name': f'axis_{i}', 'type': 'select', 'blocks': []}]
-                path = write_autosave('test.bag', payload)
-                # Simulate rapid edits
-                time.sleep(0.05)
-            
-            # Verify latest state is saved
+                write_autosave('test.bag', payload)
+
             final = read_autosave('test.bag')
-            self.assertEqual(final['axes'][0]['name'], 'axis_9')
+
+        self.assertEqual(final['axes'][0]['name'], 'axis_9')
 
 
 class TestA3_AutosaveKeepsWhatCSVDrops(TestCase):
     """A3: The autosave keeps what the CSV export drops
-    
+
     Manual Test:
     1. Create an axis and give it a name but no blocks
     2. Give another axis a shortcut key through "Manage Axes"
     3. Wait five seconds, inspect datas/annotation/<stem>.autosave.json
     4. Pass: empty axis appears with name, shortcutKey present
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
+
     def test_empty_axis_with_metadata_preserved(self):
-        """Empty axes with metadata should be preserved in autosave."""
+        """Empty axes and shortcut keys must survive the round trip."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
@@ -591,14 +721,13 @@ class TestA3_AutosaveKeepsWhatCSVDrops(TestCase):
                     'blocks': [{'start': 0.0, 'end': 5.0, 'code': 'test'}]
                 }
             ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             write_autosave('test.bag', payload)
             retrieved = read_autosave('test.bag')
-        
-        # Both axes preserved with their metadata
+
         self.assertEqual(len(retrieved['axes']), 2)
         self.assertEqual(retrieved['axes'][0]['name'], 'Empty Axis')
         self.assertEqual(retrieved['axes'][0]['shortcutKey'], 'a')
@@ -608,131 +737,227 @@ class TestA3_AutosaveKeepsWhatCSVDrops(TestCase):
 
 class TestA4_IdleSessionNoRewrite(TestCase):
     """A4: An idle session does not keep rewriting
-    
+
     Manual Test:
     1. Make one edit, wait five seconds for the write
     2. Note the modification time, leave tab untouched for two minutes
     3. Check modification time after waiting
-    4. Pass: timestamp unchanged (ceiling timer skips write if state unchanged)
+    4. Pass: timestamp unchanged (ceiling timer fires, unchanged-state check
+       skips the write)
+
+    The unchanged-state check lives in the save_autosave view, so this test
+    goes through the API rather than calling write_autosave() directly.
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
-    def test_identical_state_no_write_on_retry(self):
-        """Writing identical state twice should not update file timestamp."""
-        payload = {
-            'schema_version': 1,
+        self.client = Client()
+
+    def test_idle_repost_does_not_touch_file(self):
+        """Reposting identical state must not rewrite the file on disk."""
+        body = {
+            'bag_filename': 'test.bag',
+            'annotation_name': 'Session 1',
+            'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json',
+            )
+            path, _ = _autosave_paths('test.bag')
+            mtime_before = os.stat(path).st_mtime
+
+            time.sleep(0.1)
+
+            response = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json',
+            )
+            mtime_after = os.stat(path).st_mtime
+
+        self.assertTrue(response.json()['unchanged'])
+        self.assertEqual(mtime_before, mtime_after,
+                         "Idle repost must not rewrite the autosave file")
+
+    def test_idle_repost_preserves_backup(self):
+        """An unchanged repost must not clobber the .bak with a duplicate."""
+        first = {
             'bag_filename': 'test.bag',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+        second = {
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'axis2', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:05+11:00',
+        }
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
-            path = write_autosave('test.bag', payload)
-            stat1 = os.stat(path).st_mtime
-            
-            time.sleep(0.1)
-            
-            # Write same payload again
-            write_autosave('test.bag', payload)
-            stat2 = os.stat(path).st_mtime
-            
-            # Should be same file with same/similar timestamp
-            self.assertEqual(stat1, stat2)
+            for body in (first, second, second):
+                self.client.post(
+                    '/api/autosave/save/',
+                    data=json.dumps(body),
+                    content_type='application/json',
+                )
+
+            _, backup_path = _autosave_paths('test.bag')
+            with open(backup_path) as f:
+                backup_data = json.load(f)
+
+        self.assertEqual(backup_data['axes'][0]['name'], 'axis1',
+                         "Backup must still hold the genuinely previous state")
 
 
 class TestA5_ContinuousEditingSavesCeiling(TestCase):
     """A5: Continuous editing still saves within the ceiling
-    
+
     Manual Test:
-    1. Edit something every 2-3 seconds for a minute, never pause long enough for debounce
+    1. Edit something every 2-3 seconds for a minute, never pausing long
+       enough for the debounce
     2. Pass: file updates at least once during that minute
+
+    Backend scope: each changed state posted during continuous editing must be
+    written, not suppressed by the idempotency check.
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
-    def test_ceiling_timer_forces_save_on_continuous_edits(self):
-        """Even with continuous edits, ceiling timer should force at least one save."""
-        base_payload = {
-            'schema_version': 1,
-            'bag_filename': 'test.bag',
-            'saved_at': '2024-01-01T12:00:00Z',
-        }
-        
+        self.client = Client()
+
+    def test_changed_state_always_writes(self):
+        """Every genuinely changed state must be written, never reported unchanged."""
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
-            initial_mtime = None
-            
-            # Simulate continuous edits
             for i in range(5):
-                payload = base_payload.copy()
-                payload['axes'] = [{'name': f'edit_{i}', 'type': 'select', 'blocks': []}]
-                path = write_autosave('test.bag', payload)
-                
-                if initial_mtime is None:
-                    initial_mtime = os.stat(path).st_mtime
-                
-                time.sleep(0.2)  # Shorter than typical ceiling
-            
-            # File should exist and have been written at least once
-            final_mtime = os.stat(path).st_mtime
-            self.assertIsNotNone(final_mtime)
+                body = {
+                    'bag_filename': 'test.bag',
+                    'axes': [{'name': f'edit_{i}', 'type': 'select', 'blocks': []}],
+                    'saved_at': f'2024-01-01T12:00:0{i}+11:00',
+                }
+                response = self.client.post(
+                    '/api/autosave/save/',
+                    data=json.dumps(body),
+                    content_type='application/json',
+                )
+                self.assertTrue(response.json()['saved'],
+                                f"Changed state {i} must be written")
+
+            final = read_autosave('test.bag')
+
+        self.assertEqual(final['axes'][0]['name'], 'edit_4')
 
 
 # ============================================================================
-# Part B: Detection and Restore - Integration/Manual Tests
+# Part B: Detection and Restore
 # ============================================================================
 
 class TestB1_RecoveryPromptAppears(TestCase):
     """B1: The prompt appears
-    
+
     Manual Test:
     1. With autosave present, return to import page
     2. Select the same bag
-    3. Pass: hint appears under bag name showing local time
-    4. Check: time must be local, not UTC
+    3. Pass: hint appears under bag name showing the local time
+    4. Click "Load Me" - dialog names the bag, the time, the tier count and
+       the annotation count, and the counts match what was created
+
+    API contract: counts are axis_count and block_count; the time is saved_at.
+    saved_at is browser-stamped and carries a UTC offset so the client can
+    render it in local time.
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.client = Client()
-    
-    def test_check_endpoint_returns_timestamp(self):
-        """Recovery check should return timestamp info."""
+
+    def test_check_returns_prompt_metadata(self):
+        """Recovery check should return everything the dialog needs."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'booklist_filename': 'codebook.json',
             'annotation_name': 'Session 1',
-            'axes': [{'name': 'Speech Acts', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'axes': [
+                {'name': 'Speech Acts', 'type': 'select', 'blocks': [
+                    {'start': 0.0, 'end': 5.0, 'code': 'greeting'},
+                    {'start': 5.0, 'end': 10.0, 'code': 'request'},
+                ]},
+                {'name': 'Emotions', 'type': 'select', 'blocks': [
+                    {'start': 0.0, 'end': 10.0, 'code': 'happy'},
+                ]},
+            ],
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             write_autosave('test.bag', payload)
-            response = self.client.get('/api/autosave/check/', {'bag_filename': 'test.bag'})
-        
+            response = self.client.get('/api/autosave/check/',
+                                       {'bag_filename': 'test.bag'})
+
         self.assertEqual(response.status_code, 200)
         data = response.json()
+
         self.assertTrue(data.get('exists', False))
-        # Timestamp should be present
-        self.assertIn('timestamp', data)
+        self.assertEqual(data['bag_filename'], 'test.bag')
+        self.assertEqual(data['annotation_name'], 'Session 1')
+        self.assertEqual(data['axis_count'], 2, "Dialog tier count")
+        self.assertEqual(data['block_count'], 3, "Dialog annotation count")
+        self.assertFalse(data['recovered_from_backup'])
+
+    def test_saved_at_is_offset_aware_iso(self):
+        """saved_at must be ISO 8601 and carry an offset so the UI can localise it."""
+        payload = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'annotation_name': 'Session 1',
+            'axes': [{'name': 'Speech Acts', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('test.bag', payload)
+            response = self.client.get('/api/autosave/check/',
+                                       {'bag_filename': 'test.bag'})
+
+        saved_at = response.json()['saved_at']
+
+        self.assertTrue(saved_at, "saved_at must not be empty")
+        self.assertRegex(saved_at, r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}',
+                         f"saved_at must be ISO 8601: {saved_at}")
+
+        parsed = datetime.fromisoformat(saved_at)
+        self.assertIsNotNone(parsed.tzinfo,
+                             f"saved_at must carry an offset so the UI can "
+                             f"render local time, got: {saved_at}")
+
+    def test_no_autosave_returns_exists_false_only(self):
+        """With no autosave, the check returns exists=False and no metadata."""
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            response = self.client.get('/api/autosave/check/',
+                                       {'bag_filename': 'nothing-here.bag'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'exists': False})
 
 
 class TestB2_RestoreBringsWorkBack(TestCase):
     """B2: Restoring brings the work back
-    
+
     Manual Test:
     1. Click "Restore work"
     2. Pass: URL ends in ?restore=autosave
-    3. Pass: time axes show exactly what you had before
+    3. Pass: time axes show exactly what you had before, including the empty
+       axis from A3
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.client = Client()
-    
+
     def test_restore_returns_complete_annotation(self):
         """Restoring should return complete annotation state."""
         payload = {
@@ -754,34 +979,54 @@ class TestB2_RestoreBringsWorkBack(TestCase):
                             'text': 'Hello'
                         }
                     ]
+                },
+                {
+                    'id': 'axis_124',
+                    'name': 'Empty Axis',
+                    'type': 'select',
+                    'shortcutKey': 'e',
+                    'blocks': []
                 }
             ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             write_autosave('test.bag', payload)
-            response = self.client.get('/api/autosave/load/', {'bag_filename': 'test.bag'})
-        
+            response = self.client.get('/api/autosave/load/',
+                                       {'bag_filename': 'test.bag'})
+
         self.assertEqual(response.status_code, 200)
         restored = response.json()
         self.assertEqual(restored['axes'][0]['id'], 'axis_123')
         self.assertEqual(restored['axes'][0]['blocks'][0]['text'], 'Hello')
+        self.assertEqual(restored['axes'][1]['name'], 'Empty Axis')
+        self.assertEqual(restored['axes'][1]['blocks'], [])
+
+    def test_load_missing_autosave_returns_404(self):
+        """Loading a bag with no autosave should 404, not 200 with junk."""
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            response = self.client.get('/api/autosave/load/',
+                                       {'bag_filename': 'nothing-here.bag'})
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('error', response.json())
 
 
 class TestB3_SpeakerTiersNotDuplicated(TestCase):
     """B3: Speaker tiers are not duplicated
-    
+
     Manual Test:
-    1. Use bag with audio (produces speaker tiers via transcription)
-    2. Restore an autosave from that session
+    1. Use bag with audio (transcription produces speaker tiers)
+    2. Restore an autosave made from that session
     3. Pass: each speaker tier appears once
-    4. Fail: speaker appears twice (merge bug)
+    4. Fail: every speaker appears twice (restore branch not returning before
+       the speakerData branch runs)
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
+
     def test_speaker_tiers_not_duplicated_on_restore(self):
         """Speaker tiers from transcription should not duplicate on restore."""
         payload = {
@@ -792,357 +1037,539 @@ class TestB3_SpeakerTiersNotDuplicated(TestCase):
                 {'name': 'speaker_1', 'type': 'speaker', 'blocks': []},
                 {'name': 'manual_axis', 'type': 'select', 'blocks': []}
             ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             write_autosave('test.bag', payload)
             retrieved = read_autosave('test.bag')
-        
-        # Should have exactly 3 axes, not 6
+
         self.assertEqual(len(retrieved['axes']), 3)
+
+        names = [ax['name'] for ax in retrieved['axes']]
+        self.assertEqual(len(names), len(set(names)), "Tier names must be unique")
+
         speaker_count = sum(1 for ax in retrieved['axes'] if ax.get('type') == 'speaker')
         self.assertEqual(speaker_count, 2)
 
 
 class TestB4_AxisIdCounterResumes(TestCase):
     """B4: The axis id counter resumes correctly
-    
+
     Manual Test:
     1. Immediately after restoring, click "Add New Axis"
     2. Open "Manage Axes" and try renaming the new axis
-    3. Pass: only new axis renamed
-    4. Fail: existing axis renamed too (id collision)
+    3. Pass: only the new axis is renamed
+    4. Fail: an existing axis is renamed too (globalAxisId collided)
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
-    def test_axis_id_collision_not_present(self):
-        """Restored axes should have unique IDs, new axis should not collide."""
+
+    def test_restored_axis_ids_are_unique(self):
+        """Restored axes must keep unique IDs for the frontend counter to resume."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'axes': [
                 {'id': 'axis_1', 'name': 'Axis 1', 'type': 'select', 'blocks': []},
                 {'id': 'axis_2', 'name': 'Axis 2', 'type': 'select', 'blocks': []},
+                {'id': 'axis_7', 'name': 'Axis 7', 'type': 'select', 'blocks': []},
             ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             write_autosave('test.bag', payload)
             retrieved = read_autosave('test.bag')
-        
-        # Verify IDs are unique and preserved
+
         ids = [ax['id'] for ax in retrieved['axes']]
-        self.assertEqual(len(ids), len(set(ids)))  # All unique
-        self.assertIn('axis_1', ids)
-        self.assertIn('axis_2', ids)
+        self.assertEqual(len(ids), len(set(ids)), "Axis IDs must be unique")
+        self.assertEqual(ids, ['axis_1', 'axis_2', 'axis_7'],
+                         "IDs must survive verbatim so the counter can resume past them")
 
 
 class TestB5_RestoreNotImmediatelyDirty(TestCase):
-    """B5: Restoring does not immediately mark session dirty
-    
+    """B5: Restoring does not immediately mark the session dirty
+
     Manual Test:
-    1. Restore, check browser console
-    2. Pass: see "Data loaded. No unsaved edits."
-    3. Fail: see "Annotations modified"
+    1. Restore, then check the browser console
+    2. Pass: "Data loaded. No unsaved edits."
+    3. Fail: "Annotations modified"
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
-    def test_restore_marks_clean_state(self):
-        """Restored state should be marked as clean (no unsaved edits)."""
+
+    def test_restored_payload_carries_no_dirty_flag(self):
+        """The restored payload must not carry any unsaved-edit marker."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             write_autosave('test.bag', payload)
             retrieved = read_autosave('test.bag')
-            
-            # Should have all required fields but no "dirty" flag
-            self.assertIsNotNone(retrieved)
-            self.assertNotIn('unsaved_edits', retrieved)
+
+        self.assertIsNotNone(retrieved)
+        self.assertNotIn('unsaved_edits', retrieved)
+        self.assertNotIn('dirty', retrieved)
+
+    def test_restore_is_byte_stable(self):
+        """Restoring twice returns identical state, so no phantom edit is implied."""
+        payload = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'annotation_name': 'Session 1',
+            'axes': [
+                {'id': 'a1', 'name': 'axis1', 'type': 'select', 'blocks': [
+                    {'start': 0.0, 'end': 5.0, 'code': 'x'}
+                ]}
+            ],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('test.bag', payload)
+            first = read_autosave('test.bag')
+            second = read_autosave('test.bag')
+
+        self.assertEqual(first, second)
 
 
 class TestB6_DiscardingRemovesFile(TestCase):
     """B6: Discarding removes the file
-    
+
     Manual Test:
     1. Create fresh autosave, return to import, select bag, click "Load Me"
     2. Click "Discard and start fresh"
-    3. Pass: JSON and .bak both gone
-    4. Return to import and select bag again
-    5. Pass: no prompt
+    3. Pass: the JSON and its .bak are both gone
+    4. Return to import and select the bag again
+    5. Pass: no prompt and no hint
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.client = Client()
-    
+
     def test_discard_removes_both_json_and_backup(self):
-        """Discard should remove autosave.json and .bak backup."""
+        """Discard should remove autosave.json and its .bak."""
+        first = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+        second = dict(first)
+        second['axes'] = [{'name': 'axis2', 'type': 'select', 'blocks': []}]
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('test.bag', first)
+            write_autosave('test.bag', second)
+
+            path, backup_path = _autosave_paths('test.bag')
+            self.assertTrue(os.path.exists(path))
+            self.assertTrue(os.path.exists(backup_path))
+
+            delete_autosave('test.bag')
+
+            self.assertFalse(os.path.exists(path))
+            self.assertFalse(os.path.exists(backup_path))
+
+    def test_no_prompt_after_discard(self):
+        """After discarding, the check endpoint must report no autosave."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
-            # Create autosave
-            path = write_autosave('test.bag', payload)
-            backup_path = path + '.bak'
-            
-            # Verify both exist after update
             write_autosave('test.bag', payload)
-            
-            # Discard
-            delete_autosave('test.bag')
-            
-            # Both should be gone
-            self.assertFalse(os.path.exists(path))
-            self.assertFalse(os.path.exists(backup_path))
+            self.client.delete('/api/autosave/delete/?bag_filename=test.bag')
+
+            response = self.client.get('/api/autosave/check/',
+                                       {'bag_filename': 'test.bag'})
+
+        self.assertFalse(response.json().get('exists', True))
 
 
 # ============================================================================
-# Part C: Clearing on a Real Save - Integration Tests
+# Part C: Clearing on a Real Save
 # ============================================================================
 
 class TestC1_DeliberateSaveConsumesAutosave(TestCase):
     """C1: A deliberate save consumes the autosave
-    
+
     Manual Test:
-    1. Make edits, wait for autosave
+    1. Make edits, wait for an autosave
     2. Click "Save and Send Data" and give it a name
-    3. Pass: <name>.csv appears, <stem>.autosave.json and .bak gone
-    4. Return to import and select bag
+    3. Pass: <name>.csv appears, and <stem>.autosave.json plus its .bak are gone
+    4. Return to the import page and select the bag
     5. Pass: no prompt
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
-    def test_manual_save_should_clear_autosave(self):
-        """After manual save, autosave files should be deleted."""
+        self.client = Client()
+
+    def test_discard_after_save_clears_everything(self):
+        """The save flow's discard call must clear both files and the prompt."""
         payload = {
             'schema_version': 1,
             'bag_filename': 'test.bag',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
-            # Create autosave
             write_autosave('test.bag', payload)
             autosave_path, backup_path = _autosave_paths('test.bag')
-            
-            # Simulate manual save by clearing autosave
-            delete_autosave('test.bag')
-            
-            # Verify cleared
+
+            response = self.client.delete(
+                '/api/autosave/delete/?bag_filename=test.bag'
+            )
+
+            self.assertEqual(response.status_code, 200)
             self.assertFalse(os.path.exists(autosave_path))
             self.assertFalse(os.path.exists(backup_path))
+
+            check = self.client.get('/api/autosave/check/',
+                                    {'bag_filename': 'test.bag'})
+            self.assertFalse(check.json().get('exists', True))
+
+    def test_discard_when_nothing_to_discard(self):
+        """Discarding with no autosave present must not error."""
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            response = self.client.delete(
+                '/api/autosave/delete/?bag_filename=test.bag'
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['deleted'])
 
 
 class TestC2_EditingAfterSaveStartsNewAutosave(TestCase):
     """C2: Editing after a save starts a new autosave
-    
+
     Manual Test:
-    1. After manual save (C1), make one more edit and wait 5 seconds
-    2. Pass: fresh autosave file appears
+    1. After C1, make one more edit and wait five seconds
+    2. Pass: a fresh autosave file appears
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
+        self.client = Client()
+
     def test_new_autosave_after_manual_save(self):
-        """New edits after manual save should create new autosave file."""
-        payload1 = {
-            'schema_version': 1,
-            'bag_filename': 'test.bag',
-            'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
-        }
-        
+        """New edits after a manual save should create a fresh autosave."""
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
-            # First autosave
-            write_autosave('test.bag', payload1)
-            delete_autosave('test.bag')  # Manual save clears it
-            
-            # New edit
-            payload2 = payload1.copy()
-            payload2['axes'] = [{'name': 'axis2', 'type': 'select', 'blocks': []}]
-            
-            # New autosave appears
-            path = write_autosave('test.bag', payload2)
-            self.assertTrue(os.path.exists(path))
-            
+            self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps({
+                    'bag_filename': 'test.bag',
+                    'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+                    'saved_at': '2024-01-01T12:00:00+11:00',
+                }),
+                content_type='application/json',
+            )
+
+            self.client.delete('/api/autosave/delete/?bag_filename=test.bag')
+
+            response = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps({
+                    'bag_filename': 'test.bag',
+                    'axes': [{'name': 'axis2', 'type': 'select', 'blocks': []}],
+                    'saved_at': '2024-01-01T12:05:00+11:00',
+                }),
+                content_type='application/json',
+            )
+
+            self.assertTrue(response.json()['saved'],
+                            "Post-save edit must write a fresh autosave")
+
             retrieved = read_autosave('test.bag')
-            self.assertEqual(retrieved['axes'][0]['name'], 'axis2')
+
+        self.assertIsNotNone(retrieved)
+        self.assertEqual(retrieved['axes'][0]['name'], 'axis2')
 
 
 # ============================================================================
-# Part D: Failure Handling - Integration/Error Tests
+# Part D: Failure Handling
 # ============================================================================
 
 class TestD1_CorruptAutosaveFallsBackToBackup(TestCase):
     """D1: A corrupt autosave is treated as absent
-    
+
     Manual Test:
-    1. Create autosave, then damage it: echo 'not json' > file
-    2. Select bag on import page
-    3. Pass: dialog appears from .bak with error line about corrupt copy
+    1. Create an autosave, then damage it with: echo 'not json' > <file>
+    2. Select the bag on the import page
+    3. Pass: the dialog still appears, sourced from the .bak, with a line
+       saying the most recent copy could not be read
     4. Damage both files
-    5. Pass: no prompt, page loads normally
+    5. Pass: no prompt at all, no error, page loads normally
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
-    def test_corrupt_json_returns_none(self):
-        """Corrupt autosave file should return None safely."""
+        self.client = Client()
+
+    def test_corrupt_primary_falls_back_to_backup(self):
+        """A corrupt primary must fall back to the .bak and flag it."""
+        first = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'good_backup', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+        second = dict(first)
+        second['axes'] = [{'name': 'newer', 'type': 'select', 'blocks': []}]
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('test.bag', first)
+            write_autosave('test.bag', second)
+
             path, _ = _autosave_paths('test.bag')
-            os.makedirs(self.temp_dir, exist_ok=True)
-            
-            # Create corrupt file
             with open(path, 'w') as f:
                 f.write('this is not json at all {]')
-            
+
             result = read_autosave('test.bag')
-        
-        self.assertIsNone(result)
-    
+
+        self.assertIsNotNone(result, "Must recover from the .bak")
+        self.assertEqual(result['axes'][0]['name'], 'good_backup')
+        self.assertTrue(result['recovered_from_backup'],
+                        "UI must be told this came from the backup")
+
     def test_both_files_corrupt_returns_none(self):
-        """If both primary and backup are corrupt, return None."""
+        """If both copies are corrupt, recovery fails quietly to the safe state."""
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             path, backup_path = _autosave_paths('test.bag')
             os.makedirs(self.temp_dir, exist_ok=True)
-            
-            # Corrupt both
+
             with open(path, 'w') as f:
                 f.write('broken')
             with open(backup_path, 'w') as f:
                 f.write('broken')
-            
+
             result = read_autosave('test.bag')
-        
+
+            response = self.client.get('/api/autosave/check/',
+                                       {'bag_filename': 'test.bag'})
+
         self.assertIsNone(result)
+        self.assertEqual(response.status_code, 200, "Must not error")
+        self.assertFalse(response.json().get('exists', True), "Must show no prompt")
 
 
 class TestD2_FutureSchemaVersionRefused(TestCase):
     """D2: A future schema version is refused
-    
+
     Manual Test:
-    1. Edit JSON, change schema_version to 99
-    2. Select bag on import page
-    3. Pass: no prompt, incompatible file ignored
+    1. Edit the JSON and change schema_version from 1 to 99
+    2. Select the bag
+    3. Pass: no prompt; an incompatible file is ignored rather than half-loaded
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
-    def test_unsupported_schema_version_ignored(self):
-        """File with future schema version should be ignored."""
+        self.client = Client()
+
+    def test_future_schema_version_ignored(self):
+        """A future schema version must produce no prompt."""
         payload = {
-            'schema_version': 999,  # Unsupported version
+            'schema_version': 99,
             'bag_filename': 'test.bag',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
             path, _ = _autosave_paths('test.bag')
             os.makedirs(self.temp_dir, exist_ok=True)
-            
             with open(path, 'w') as f:
                 json.dump(payload, f)
-            
+
             result = read_autosave('test.bag')
-        
+            response = self.client.get('/api/autosave/check/',
+                                       {'bag_filename': 'test.bag'})
+
+        self.assertIsNone(result)
+        self.assertFalse(response.json().get('exists', True))
+
+    def test_malformed_axes_field_ignored(self):
+        """A payload whose axes is not a list must be treated as unusable."""
+        payload = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'axes': 'not-a-list',
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            path, _ = _autosave_paths('test.bag')
+            os.makedirs(self.temp_dir, exist_ok=True)
+            with open(path, 'w') as f:
+                json.dump(payload, f)
+
+            result = read_autosave('test.bag')
+
         self.assertIsNone(result)
 
 
-class TestD3_AutosaveFilesNotLoadable(TestCase):
+class TestD3_AutosaveFilesNotInLoadableList(TestCase):
     """D3: Autosave files never appear as loadable annotations
-    
+
     Manual Test:
-    1. With autosave on disk, reload import page
-    2. Pass: "Annotation File" column lists only .csv files
-    3. JSON invisible because list_filenames filters on extension
+    1. With an autosave on disk, reload the import page
+    2. Pass: the "Annotation File" column lists only .csv files
+
+    This asserts against the real list_filenames endpoint rather than a
+    reimplementation of its filter.
     """
-    
-    def test_autosave_json_not_in_file_list(self):
-        """list_filenames should filter out .autosave.json files."""
-        # This is more of an integration test that would verify
-        # the list_filenames function excludes .autosave.json
-        # Actual implementation depends on how list_filenames is structured
-        pass
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.client = Client()
+
+    def test_autosave_not_listed_as_annotation_file(self):
+        """list_filenames must not offer .autosave.json or .bak files."""
+        payload = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('test.bag', payload)
+            write_autosave('test.bag', dict(payload, annotation_name='v2'))
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            response = self.client.get('/api/list_filenames/')
+
+        self.assertEqual(response.status_code, 200)
+
+        body = json.dumps(response.json())
+        self.assertNotIn('.autosave.json', body,
+                         "Autosave files must never be listed as loadable")
+
+    def test_autosave_suffix_is_not_csv(self):
+        """The autosave naming scheme must not collide with the CSV namespace."""
+        from rosbag_processing.autosave import AUTOSAVE_SUFFIX, BACKUP_SUFFIX
+
+        self.assertFalse(AUTOSAVE_SUFFIX.endswith('.csv'))
+        self.assertFalse(BACKUP_SUFFIX.endswith('.csv'))
+        self.assertTrue(AUTOSAVE_SUFFIX.endswith('.json'))
 
 
 class TestD4_BackendDownDoesNotBreakEditing(TestCase):
-    """D4: Backend being down does not break editing
-    
+    """D4: The backend being down does not break editing
+
     Manual Test:
-    1. Stop backend: docker compose stop backend
-    2. Keep editing in still-open tab for a minute
-    3. Pass: editing continues normally, console warnings
-    4. Restart backend, make another edit
-    5. Pass: next autosave succeeds
+    1. docker compose stop backend
+    2. Keep editing in the still-open tab for a minute
+    3. Pass: editing continues, console warnings, no dialog or crash
+    4. docker compose start backend, make another edit
+    5. Pass: the next autosave succeeds
+
+    Backend scope: a failing write must surface as a clean 500 the frontend
+    can catch, and a later write must still succeed.
     """
-    
+
     def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
         self.client = Client()
-    
-    def test_save_endpoint_error_returns_500(self):
-        """Failed autosave should return proper error."""
-        payload = {
+
+    def test_save_failure_returns_clean_error(self):
+        """A failed write returns 500 with an error message, not a stack trace."""
+        body = {
             'bag_filename': 'test.bag',
             'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
         }
-        
-        with patch('rosbag_processing.autosave.write_autosave', side_effect=OSError('Backend error')):
+
+        with patch('rosbag_processing.autosave.write_autosave',
+                   side_effect=OSError('Backend error')):
             response = self.client.post(
                 '/api/autosave/save/',
-                data=json.dumps(payload),
+                data=json.dumps(body),
                 content_type='application/json'
             )
-        
+
         self.assertEqual(response.status_code, 500)
+        self.assertIn('error', response.json())
+
+    def test_save_recovers_after_transient_failure(self):
+        """Once the failure clears, the next autosave must succeed."""
+        body = {
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            with patch('rosbag_processing.autosave.write_autosave',
+                       side_effect=OSError('Backend down')):
+                failed = self.client.post(
+                    '/api/autosave/save/',
+                    data=json.dumps(body),
+                    content_type='application/json'
+                )
+            self.assertEqual(failed.status_code, 500)
+
+            recovered = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json'
+            )
+
+            self.assertEqual(recovered.status_code, 200)
+            self.assertTrue(recovered.json()['saved'])
+            self.assertIsNotNone(read_autosave('test.bag'))
 
 
 class TestD5_ClosingTabSavesLastEdits(TestCase):
     """D5: Closing the tab saves the last edits
-    
+
     Manual Test:
-    1. Make edit, within ~1 second close the tab
-    2. Check file modification time
-    3. Pass: reflects moment of closing
-    Note: Best-effort test; treat failure as note, not blocker
+    1. Make an edit and, within about a second, close the tab
+    2. Check the file's modification time
+    3. Pass: it reflects the moment of closing
+
+    Best-effort by design (beacon based). Backend scope: the final beacon
+    write must be accepted and persisted like any other save.
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
-    
-    def test_final_write_occurs_before_app_close(self):
-        """Last edit should be written before app closes."""
-        payload = {
-            'schema_version': 1,
+        self.client = Client()
+
+    def test_final_beacon_write_is_persisted(self):
+        """A last-moment save must persist in full."""
+        body = {
             'bag_filename': 'test.bag',
-            'axes': [{'name': 'final', 'type': 'select', 'blocks': []}],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'annotation_name': 'Session 1',
+            'axes': [{'name': 'final', 'type': 'select', 'blocks': [
+                {'start': 0.0, 'end': 5.0, 'code': 'last_edit'}
+            ]}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
-            write_autosave('test.bag', payload)
+            response = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json',
+            )
             retrieved = read_autosave('test.bag')
-            self.assertEqual(retrieved['axes'][0]['name'], 'final')
+
+        self.assertTrue(response.json()['saved'])
+        self.assertEqual(retrieved['axes'][0]['name'], 'final')
+        self.assertEqual(retrieved['axes'][0]['blocks'][0]['code'], 'last_edit')
 
 
 # ============================================================================
@@ -1151,23 +1578,22 @@ class TestD5_ClosingTabSavesLastEdits(TestCase):
 
 class TestE_CrashRecovery(TestCase):
     """E: The crash test - the one the feature exists for
-    
+
     Manual Test:
-    1. Load bag, build several tiers and blocks, wait 5 seconds
-    2. Kill browser process: pkill -9 chrome
-    3. Reopen browser, go to import page, select same bag
-    4. Pass: prompt offers the work, restoring returns everything
+    1. Load a bag, build several tiers and blocks, wait five seconds
+    2. Kill the browser process outright: pkill -9 chrome
+    3. Reopen the browser, go to the import page, select the same bag
+    4. Pass: the prompt offers the work, and restoring returns everything up
+       to the last autosave
     """
-    
+
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.client = Client()
-    
+
     def test_crash_recovery_full_workflow(self):
-        """Complete crash recovery workflow."""
-        # Build significant state
-        payload = {
-            'schema_version': 1,
+        """Save, crash, detect, restore - everything comes back."""
+        body = {
             'bag_filename': 'test.bag',
             'booklist_filename': 'codebook.json',
             'annotation_name': 'Session 1',
@@ -1191,28 +1617,97 @@ class TestE_CrashRecovery(TestCase):
                     ]
                 }
             ],
-            'saved_at': '2024-01-01T12:00:00Z',
+            'saved_at': '2024-01-01T12:00:00+11:00',
         }
-        
+
         with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
-            # Autosave occurs
-            path = write_autosave('test.bag', payload)
-            self.assertTrue(os.path.exists(path))
-            
-            # Simulate crash and restart
-            # Check if recovery can be detected
-            response = self.client.get('/api/autosave/check/', {'bag_filename': 'test.bag'})
-            self.assertTrue(response.json().get('exists', False))
-            
-            # Restore everything
-            response = self.client.get('/api/autosave/load/', {'bag_filename': 'test.bag'})
-            restored = response.json()
-            
-            # Verify all data is exactly preserved
-            self.assertEqual(len(restored['axes']), 2)
-            self.assertEqual(len(restored['axes'][0]['blocks']), 3)
-            self.assertEqual(restored['axes'][0]['blocks'][0]['text'], 'Hello')
-            self.assertEqual(restored['axes'][1]['blocks'][0]['code'], 'happy')
+            save = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json',
+            )
+            self.assertTrue(save.json()['saved'])
+
+            # Browser dies here. New session starts below.
+
+            check = self.client.get('/api/autosave/check/',
+                                    {'bag_filename': 'test.bag'})
+            check_data = check.json()
+
+            self.assertTrue(check_data['exists'])
+            self.assertEqual(check_data['axis_count'], 2)
+            self.assertEqual(check_data['block_count'], 4)
+            self.assertEqual(check_data['annotation_name'], 'Session 1')
+
+            load = self.client.get('/api/autosave/load/',
+                                   {'bag_filename': 'test.bag'})
+            restored = load.json()
+
+        self.assertEqual(len(restored['axes']), 2)
+        self.assertEqual(len(restored['axes'][0]['blocks']), 3)
+        self.assertEqual(restored['axes'][0]['blocks'][0]['text'], 'Hello')
+        self.assertEqual(restored['axes'][1]['blocks'][0]['code'], 'happy')
+
+    def test_prompt_counts_match_restored_data(self):
+        """The counts in the prompt must match exactly what restore returns."""
+        body = {
+            'bag_filename': 'session.bag',
+            'annotation_name': 'Interview Recording',
+            'axes': [
+                {
+                    'id': 'axis_1',
+                    'name': 'Speech Acts',
+                    'type': 'select',
+                    'blocks': [
+                        {'start': 0.0, 'end': 5.0, 'code': 'greeting'},
+                        {'start': 5.0, 'end': 10.0, 'code': 'question'},
+                        {'start': 10.0, 'end': 15.0, 'code': 'answer'},
+                    ]
+                },
+                {
+                    'id': 'axis_2',
+                    'name': 'Emotions',
+                    'type': 'select',
+                    'blocks': [
+                        {'start': 0.0, 'end': 10.0, 'code': 'happy'},
+                        {'start': 10.0, 'end': 15.0, 'code': 'neutral'},
+                    ]
+                },
+                {
+                    'id': 'axis_3',
+                    'name': 'Empty Tier',
+                    'type': 'select',
+                    'blocks': []
+                },
+            ],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(body),
+                content_type='application/json',
+            )
+
+            check_data = self.client.get(
+                '/api/autosave/check/', {'bag_filename': 'session.bag'}
+            ).json()
+
+            restored = self.client.get(
+                '/api/autosave/load/', {'bag_filename': 'session.bag'}
+            ).json()
+
+        restored_axis_count = len(restored['axes'])
+        restored_block_count = sum(len(ax['blocks']) for ax in restored['axes'])
+
+        self.assertEqual(check_data['axis_count'], restored_axis_count,
+                         "Prompt tier count must match what restore returns")
+        self.assertEqual(check_data['block_count'], restored_block_count,
+                         "Prompt annotation count must match what restore returns")
+
+        self.assertEqual(check_data['axis_count'], 3)
+        self.assertEqual(check_data['block_count'], 5)
 
 
 if __name__ == '__main__':
