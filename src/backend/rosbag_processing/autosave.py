@@ -18,6 +18,7 @@ import json
 import os
 import re
 import tempfile
+from uuid import UUID
 from datetime import datetime, timezone
 
 from django.views.decorators.csrf import csrf_exempt
@@ -68,9 +69,29 @@ def _autosave_stem(bag_filename):
     return stem
 
 
-def _autosave_paths(bag_filename):
+def _request_scope(values):
+    manifest_id = values.get('manifest_id')
+    chunk_index = values.get('chunk_index')
+    if manifest_id is None and chunk_index is None:
+        return None
+    try:
+        identifier = str(UUID(str(manifest_id)))
+        if isinstance(chunk_index, bool) or not re.fullmatch(r'\d+', str(chunk_index)):
+            raise ValueError()
+        index = int(chunk_index)
+        if index >= 10000:
+            raise ValueError()
+    except (ValueError, TypeError, AttributeError):
+        raise AutosaveNameError('A valid manifest_id and chunk_index are required together.')
+    return identifier, index
+
+
+def _autosave_paths(bag_filename, scope=None):
     """Return (autosave_path, backup_path) for a bag filename."""
-    base = os.path.join(AUTOSAVE_DIR, _autosave_stem(bag_filename))
+    directory = AUTOSAVE_DIR
+    if scope is not None:
+        directory = os.path.join(directory, 'chunks', scope[0], str(scope[1]))
+    base = os.path.join(directory, _autosave_stem(bag_filename))
     return base + AUTOSAVE_SUFFIX, base + BACKUP_SUFFIX
 
 # Fields that define the content of an autosave. saved_at is excluded on
@@ -93,14 +114,14 @@ def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _read_primary(bag_filename):
+def _read_primary(bag_filename, scope=None):
     """Read only the primary autosave, ignoring the .bak.
 
     Used for the unchanged-content check. read_autosave() falls back to the
     backup, which would be wrong here: if the primary is corrupt and the backup
     happens to match the incoming state, we must still write a good primary.
     """
-    path, _ = _autosave_paths(bag_filename)
+    path, _ = _autosave_paths(bag_filename, scope)
     if not os.path.isfile(path):
         return None
     try:
@@ -123,10 +144,11 @@ def _same_content(existing, payload):
 # File operations
 # ---------------------------------------------------------------------------
 
-def write_autosave(bag_filename, payload):
+def write_autosave(bag_filename, payload, scope=None):
     """Atomically write an autosave payload, rotating the previous one to .bak."""
-    path, backup_path = _autosave_paths(bag_filename)
-    os.makedirs(AUTOSAVE_DIR, exist_ok=True)
+    path, backup_path = _autosave_paths(bag_filename, scope)
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
 
     if os.path.isfile(path):
         try:
@@ -136,7 +158,7 @@ def write_autosave(bag_filename, payload):
             pass
 
     handle_fd, tmp_path = tempfile.mkstemp(
-        dir=AUTOSAVE_DIR, prefix='.autosave-', suffix='.tmp'
+        dir=directory, prefix='.autosave-', suffix='.tmp'
     )
     try:
         with os.fdopen(handle_fd, 'w', encoding='utf-8') as handle:
@@ -152,14 +174,14 @@ def write_autosave(bag_filename, payload):
     return path
 
 
-def read_autosave(bag_filename):
+def read_autosave(bag_filename, scope=None):
     """Return the autosave payload, or None if there is nothing usable.
 
     Falls back to the .bak copy if the primary file is missing or corrupt. The
     returned payload carries 'recovered_from_backup' so the interface can be
     honest about which copy the user is being offered.
     """
-    path, backup_path = _autosave_paths(bag_filename)
+    path, backup_path = _autosave_paths(bag_filename, scope)
 
     for candidate, from_backup in ((path, False), (backup_path, True)):
         if not os.path.isfile(candidate):
@@ -183,10 +205,10 @@ def read_autosave(bag_filename):
     return None
 
 
-def delete_autosave(bag_filename):
+def delete_autosave(bag_filename, scope=None):
     """Remove the autosave and its backup. Returns True if anything was removed."""
     removed = False
-    for candidate in _autosave_paths(bag_filename):
+    for candidate in _autosave_paths(bag_filename, scope):
         try:
             os.remove(candidate)
             removed = True
@@ -226,6 +248,7 @@ def save_autosave(request):
 
     try:
         _autosave_stem(bag_filename)
+        scope = _request_scope(request.data)
     except AutosaveNameError as exc:
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -248,7 +271,9 @@ def save_autosave(request):
     # Idempotency: identical state is not rewritten. This keeps saved_at
     # honest about when the work actually dates from, and protects the .bak
     # from being overwritten with a duplicate of the current file.
-    existing = _read_primary(bag_filename)
+    if scope is not None:
+        payload.update(manifest_id=scope[0], chunk_index=scope[1])
+    existing = _read_primary(bag_filename, scope)
     if existing is not None and _same_content(existing, payload):
         return Response({
             'saved': False,
@@ -258,7 +283,7 @@ def save_autosave(request):
         })
 
     try:
-        write_autosave(bag_filename, payload)
+        write_autosave(bag_filename, payload, scope)
     except OSError as exc:
         return Response(
             {'error': f'Unable to write autosave: {str(exc)}'},
@@ -280,10 +305,11 @@ def check_autosave(request):
 
     try:
         _autosave_stem(bag_filename)
+        scope = _request_scope(request.query_params)
     except AutosaveNameError as exc:
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    payload = read_autosave(bag_filename)
+    payload = read_autosave(bag_filename, scope)
     if payload is None:
         return Response({'exists': False})
 
@@ -297,10 +323,11 @@ def load_autosave(request):
 
     try:
         _autosave_stem(bag_filename)
+        scope = _request_scope(request.query_params)
     except AutosaveNameError as exc:
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    payload = read_autosave(bag_filename)
+    payload = read_autosave(bag_filename, scope)
     if payload is None:
         return Response(
             {'error': 'No autosave found for this ROSBag.'},
@@ -318,7 +345,8 @@ def discard_autosave(request):
 
     try:
         _autosave_stem(bag_filename)
+        scope = _request_scope(request.query_params)
     except AutosaveNameError as exc:
         return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({'deleted': delete_autosave(bag_filename)})
+    return Response({'deleted': delete_autosave(bag_filename, scope)})

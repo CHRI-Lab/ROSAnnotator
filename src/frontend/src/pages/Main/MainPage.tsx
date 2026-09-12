@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import LoadingPage from "../Loading";
 import Annotator from "../Annotator";
 import { useParams, useSearchParams } from "react-router-dom";
@@ -20,8 +20,21 @@ interface ChunkPageData {
 
 import {
   fetchAutosave,
+  fetchAutosaveMeta,
   hydrateAutosaveAxes,
 } from "../../components/Autosave/autosaveUtils";
+
+const restoreChunk = async (bag: string, id: string, index: number) => {
+  const scope = { manifest_id: id, chunk_index: index };
+  const meta = await fetchAutosaveMeta(bag, scope);
+  if (!meta.exists) return null;
+  const payload = await fetchAutosave(bag, scope);
+  if (payload.bag_filename !== bag || payload.manifest_id !== id ||
+      payload.chunk_index !== index || !Array.isArray(payload.axes)) {
+    throw new Error("The autosave does not belong to this chunk.");
+  }
+  return hydrateAutosaveAxes(payload.axes);
+};
 
 const MainPage = () => {
   const { rosBagFile, bookListFile, annotationFile } = useParams();
@@ -39,6 +52,10 @@ const MainPage = () => {
   const [errorDisplay, setErrorDisplay] = useState(false);
   const requestGeneration = useRef(0);
   const chunkChangeInProgress = useRef(false);
+  const autosaveFlush = useRef<(() => Promise<void>) | null>(null);
+  const registerAutosave = useCallback((flush: (() => Promise<void>) | null) => {
+    autosaveFlush.current = flush;
+  }, []);
 
   useEffect(() => {
     const generation = ++requestGeneration.current;
@@ -71,6 +88,9 @@ const MainPage = () => {
             throw new Error("Whole-input recovery cannot be applied to a split chunk. Restore from the file selection page.");
           }
           loadedData = await processChunk(manifestId, 0);
+          if (manifest.chunking_enabled) {
+            recoveredAxes = await restoreChunk(rosBagFile, manifestId, 0);
+          }
         } else {
           const response = await fetch("http://localhost:8000/api/process_rosbag/", {
             method: "POST",
@@ -129,14 +149,19 @@ const MainPage = () => {
     setError(null);
     setErrorDisplay(false);
     try {
+      if (!autosaveFlush.current) throw new Error("The editor is not ready to save. Please retry.");
+      await autosaveFlush.current();
+      if (generation !== requestGeneration.current) return;
       const nextChunk = await processChunk(manifestId, targetIndex);
       if (generation !== requestGeneration.current) return;
       const refreshedManifest = await getChunkManifest(manifestId);
       if (generation !== requestGeneration.current) return;
+      const recoveredAxes = await restoreChunk(rosBagFile!, manifestId, targetIndex);
+      if (generation !== requestGeneration.current) return;
       setData(nextChunk);
       setBookListData(nextChunk.booklist_data);
       setChunkManifest(refreshedManifest);
-      setRestoredAxes(null);
+      setRestoredAxes(recoveredAxes);
       setCurrentChunkIndex(targetIndex);
     } catch (error) {
       if (generation !== requestGeneration.current) return;
@@ -158,8 +183,11 @@ const MainPage = () => {
 
   return (
     <div>
+      <Dialog open={switchingChunk}>
+        <DialogTitle>Saving and switching chunk…</DialogTitle>
+      </Dialog>
       <Dialog open={errorDisplay} onClose={() => data && setErrorDisplay(false)}>
-        <DialogTitle>Error loading your files</DialogTitle>
+        <DialogTitle>{data ? "Unable to switch chunk" : "Error loading your files"}</DialogTitle>
         <DialogContent>
           <Typography color="error">{String(error)}</Typography>
           {data && <Button onClick={() => setErrorDisplay(false)}>Back to current chunk</Button>}
@@ -177,7 +205,8 @@ const MainPage = () => {
         switchingChunk={switchingChunk}
         onChunkChange={handleChunkChange}
         restoredAxes={restoredAxes}
-        autosaveEnabled={!chunkManifest?.chunking_enabled}
+        autosaveEnabled={true}
+        onAutosaveReady={registerAutosave}
       />}
     </div>
   );

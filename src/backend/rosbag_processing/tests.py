@@ -257,3 +257,29 @@ class ChunkApiTests(SimpleTestCase):
         self.assertEqual(response.data['index'], 1)
         self.assertEqual(response.data['status'], 'ready')
         process_chunk_mock.assert_called_once()
+
+    @patch('rosbag_processing.chunk_views.process_chunk')
+    def test_model_certificate_errors_explain_recovery(self, process_chunk_mock):
+        import ssl
+        from urllib.error import URLError
+        from requests.exceptions import SSLError
+
+        manifest = save_manifest(self.manifest_directory, 'example.bag', 610, 300)
+        for error in (
+            URLError(ssl.SSLCertVerificationError('certificate verify failed')),
+            SSLError('certificate verify failed'),
+        ):
+            with self.subTest(error=type(error).__name__):
+                process_chunk_mock.side_effect = error
+                response = self.client.post(f"/api/chunks/{manifest['id']}/0/process/")
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.data['code'], 'model_download_tls_error')
+                self.assertIn('CA certificate', response.data['error'])
+
+    @patch('rosbag_processing.chunk_views.process_chunk')
+    def test_unrelated_errors_do_not_report_certificate_failure(self, process_chunk_mock):
+        manifest = save_manifest(self.manifest_directory, 'example.bag', 610, 300)
+        process_chunk_mock.side_effect = ValueError('internal detail')
+        response = self.client.post(f"/api/chunks/{manifest['id']}/0/process/")
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.data, {'error': 'Unable to process chunk.'})

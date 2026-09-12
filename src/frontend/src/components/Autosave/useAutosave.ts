@@ -18,9 +18,11 @@ import {
     buildAutosaveRequestBody,
     postAutosave,
     postAutosaveBeacon,
+    AutosaveScope,
 } from "./autosaveUtils";
 
 interface UseAutosaveOptions {
+    scope?: AutosaveScope;
     enabled: boolean;
     bagFileName: string;
     axes: any[];
@@ -57,8 +59,9 @@ export const useAutosave = (
 
     const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const ceilingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const inFlight = useRef(false);
+    const inFlight = useRef<Promise<void> | null>(null);
     const lastSavedSnapshot = useRef<string>("");
+    const mounted = useRef(true);
 
     const clearTimers = useCallback(() => {
         if (idleTimer.current) {
@@ -72,13 +75,17 @@ export const useAutosave = (
     }, []);
 
     const runAutosave = useCallback(async () => {
+        // Serialize writes, then inspect the latest state: edits may have arrived
+        // while the previous background request was pending.
+        while (inFlight.current) await inFlight.current;
+        if (!mounted.current) return;
         const current = latest.current;
 
         if (!current.enabled || !current.bagFileName) return;
         if (!current.hasUnsavedEdits) return;
-        if (inFlight.current) return;
 
         const body = buildAutosaveRequestBody({
+            scope: current.scope,
             bagFileName: current.bagFileName,
             bookListFileName: current.bookListFileName,
             annotationFileName: current.annotationFileName,
@@ -89,9 +96,10 @@ export const useAutosave = (
         const snapshot = JSON.stringify(body.axes);
         if (snapshot === lastSavedSnapshot.current) return;
 
-        inFlight.current = true;
+        const pending = postAutosave(body);
+        inFlight.current = pending;
         try {
-            await postAutosave(body);
+            await pending;
             lastSavedSnapshot.current = snapshot;
             current.onAutosaved?.(body.saved_at);
         } catch (error) {
@@ -99,8 +107,9 @@ export const useAutosave = (
             // next timer tick will try again.
             console.warn("Autosave failed.", error);
             current.onError?.(error);
+            throw error;
         } finally {
-            inFlight.current = false;
+            inFlight.current = null;
         }
     }, []);
 
@@ -115,7 +124,7 @@ export const useAutosave = (
 
         idleTimer.current = setTimeout(() => {
             idleTimer.current = null;
-            void runAutosave();
+            void runAutosave().catch(() => {});
         }, idleDelayMs);
     }, [options.axes, options.hasUnsavedEdits, options.enabled, idleDelayMs, runAutosave]);
 
@@ -132,8 +141,8 @@ export const useAutosave = (
         if (ceilingTimer.current) return;
 
         const tick = () => {
-            void runAutosave().finally(() => {
-                if (latest.current.enabled && latest.current.hasUnsavedEdits) {
+            void runAutosave().catch(() => {}).finally(() => {
+                if (mounted.current && latest.current.enabled && latest.current.hasUnsavedEdits) {
                     ceilingTimer.current = setTimeout(tick, maxIntervalMs);
                 } else {
                     ceilingTimer.current = null;
@@ -154,6 +163,7 @@ export const useAutosave = (
 
             postAutosaveBeacon(
                 buildAutosaveRequestBody({
+                    scope: current.scope,
                     bagFileName: current.bagFileName,
                     bookListFileName: current.bookListFileName,
                     annotationFileName: current.annotationFileName,
@@ -167,7 +177,13 @@ export const useAutosave = (
         return () => window.removeEventListener("beforeunload", handleBeforeUnload);
     }, []);
 
-    useEffect(() => clearTimers, [clearTimers]);
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+            clearTimers();
+        };
+    }, [clearTimers]);
 
     const markSynced = useCallback((axes: any[]) => {
         lastSavedSnapshot.current = JSON.stringify(
@@ -179,9 +195,8 @@ export const useAutosave = (
     }, []);
 
     const flush = useCallback(async () => {
-        clearTimers();
         await runAutosave();
-    }, [clearTimers, runAutosave]);
+    }, [runAutosave]);
 
     return { markSynced, flush };
 };

@@ -1,6 +1,10 @@
 import json
 import logging
+import ssl
 from pathlib import Path
+from urllib.error import URLError
+
+from requests.exceptions import SSLError as RequestsSSLError
 
 from django.conf import settings
 from rest_framework import serializers, status
@@ -194,8 +198,18 @@ def process_chunk_view(request, manifest_id, chunk_index):
     except RuntimeError as exc:
         status_code = status.HTTP_409_CONFLICT if 'already being processed' in str(exc) else 400
         return Response({'error': str(exc)}, status=status_code)
-    except Exception:
+    except Exception as exc:
         logger.exception('Unable to process chunk %s from manifest %s', chunk_index, manifest_id)
+        cause = exc.reason if isinstance(exc, URLError) else exc
+        if isinstance(cause, (ssl.SSLError, RequestsSSLError)):
+            return Response({
+                'error': (
+                    'Unable to download an audio model because HTTPS certificate '
+                    'verification failed. Check antivirus/proxy HTTPS inspection '
+                    'or configure the backend to trust its CA certificate, then retry.'
+                ),
+                'code': 'model_download_tls_error',
+            }, status=503)
         return Response({'error': 'Unable to process chunk.'}, status=500)
 
     booklist_data = {}

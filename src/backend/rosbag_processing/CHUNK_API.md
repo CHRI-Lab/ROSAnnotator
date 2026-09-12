@@ -60,3 +60,16 @@ only call this endpoint after saving succeeds:
 await autoSave(currentChunk)
 await processAndLoad(targetChunk)
 ```
+
+Chunk autosaves use the existing `/api/autosave/save/`, `check/`, `load/`, and
+`delete/` endpoints. Supply both `manifest_id` (UUID) and `chunk_index` (integer
+from 0 to 9999), in the POST body or query parameters. Omitting both retains
+whole-bag autosave behavior. Recovery files are isolated by manifest and chunk
+under `annotation/chunks/{manifest_id}/{chunk_index}/`; block times remain local
+to the chunk. Empty axes and shortcut keys are retained.
+
+The editor awaits pending saves and saves the latest edits before processing
+the next chunk. Failed saves keep the current editor mounted; dismiss the error
+and select the chunk again to retry. Loading a chunk, including reopening the
+same manifest URL, restores its saved axes before mounting the timeline.
+Creating a new manifest starts a separate recovery set.

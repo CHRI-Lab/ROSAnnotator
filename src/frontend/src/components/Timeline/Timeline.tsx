@@ -27,6 +27,7 @@ import useAutosave from "../Autosave/useAutosave";
 import {
   highestAxisId,
   deleteAutosave,
+  AutosaveScope,
 } from "../Autosave/autosaveUtils";
 
 let globalAxisId = 1;
@@ -41,8 +42,10 @@ interface TimelineProps {
   annotationData: any;
   speakerData?: Array<any>;
   restoredAxes?: any[] | null;
-  // Disable for split chunks: recovery currently stores whole-bag timelines.
   autosaveEnabled?: boolean;
+  autosaveScope?: AutosaveScope;
+  onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
+  switchingChunk?: boolean;
   onAxesUpdate: (axes: any) => void;
   instruction: any;
 }
@@ -110,6 +113,9 @@ const Timeline: React.FC<TimelineProps> = ({
   instruction,
   restoredAxes,
   autosaveEnabled = true,
+  autosaveScope,
+  onAutosaveReady,
+  switchingChunk = false,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
@@ -130,8 +136,9 @@ const Timeline: React.FC<TimelineProps> = ({
   const autosave = useAutosave({
     enabled: autosaveEnabled && Boolean(rosBagFileName),
     bagFileName: rosBagFileName,
+    scope: autosaveScope,
     axes,
-    hasUnsavedEdits,
+    hasUnsavedEdits: hasUnsavedEdits || Boolean(autosaveScope),
     bookListFileName,
     annotationName,
     onAutosaved: (savedAt) => {
@@ -146,6 +153,11 @@ const Timeline: React.FC<TimelineProps> = ({
   });
   const isLoadingData = useRef(true); //initialize true upon load
   const { markSynced } = autosave;
+  const { flush } = autosave;
+  useEffect(() => {
+    onAutosaveReady?.(flush);
+    return () => onAutosaveReady?.(null);
+  }, [flush, onAutosaveReady]);
 
   useEffect(() => {
     if (restoredAxes) {
@@ -282,6 +294,7 @@ const Timeline: React.FC<TimelineProps> = ({
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
+      if (switchingChunk) return;
       if (
         event.target instanceof HTMLElement &&
         event.target.tagName === "INPUT"
@@ -302,7 +315,7 @@ const Timeline: React.FC<TimelineProps> = ({
     return () => {
       window.removeEventListener("keydown", handleKeyPress);
     };
-  }, [axes, selectedRange]);
+  }, [axes, selectedRange, switchingChunk]);
 
   useEffect(() => {
     setSeekTime(played);
@@ -334,10 +347,11 @@ const Timeline: React.FC<TimelineProps> = ({
 
     try {
       await postAnnotation(annotationName, data);
+      if (autosaveScope) await autosave.flush();
       alert("Data saved successfully.");
       setHasUnsavedEdits(false);
       autosave.markSynced(axes);
-      if (autosaveEnabled) {
+      if (autosaveEnabled && !autosaveScope) {
         deleteAutosave(rosBagFileName).catch((err) =>
           console.warn(" [autosave] Could not clear autosave after save.", err)
         );
