@@ -2,6 +2,7 @@ version: "2.0"
 
 services:
   backend:
+    platform: linux/amd64
     build:
       context: ./src/backend # Path backend Dockerfile
     env_file:
