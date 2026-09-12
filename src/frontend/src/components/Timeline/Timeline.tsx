@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from "react";
+import React, { useState, useEffect, useContext, useRef } from "react";
 import { Droppable, Draggable, DragDropContext, DropResult } from 'react-beautiful-dnd';
 import {
   Box,
@@ -11,14 +11,25 @@ import {
   DialogContent,
   DialogContentText,
   Typography,
+  TextField,
 } from "@mui/material";
 import { styled } from "@mui/system";
 import Axis from "../Axis";
 import AxisManager from "../AxisManager";
 import AxesContext from "../AxesProvider";
+import {
+  buildDefaultAnnotationName,
+  isValidAnnotationName,
+  collectAnnotationData,
+  postAnnotation,
+} from "./saveUtils"; 
+import useAutosave from "../Autosave/useAutosave";
+import {
+  highestAxisId,
+  deleteAutosave,
+} from "../Autosave/autosaveUtils";
 
 let globalAxisId = 1;
-
 
 interface TimelineProps {
   rosBagFileName: string;
@@ -29,7 +40,8 @@ interface TimelineProps {
   booklist: any;
   annotationData: any;
   speakerData?: Array<any>;
-  onAxesUpdate: (axes: any) => void;//Send information to parent
+  restoredAxes?: any[] | null;
+  onAxesUpdate: (axes: any) => void;
   instruction: any;
 }
 
@@ -94,6 +106,7 @@ const Timeline: React.FC<TimelineProps> = ({
   speakerData,
   onAxesUpdate,
   instruction,
+  restoredAxes,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
@@ -104,8 +117,37 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState("");
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
-
   const { axes, setAxes } = useContext(AxesContext)!;
+  
+  // SAVE FUNCTIONALITY
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false); // flag controlling whether the "name your annotation" popup is currently visible
+  const [annotationName, setAnnotationName] = useState(""); //container for annotation name text
+  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
+
+  const autosave = useAutosave({
+    enabled: Boolean(rosBagFileName),
+    bagFileName: rosBagFileName,
+    axes,
+    hasUnsavedEdits,
+    bookListFileName,
+    annotationName,
+    onAutosaved: (savedAt) => {
+      const blockCount = axes.reduce(
+        (total, axis) => total + (axis.blocks?.length ?? 0),
+        0
+      );
+      console.log(
+        `[autosave] ${savedAt} — ${axes.length} axes, ${blockCount} blocks`
+      );
+    },
+  });
+  const isLoadingData = useRef(true); //initialize true upon load
+
+  useEffect(() => {
+  if (restoredAxes) {
+    autosave.markSynced(restoredAxes);
+  }
+}, [restoredAxes]);
 
   useEffect(() => {
     if (instruction) {
@@ -167,68 +209,76 @@ const Timeline: React.FC<TimelineProps> = ({
     );
   };
 
+  useEffect(() => { // marks when unsaved changes are detected
+    // Skip flagging unsaved edits on the first render / data load
+    if (isLoadingData.current) {
+      isLoadingData.current = false; // consume the flag, reset for next time
+      setHasUnsavedEdits(false); // a fresh load is always "in sync," regardless of prior state
+      console.log("Data loaded. No unsaved edits.");
+      return;
+    }
+    console.log(" Annotations modified. You have unsaved changes.");
+    setHasUnsavedEdits(true);
+  }, [axes]);
+
 
   useEffect(() => {
+  // A restored autosave replaces the loaded state entirely. It already
+  // contains the speaker tiers from the session it was saved in, so the
+  // branches below must not run as well.
+  if (restoredAxes) {
+    isLoadingData.current = true;
+    globalAxisId = highestAxisId(restoredAxes) + 1;
+    setAxes(restoredAxes);
+    return;
+  }
 
-    if (annotationData) {
-      const newAxes = annotationData.map((axisData: any) => ({
-        id: globalAxisId++,
-        type: axisData.axisType,
-        axisName: axisData.axisName,
-        typeName: axisData.axisBooklistName,
-        blocks: axisData.annotationBlocks,
-      }));
-      setAxes(newAxes);
-    }
-  
-    if (speakerData) {
-      const speakerAxesMap = new Map<string, any>();
-  
-      speakerData.forEach((segment) => {
-        const speakerLabel = segment.speaker_label;
-  
-        if (speakerAxesMap.has(speakerLabel)) {
-          const existingAxis = speakerAxesMap.get(speakerLabel);
-          existingAxis.blocks.push({
-            start: segment.start_time,
-            end: segment.end_time,
-            text: segment.text,
-          });
-        } else {
-          // 如果 map 中没有该 speaker_label，创建新的 axis 并添加到 map 中
-          speakerAxesMap.set(speakerLabel, {
-            id: globalAxisId++,
-            type: "Type-in",
-            axisName: speakerLabel,
-            blocks: [
-              {
-                start: segment.start_time,
-                end: segment.end_time,
-                text: segment.text,
-              },
-            ],
-            shortcutKey: speakerLabel.charAt(0).toUpperCase(),
-          });
-        }
-      });
-  
-      const speakerAxes = Array.from(speakerAxesMap.values());
-      setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
-    }
-  }, [annotationData, speakerData]);
-  useEffect(() => {
-    if (annotationData) {
-      //TODO check this code
-      const newAxes = annotationData.map((axisData: any) => ({
-        id: globalAxisId++,
-        type: axisData.axisType,
-        axisName: axisData.axisName,
-        typeName: axisData.axisBooklistName,
-        blocks: axisData.annotationBlocks,
-      }));
-      setAxes(newAxes);
-    }
-  }, []);
+  if (annotationData) {
+    isLoadingData.current = true;
+    const newAxes = annotationData.map((axisData: any) => ({
+      id: globalAxisId++,
+      type: axisData.axisType,
+      axisName: axisData.axisName,
+      typeName: axisData.axisBooklistName,
+      blocks: axisData.annotationBlocks,
+    }));
+    setAxes(newAxes);
+  }
+
+  if (speakerData) {
+    isLoadingData.current = true;
+    const speakerAxesMap = new Map<string, any>();
+    speakerData.forEach((segment) => {
+      const speakerLabel = segment.speaker_label;
+
+      if (speakerAxesMap.has(speakerLabel)) {
+        const existingAxis = speakerAxesMap.get(speakerLabel);
+        existingAxis.blocks.push({
+          start: segment.start_time,
+          end: segment.end_time,
+          text: segment.text,
+        });
+      } else {
+        speakerAxesMap.set(speakerLabel, {
+          id: globalAxisId++,
+          type: "Type-in",
+          axisName: speakerLabel,
+          blocks: [
+            {
+              start: segment.start_time,
+              end: segment.end_time,
+              text: segment.text,
+            },
+          ],
+          shortcutKey: speakerLabel.charAt(0).toUpperCase(),
+        });
+      }
+    });
+
+    const speakerAxes = Array.from(speakerAxesMap.values());
+    setAxes((prevAxes) => [...prevAxes, ...speakerAxes]);
+  }
+}, [restoredAxes, annotationData, speakerData]);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
@@ -257,60 +307,47 @@ const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => {
     setSeekTime(played);
   }, [played]);
+  
+  
+  // Prompts user for annotation file name, with prefilled defined filename set.
+  const handleOpenSaveDialog = () => {
+    // Pre-fill with the existing auto-generated name as a sensible default
+    const defaultName = buildDefaultAnnotationName(rosBagFileName, bookListFileName);
+    setAnnotationName(defaultName);
+    setIsSaveDialogOpen(true);
+  };
 
-  // Save data through API
-  const handleSaveData = async () => {
-    const data = collectData();
-    console.log(JSON.stringify(data));
+  
+  
+  // ensures sensible name is provided by user (no whitespace, no invalid characters), 
+  // before gathering current annotation state via collectAnnotationData() and sending it to backend.
+  const handleConfirmSave = async () => {
+    const validation = isValidAnnotationName(annotationName); 
+    if (!validation.valid) {
+      setError(validation.reason || "Invalid name.");
+      setIsErrorDialogOpen(true);
+      return;
+    }
+
+    setIsSaveDialogOpen(false);
+    const data = collectAnnotationData(axes); //collects axis data
+
     try {
-      const response = await fetch("http://localhost:8000/api/save_annotation/", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          annotation_name: `${rosBagFileName}+${
-            bookListFileName ? bookListFileName : "noBookList"
-          }`,
-          annotation_data: data,
-        }),
-      });
-
-      if (!response.ok) {
-        switch (response.status) {
-          case 500:
-            throw new Error("Internal server error");
-          case 400:
-            throw new Error("Invalid JSON format");
-          case 405:
-            throw new Error("Method not allowed");
-        }
-      } else {
-        alert("Data saved successfully.");
-      }
+      await postAnnotation(annotationName, data);
+      alert("Data saved successfully.");
+      setHasUnsavedEdits(false);
+      autosave.markSynced(axes);
+      deleteAutosave(rosBagFileName).catch((err) =>
+        console.warn(" [autosave] Could not clear autosave after save.", err)
+      );
+      
     } catch (error) {
       setError("Failed to save data. Please try again.\n" + error);
       setIsErrorDialogOpen(true);
     }
   };
 
-  const collectData = () => {
-    const data = axes.map((axis) => ({
-      id: axis.id,
-      axisType: axis.type,
-      axisName: axis.axisName ? axis.axisName : "",
-      axisBooklistName: axis.typeName ? axis.typeName : "",
-      annotationBlocks: axis.blocks
-        ? axis.blocks.map((block) => ({
-            start: block.start,
-            end: block.end,
-            text: block.text,
-          }))
-        : [],
-    }));
-    console.log(data);
-    return data;
-  };
+
 
   const handleSliderChange = (_event: Event, newValue: number | number[]) => {
     setSeekTime(newValue as number);
@@ -371,7 +408,6 @@ const Timeline: React.FC<TimelineProps> = ({
     globalAxisId = globalAxisId++
   };
   
-
   const handleAddAxis = () => {
     setAxes((prev) => [
       ...prev,
@@ -413,7 +449,6 @@ const Timeline: React.FC<TimelineProps> = ({
       })
     );
   };
-
   const handleDeleteBlock = (axisId: number, blockIndex: number) => {
     setAxes(
       axes.map((axis) => {
@@ -567,8 +602,29 @@ const Timeline: React.FC<TimelineProps> = ({
           <Button onClick={() => setIsErrorDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
+    <Dialog open={isSaveDialogOpen} onClose={() => setIsSaveDialogOpen(false)}>
+      <DialogTitle>Name Your Annotation</DialogTitle>
+      <DialogContent>
+        <DialogContentText>
+          Enter a name to save this annotation under. You can reuse this name later to overwrite it, or choose a new one to save a separate version.
+        </DialogContentText>
+        <TextField
+          autoFocus
+          margin="dense"
+          label="Annotation Name"
+          fullWidth
+          variant="outlined"
+          value={annotationName}
+          onChange={(e) => setAnnotationName(e.target.value)}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setIsSaveDialogOpen(false)}>Cancel</Button>
+        <Button onClick={handleConfirmSave} variant="contained">Save</Button>
+      </DialogActions>
+    </Dialog>
       <ControlsContainer>
-        <Button onClick={handleSaveData} variant="contained">
+        <Button onClick={handleOpenSaveDialog} variant="contained">
           Save and Send Data
         </Button>
         <Button onClick={handleAddAxis} variant="contained">
