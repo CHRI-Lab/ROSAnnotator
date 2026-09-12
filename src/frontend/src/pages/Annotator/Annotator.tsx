@@ -22,17 +22,33 @@ import AnnotationTable from "../../components/AnnotationTable";
 import { AxesProvider } from "../../components/AxesProvider/AxesContext";
 import StatisticsAnnotation from "../../components/StatisticsAnnotation";
 import StatisticsTier from "../../components/StatisticsTier";
+import type { ChunkManifest } from "../../api/chunks";
+
+interface AnnotatorProps {
+  rosBagFileName?: string;
+  bookListFileName?: string;
+  data: any;
+  bookListData: any;
+  chunkManifest?: ChunkManifest | null;
+  currentChunkIndex?: number;
+  switchingChunk?: boolean;
+  onChunkChange?: (index: number) => void | Promise<void>;
+  restoredAxes?: any[] | null;
+  autosaveEnabled?: boolean;
+}
 
 const Annotator = ({
-  rosBagFileName,
-  bookListFileName,
+  rosBagFileName = "",
+  bookListFileName = "",
   data,
   bookListData,
   chunkManifest = null,
   currentChunkIndex = 0,
   switchingChunk = false,
   onChunkChange = () => {},
-}) => {
+  restoredAxes = null,
+  autosaveEnabled = true,
+}: AnnotatorProps) => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
@@ -54,10 +70,10 @@ const Annotator = ({
     setSelectedTab(newValue);
   };
 
-  const handleAxesUpdate = (updatedAxes) => {
+  const handleAxesUpdate = useCallback((updatedAxes) => {
     setAxesData(updatedAxes);
     return updatedAxes;
-  };
+  }, []);
 
   const handleSendMessageToGPT = (message) => {
     return fetch("http://localhost:8000/api/gpt_chat/", {
@@ -176,6 +192,15 @@ const Annotator = ({
   };
 
   const currentChunk = chunkManifest?.chunks?.[currentChunkIndex];
+  const handleChunkSelection = (index: number | null | undefined) => {
+    if (
+      switchingChunk ||
+      index == null ||
+      index === currentChunkIndex ||
+      !chunkManifest?.chunks.some((chunk) => chunk.index === index)
+    ) return;
+    return onChunkChange(index);
+  };
 
   return (
     <AxesProvider key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}>
@@ -274,7 +299,7 @@ const Annotator = ({
             >
               <Button
                 variant="outlined"
-                onClick={() => onChunkChange(currentChunk?.previous_index)}
+                onClick={() => handleChunkSelection(currentChunk?.previous_index)}
                 disabled={switchingChunk || currentChunk?.previous_index == null}
                 sx={{ justifySelf: "start" }}
               >
@@ -286,7 +311,7 @@ const Annotator = ({
                 <FormControl size="small" sx={{ minWidth: 210 }}>
                   <Select
                     value={currentChunkIndex}
-                    onChange={(event) => onChunkChange(Number(event.target.value))}
+                    onChange={(event) => handleChunkSelection(Number(event.target.value))}
                     disabled={switchingChunk}
                     aria-label="Select video chunk"
                   >
@@ -305,7 +330,7 @@ const Annotator = ({
 
               <Button
                 variant="outlined"
-                onClick={() => onChunkChange(currentChunk?.next_index)}
+                onClick={() => handleChunkSelection(currentChunk?.next_index)}
                 disabled={switchingChunk || currentChunk?.next_index == null}
                 sx={{ justifySelf: "end" }}
               >
@@ -327,6 +352,8 @@ const Annotator = ({
               speakerData={data.speaker_data}
               onAxesUpdate={handleAxesUpdate}
               instruction={instruction}
+              restoredAxes={restoredAxes}
+              autosaveEnabled={autosaveEnabled}
             />
           </Box>
         </Box>

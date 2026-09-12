@@ -15,11 +15,18 @@ import {
   Radio,
   RadioGroup,
   TextField,
+  DialogContentText,
 } from "@mui/material";
 import Snackbar from "@mui/material/Snackbar";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createChunkManifest, inspectInput } from "../../api/chunks";
+import {
+  fetchAutosaveMeta,
+  deleteAutosave,
+  formatAutosaveTimestamp,
+  AutosaveMeta,
+} from "../../components/Autosave/autosaveUtils";
 
 function LoadableList() {
   const [fileNameList, setFileNameList] = useState({
@@ -40,6 +47,16 @@ function LoadableList() {
   const [inputDurationSeconds, setInputDurationSeconds] = useState(0);
   const [chunkError, setChunkError] = useState("");
   const [preparing, setPreparing] = useState(false);
+
+  // AUTOSAVE RECOVERY
+  const [autosaveMeta, setAutosaveMeta] = useState<AutosaveMeta | null>(null);
+  const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
+  const [recoveryError, setRecoveryError] = useState("");
+  // Tracks the bag currently selected, so a slow check for a previously
+  // selected bag cannot land after the user has moved on to another one.
+  const selectedBagRef = useRef("");
+  const autosaveCheckRef = useRef<Promise<AutosaveMeta | null> | null>(null);
+  const operationInProgress = useRef(false);
 
   const navigate = useNavigate();
 
@@ -75,15 +92,19 @@ function LoadableList() {
     return "/main/" + encodeURIComponent(rosBagFile) + booklistPath + annotationPath;
   };
 
-  const handleLoadData = async () => {
+  const prepareChunking = async () => {
     if (rosBagFile === "") {
       setOpen(true);
       return;
     }
     setPreparing(true);
     setChunkError("");
+    setInputDurationSeconds(0);
     try {
       const inspection = await inspectInput(rosBagFile);
+      if (!Number.isFinite(inspection.duration_seconds) || inspection.duration_seconds <= 0) {
+        throw new Error("Unable to determine the input duration.");
+      }
       setInputDurationSeconds(inspection.duration_seconds);
       const suggestedMinutes = Math.max(
         1,
@@ -100,12 +121,97 @@ function LoadableList() {
     }
   };
 
+  // Selecting a bag prefetches its autosave metadata, so the prompt appears
+  // without a wait when the user clicks Load Me. Metadata only, no axes.
+  const handleSelectRosBag = (fileName: string, index: number) => {
+    if (operationInProgress.current) return;
+    setRosBagFile(fileName);
+    setRosSelectedIndex(index);
+    setAutosaveMeta(null);
+    setRecoveryError("");
+    selectedBagRef.current = fileName;
+
+    const check = fetchAutosaveMeta(fileName)
+      .then((meta) => {
+        const result = meta.exists && meta.bag_filename === fileName ? meta : null;
+        if (autosaveCheckRef.current === check) setAutosaveMeta(result);
+        return result;
+      })
+      .catch((error) => {
+        // No autosave information just means no prompt. Never block loading.
+        console.warn("Could not check for an autosave.", error);
+        return null;
+      });
+    autosaveCheckRef.current = check;
+  };
+
+  const goToMainPage = (restore: boolean) => {
+    if (restore) {
+      navigate(`${destinationPath()}?restore=autosave`);
+    } else {
+      return prepareChunking();
+    }
+  };
+
+  const handleLoadData = async () => {
+    if (operationInProgress.current) return;
+    if (rosBagFile === "") {
+      setOpen(true);
+      return;
+    }
+
+    operationInProgress.current = true;
+    setPreparing(true);
+    try {
+      // A quick click on Load must still wait for the selected bag's check.
+      const meta = await autosaveCheckRef.current;
+      if (selectedBagRef.current !== rosBagFile) return;
+      if (meta?.exists) {
+        setAutosaveMeta(meta);
+        setRecoveryError("");
+        setIsRestoreDialogOpen(true);
+        return;
+      }
+      await goToMainPage(false);
+    } finally {
+      operationInProgress.current = false;
+      setPreparing(false);
+    }
+  };
+
+  const handleRestoreAutosave = () => {
+    if (operationInProgress.current) return;
+    setIsRestoreDialogOpen(false);
+    goToMainPage(true);
+  };
+
+  const handleDiscardAutosave = async () => {
+    if (operationInProgress.current) return;
+    operationInProgress.current = true;
+    setPreparing(true);
+    setRecoveryError("");
+    try {
+      await deleteAutosave(rosBagFile);
+      setAutosaveMeta(null);
+      autosaveCheckRef.current = Promise.resolve(null);
+      setIsRestoreDialogOpen(false);
+      await goToMainPage(false);
+    } catch (error) {
+      setRecoveryError("Could not discard the saved work. Please try again or restore it.");
+    } finally {
+      operationInProgress.current = false;
+      setPreparing(false);
+    }
+  };
+
   const handleConfirmChunking = async () => {
+    if (operationInProgress.current || inputDurationSeconds <= 0) return;
     const seconds = Number(chunkMinutes) * 60;
     if (chunkingEnabled && (!Number.isFinite(seconds) || seconds <= 0 || seconds >= inputDurationSeconds)) {
       setChunkError("Chunk length must be greater than 0 and shorter than the input.");
       return;
     }
+    operationInProgress.current = true;
     setPreparing(true);
     setChunkError("");
     try {
@@ -120,6 +226,7 @@ function LoadableList() {
     } catch (error) {
       setChunkError(error instanceof Error ? error.message : "Unable to create chunks.");
     } finally {
+      operationInProgress.current = false;
       setPreparing(false);
     }
   };
@@ -131,6 +238,10 @@ function LoadableList() {
     setOpen(false);
   };
 
+  const autosaveCodebook = autosaveMeta?.booklist_filename || "";
+  const codebookMismatch =
+    Boolean(autosaveMeta) && autosaveCodebook !== (bookListFile || "");
+
   return (
     <div
       style={{
@@ -138,8 +249,6 @@ function LoadableList() {
         flexDirection: "column",
         justifyContent: "center",
         height: "100vh",
-        // padding: "20px",
-        // marginTop: "200px",
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-around" }}>
@@ -161,14 +270,19 @@ function LoadableList() {
                 <ListItem
                   button
                   key={index}
-                  onClick={() => {
-                    setRosBagFile(fileName);
-                    setRosSelectedIndex(index);
-                  }}
+                  onClick={() => handleSelectRosBag(fileName, index)}
+                  disabled={preparing}
                   selected={rosSelectedIndex === index}
                 >
                   <ListItemText
                     primary={fileName}
+                    secondary={
+                      rosSelectedIndex === index && autosaveMeta?.exists
+                        ? `Unsaved work from ${formatAutosaveTimestamp(
+                            autosaveMeta.saved_at
+                          )}`
+                        : undefined
+                    }
                     primaryTypographyProps={{
                       style: {
                         overflow: "hidden",
@@ -207,6 +321,7 @@ function LoadableList() {
                     setBookSelectedIndex(index);
                   }}
                   selected={bookSelectedIndex === index}
+                  disabled={preparing}
                 >
                   <ListItemText
                     primary={fileName}
@@ -243,6 +358,7 @@ function LoadableList() {
                   setAnnotSelectedIndex(index);
                 }}
                 selected={annotSelectedIndex === index}
+                disabled={preparing}
               >
                 <ListItemText
                   primary={fileName}
@@ -257,9 +373,6 @@ function LoadableList() {
                 />
               </ListItem>
             ))}
-            {/* <ListItem button>
-              <ListItemText primary="Not Supported for Now" />
-            </ListItem> */}
           </List>
         </Paper>
       </div>
@@ -303,6 +416,44 @@ function LoadableList() {
           <Button onClick={() => setChunkDialogOpen(false)} disabled={preparing}>Cancel</Button>
           <Button onClick={handleConfirmChunking} variant="contained" disabled={preparing || inputDurationSeconds <= 0}>
             {preparing ? <CircularProgress size={22} /> : "Continue"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={isRestoreDialogOpen}
+        onClose={() => !preparing && setIsRestoreDialogOpen(false)}
+      >
+        <DialogTitle>Unsaved work found</DialogTitle>
+        <DialogContent>
+          {recoveryError && <Alert severity="error">{recoveryError}</Alert>}
+          <DialogContentText>
+            {`ROSAnnotator has unsaved work for ${rosBagFile} from ${formatAutosaveTimestamp(
+              autosaveMeta?.saved_at
+            )}, with ${autosaveMeta?.axis_count ?? 0} time ${
+              autosaveMeta?.axis_count === 1 ? "axis" : "axes"
+            } and ${autosaveMeta?.block_count ?? 0} annotations.`}
+          </DialogContentText>
+          {codebookMismatch && (
+            <DialogContentText sx={{ marginTop: 2 }}>
+              {autosaveCodebook
+                ? `This work was annotated against ${autosaveCodebook}, which is not the codebook you selected.`
+                : "This work was annotated without a codebook."}
+            </DialogContentText>
+          )}
+          {autosaveMeta?.recovered_from_backup && (
+            <DialogContentText sx={{ marginTop: 2 }}>
+              The most recent copy could not be read, so this is the previous
+              one. Some recent edits may be missing.
+            </DialogContentText>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDiscardAutosave} color="error" disabled={preparing}>
+            Discard and start fresh
+          </Button>
+          <Button onClick={handleRestoreAutosave} variant="contained" disabled={preparing}>
+            Restore work
           </Button>
         </DialogActions>
       </Dialog>
