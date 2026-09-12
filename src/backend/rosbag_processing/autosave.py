@@ -18,6 +18,7 @@ import json
 import os
 import re
 import tempfile
+from datetime import datetime, timezone
 
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
@@ -72,7 +73,52 @@ def _autosave_paths(bag_filename):
     base = os.path.join(AUTOSAVE_DIR, _autosave_stem(bag_filename))
     return base + AUTOSAVE_SUFFIX, base + BACKUP_SUFFIX
 
+# Fields that define the content of an autosave. saved_at is excluded on
+# purpose: it changes on every request and is not part of the state.
+_CONTENT_FIELDS = (
+    'schema_version',
+    'bag_filename',
+    'booklist_filename',
+    'annotation_filename',
+    'annotation_name',
+    'axes',
+)
 
+
+def _utc_now_iso():
+    """Timezone-aware ISO 8601 fallback when the client sends no timestamp.
+
+    The offset is included, so the browser still renders it in local time.
+    """
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _read_primary(bag_filename):
+    """Read only the primary autosave, ignoring the .bak.
+
+    Used for the unchanged-content check. read_autosave() falls back to the
+    backup, which would be wrong here: if the primary is corrupt and the backup
+    happens to match the incoming state, we must still write a good primary.
+    """
+    path, _ = _autosave_paths(bag_filename)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as handle:
+            payload = json.load(handle)
+    except (ValueError, OSError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _same_content(existing, payload):
+    """True when the stored autosave holds the same state as the new one."""
+    return all(
+        existing.get(field) == payload.get(field) for field in _CONTENT_FIELDS
+    )
+
+
+    
 # ---------------------------------------------------------------------------
 # File operations
 # ---------------------------------------------------------------------------
@@ -93,8 +139,8 @@ def write_autosave(bag_filename, payload):
         dir=AUTOSAVE_DIR, prefix='.autosave-', suffix='.tmp'
     )
     try:
-        with os.fdopen(handle_fd, 'w') as handle:
-            json.dump(payload, handle)
+        with os.fdopen(handle_fd, 'w', encoding='utf-8') as handle:
+            json.dump(payload, handle, ensure_ascii=False)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
@@ -119,7 +165,7 @@ def read_autosave(bag_filename):
         if not os.path.isfile(candidate):
             continue
         try:
-            with open(candidate, 'r') as handle:
+            with open(candidate, 'r', encoding='utf-8') as handle:
                 payload = json.load(handle)
         except (ValueError, OSError):
             continue
@@ -195,9 +241,21 @@ def save_autosave(request):
         'booklist_filename': request.data.get('booklist_filename') or '',
         'annotation_filename': request.data.get('annotation_filename') or '',
         'annotation_name': request.data.get('annotation_name') or '',
-        'saved_at': request.data.get('saved_at') or '',
+        'saved_at': request.data.get('saved_at') or _utc_now_iso(),
         'axes': axes,
     }
+
+    # Idempotency: identical state is not rewritten. This keeps saved_at
+    # honest about when the work actually dates from, and protects the .bak
+    # from being overwritten with a duplicate of the current file.
+    existing = _read_primary(bag_filename)
+    if existing is not None and _same_content(existing, payload):
+        return Response({
+            'saved': False,
+            'unchanged': True,
+            'saved_at': existing.get('saved_at', ''),
+            'axis_count': len(axes),
+        })
 
     try:
         write_autosave(bag_filename, payload)
@@ -209,6 +267,7 @@ def save_autosave(request):
 
     return Response({
         'saved': True,
+        'unchanged': False,
         'saved_at': payload['saved_at'],
         'axis_count': len(axes),
     })
