@@ -4,6 +4,7 @@ Tests to identify actual dev code issues.
 """
 
 import json
+import unittest
 from unittest.mock import patch, MagicMock
 from django.test import TestCase, Client
 from django.urls import reverse
@@ -216,38 +217,43 @@ class TestChunkNavigation(TestCase):
         self.assertEqual(chunk['previous_index'], 10, "Previous should be available")
         self.assertIsNone(chunk['next_index'], "Final chunk must have no next")
 
+    @unittest.skip("Req 14 pending: autosave-before-navigation is not implemented")
     def test_edit_and_navigate_autosave_completes_before_transition(self):
         """Req 14: Edit chunk → autosave completes before navigation"""
         # This tests the API coordination between autosave and navigation
         # Requires mocking the autosave and navigation flow
-        client = Client()
         
         # Would test POST /api/chunks/<id>/<index>/navigate with autosave
         # Actual test depends on implementation
+    
+        raise NotImplementedError
 
 
 class TestAutoSaveNavigation(TestCase):
     """Req 15-16: Autosave and concurrent navigation handling"""
 
+    @unittest.skip("Req 15 pending: autosave-before-navigation is not implemented")
     def test_autosave_fails_during_navigation_blocks_transition(self):
         """Req 15: Autosave fails → navigation blocked, retry/cancel shown"""
         # Tests error handling in chunk_views.process_chunk_view
-        pass
+        raise NotImplementedError
 
+    @unittest.skip("Req 16 pending: navigation concurrency coverage is not implemented")
     def test_repeated_navigation_clicks_prevent_duplicates(self):
         """Req 16: Rapid navigation clicks → at most 1 transition, pending state"""
         # Tests idempotency and state locking
-        pass
+        raise NotImplementedError
 
 
 class TestAnnotationReloading(TestCase):
     """Req 17: Returning to previously edited chunk"""
 
+    @unittest.skip("Req 17 pending: per-chunk annotation persistence is not implemented")
     def test_return_to_edited_chunk_reloads_annotations_exactly_once(self):
         """Req 17: Return to chunk → annotations reload exactly once, stable IDs"""
         # Tests that returning to chunk[5] reloads saved annotations
         # IDs must remain stable across reloads
-        pass
+        raise NotImplementedError
 
 
 class TestTimeConversion(TestCase):
