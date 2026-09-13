@@ -35,6 +35,7 @@ interface AnnotatorProps {
   onChunkChange?: (index: number) => void | Promise<void>;
   restoredAxes?: any[] | null;
   autosaveEnabled?: boolean;
+  onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
 }
 
 const Annotator = ({
@@ -48,6 +49,7 @@ const Annotator = ({
   onChunkChange = () => {},
   restoredAxes = null,
   autosaveEnabled = true,
+  onAutosaveReady,
 }: AnnotatorProps) => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
@@ -354,6 +356,12 @@ const Annotator = ({
               instruction={instruction}
               restoredAxes={restoredAxes}
               autosaveEnabled={autosaveEnabled}
+              autosaveScope={chunkManifest?.chunking_enabled ? {
+                manifest_id: chunkManifest.id,
+                chunk_index: currentChunkIndex,
+              } : undefined}
+              onAutosaveReady={onAutosaveReady}
+              switchingChunk={switchingChunk}
             />
           </Box>
         </Box>

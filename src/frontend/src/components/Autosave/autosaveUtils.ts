@@ -12,6 +12,15 @@ const API_BASE = "http://localhost:8000";
 
 export const AUTOSAVE_SCHEMA_VERSION = 1; //ensures if schema updates, alt versions are NOT accepted
 
+export interface AutosaveScope {
+    manifest_id: string;
+    chunk_index: number;
+}
+
+const scopeQuery = (scope?: AutosaveScope) => scope
+    ? `&manifest_id=${encodeURIComponent(scope.manifest_id)}&chunk_index=${scope.chunk_index}`
+    : "";
+
 export interface AutosaveBlock {
     start: number;
     end: number;
@@ -28,6 +37,8 @@ export interface AutosaveAxis {
 }
 
 export interface AutosaveRequestBody {
+    manifest_id?: string;
+    chunk_index?: number;
     bag_filename: string;
     booklist_filename: string;
     annotation_filename: string;
@@ -49,6 +60,8 @@ export interface AutosaveMeta {
 }
 
 export interface AutosavePayload extends AutosaveMeta {
+    manifest_id?: string;
+    chunk_index?: number;
     schema_version: number;
     axes: AutosaveAxis[];
 }
@@ -73,12 +86,14 @@ export const collectAutosaveState = (axes: any[]): AutosaveAxis[] =>
 // a container on UTC, so a server-side time would show Melbourne users a
 // recovery prompt that is hours out.
 export const buildAutosaveRequestBody = (options: {
+    scope?: AutosaveScope;
     bagFileName: string;
     bookListFileName?: string;
     annotationFileName?: string;
     annotationName?: string;
     axes: any[];
 }): AutosaveRequestBody => ({
+    ...options.scope,
     bag_filename: options.bagFileName,
     booklist_filename: options.bookListFileName ?? "",
     annotation_filename: options.annotationFileName ?? "",
@@ -111,12 +126,12 @@ export const postAutosaveBeacon = (body: AutosaveRequestBody): boolean => {
 
 // Metadata only, for the import-page prompt. Cheap even for long recordings.
 export const fetchAutosaveMeta = async (
-    bagFileName: string
+    bagFileName: string, scope?: AutosaveScope
 ): Promise<AutosaveMeta> => {
     const url = `${API_BASE}/api/autosave/check/?bag_filename=${encodeURIComponent(
         bagFileName
     )}`;
-    const response = await fetch(url);
+    const response = await fetch(url + scopeQuery(scope));
 
     if (!response.ok) {
         throw new Error(`Autosave check failed: ${response.status}`);
@@ -126,12 +141,12 @@ export const fetchAutosaveMeta = async (
 
 // The full payload, fetched only once the user chooses to restore.
 export const fetchAutosave = async (
-    bagFileName: string
+    bagFileName: string, scope?: AutosaveScope
 ): Promise<AutosavePayload> => {
     const url = `${API_BASE}/api/autosave/load/?bag_filename=${encodeURIComponent(
         bagFileName
     )}`;
-    const response = await fetch(url);
+    const response = await fetch(url + scopeQuery(scope));
 
     if (!response.ok) {
         throw new Error(`Autosave load failed: ${response.status}`);
@@ -139,11 +154,11 @@ export const fetchAutosave = async (
     return response.json();
 };
 
-export const deleteAutosave = async (bagFileName: string): Promise<boolean> => {
+export const deleteAutosave = async (bagFileName: string, scope?: AutosaveScope): Promise<boolean> => {
     const url = `${API_BASE}/api/autosave/delete/?bag_filename=${encodeURIComponent(
         bagFileName
     )}`;
-    const response = await fetch(url, { method: "DELETE" });
+    const response = await fetch(url + scopeQuery(scope), { method: "DELETE" });
 
     if (!response.ok) {
         throw new Error(`Autosave delete failed: ${response.status}`);
