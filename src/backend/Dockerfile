@@ -9,7 +9,8 @@ FROM ${BACKEND_BASE_IMAGE}
 # the ffmpeg command-line tools at runtime. Install them in the application
 # image so local and tester builds do not depend on the host machine.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC \
+       apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Keep the existing published base image compatible with the versions tested

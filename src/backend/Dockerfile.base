@@ -5,7 +5,8 @@
 FROM ubuntu:focal@sha256:8feb4d8ca5354def3d8fce243717141ce31e2c428701f6682bd2fafe15388214
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends wget dos2unix python3-pip ffmpeg \
+    && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC \
+       apt-get install -y --no-install-recommends wget dos2unix python3-pip ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY env_config/ /env_config/
