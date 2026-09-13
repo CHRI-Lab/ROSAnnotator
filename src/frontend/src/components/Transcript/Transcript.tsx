@@ -1,4 +1,4 @@
-import { CSSProperties, useCallback, useEffect } from "react";
+import { CSSProperties, useCallback, useEffect, useRef } from "react";
 import { styled } from "@mui/system";
 import { Lrc, LrcLine } from "react-lrc";
 import { Box } from "@mui/material";
@@ -6,6 +6,7 @@ import { Box } from "@mui/material";
 interface TranscriptProps {
   LRC: string; // LRC string to be displayed
   played: number;
+  isPlaying: boolean;
   setPlayed: (time: number) => void; // Function to update the played state
 }
 
@@ -28,13 +29,47 @@ const Line = styled("div")<{ active: boolean }>`
 `;
 
 // The main Transcript component
-const Transcript: React.FC<TranscriptProps> = ({ LRC, played, setPlayed }) => {
-  // const [LRC, setLRC] = useState<string>("");
+const Transcript: React.FC<TranscriptProps> = ({
+  LRC,
+  played,
+  isPlaying,
+  setPlayed,
+}) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const keepActiveLineVisible = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      const container = containerRef.current;
+      const activeLine = container?.querySelector<HTMLElement>(
+        '[data-transcript-active="true"]'
+      );
+      if (!container || !activeLine) return;
+
+      const containerBounds = container.getBoundingClientRect();
+      const lineBounds = activeLine.getBoundingClientRect();
+      if (
+        lineBounds.top < containerBounds.top ||
+        lineBounds.bottom > containerBounds.bottom
+      ) {
+        activeLine.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
+  }, []);
 
   useEffect(() => {
-    // const srtContent = fs.readFileSync(lrcPath, "utf-8");
-    // setLRC(srtContent);
-  }, []);
+    const container = containerRef.current;
+    if (!container) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (isPlaying) keepActiveLineVisible();
+    });
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, [isPlaying, keepActiveLineVisible]);
+
+  useEffect(() => {
+    if (isPlaying) keepActiveLineVisible();
+  }, [isPlaying, keepActiveLineVisible]);
 
   // Function to render each line of the LRC
   const lineRenderer = useCallback(
@@ -45,7 +80,11 @@ const Transcript: React.FC<TranscriptProps> = ({ LRC, played, setPlayed }) => {
       active: boolean;
       line: LrcLine;
     }) => (
-      <Line active={active} onClick={() => setPlayed(startMillisecond / 1000)}>
+      <Line
+        active={active}
+        data-transcript-active={active ? "true" : undefined}
+        onClick={() => setPlayed(startMillisecond / 1000)}
+      >
         {content.slice(0, -7)}
       </Line>
     ),
@@ -54,6 +93,7 @@ const Transcript: React.FC<TranscriptProps> = ({ LRC, played, setPlayed }) => {
 
   return (
     <Box
+      ref={containerRef}
       width="100%"
       height="100%"
       display="flex"
@@ -66,7 +106,10 @@ const Transcript: React.FC<TranscriptProps> = ({ LRC, played, setPlayed }) => {
         currentMillisecond={played * 1000} // Convert seconds to milliseconds
         verticalSpace
         style={lrcStyle}
-        recoverAutoScrollInterval={1000} // Reduce scroll recovery interval
+        recoverAutoScrollInterval={isPlaying ? 1000 : 1}
+        onLineUpdate={() => {
+          if (isPlaying) keepActiveLineVisible();
+        }}
       />
     </Box>
   );

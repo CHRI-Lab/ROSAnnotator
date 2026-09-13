@@ -78,6 +78,7 @@ const Annotator = ({
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(true);
   const [editMode, setEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [bookList, setBookList] = useState(bookListData);
@@ -416,7 +417,10 @@ const Annotator = ({
               videoPath: data.video_path,
               transcript: data.audio_transcript,
               played,
+              isPlaying,
               onProgress: setPlayed,
+              onPlay: () => setIsPlaying(true),
+              onPause: () => setIsPlaying(false),
               onSeek: handleSeek,
               onDurationChange: setDuration,
               playerRef,

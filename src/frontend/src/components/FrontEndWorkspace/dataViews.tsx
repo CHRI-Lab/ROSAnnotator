@@ -10,6 +10,9 @@ export const VideoView = ({
   videoPath,
   onDurationChange,
   onProgress,
+  isPlaying,
+  onPlay,
+  onPause,
   playerRef,
 }: ViewPanelContext) => (
   <ReactPlayer
@@ -19,17 +22,25 @@ export const VideoView = ({
     url={`/processed/${videoPath}`}
     onDuration={onDurationChange}
     onProgress={({ playedSeconds }) => onProgress(playedSeconds)}
+    onPlay={onPlay}
+    onPause={onPause}
     controls
-    playing
+    playing={isPlaying}
   />
 );
 
 export const TranscriptView = ({
   transcript,
   played,
+  isPlaying,
   onSeek,
 }: ViewPanelContext) => (
-  <Transcript LRC={transcript} played={played} setPlayed={onSeek} />
+  <Transcript
+    LRC={transcript}
+    played={played}
+    isPlaying={isPlaying}
+    setPlayed={onSeek}
+  />
 );
 
 export const AnnotationView = () => <AnnotationTable />;
