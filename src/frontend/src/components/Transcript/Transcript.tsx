@@ -13,6 +13,8 @@ interface TranscriptProps {
 const lrcStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
+  height: "100%",
+  overflowY: "auto",
 };
 
 // Styled component for each line of the transcript
@@ -56,14 +58,14 @@ const Transcript: React.FC<TranscriptProps> = ({ LRC, played, setPlayed }) => {
       height="100%"
       display="flex"
       flexDirection="column"
-      style={{ overflowY: "auto" }} // Enable scrolling if content overflows
+      overflow="hidden"
     >
       <Lrc
         lrc={LRC}
         lineRenderer={lineRenderer}
         currentMillisecond={played * 1000} // Convert seconds to milliseconds
         verticalSpace
-        style={{ ...lrcStyle, maxHeight: "400px", overflowY: "scroll" }} // Add maxHeight and scroll
+        style={lrcStyle}
         recoverAutoScrollInterval={1000} // Reduce scroll recovery interval
       />
     </Box>
