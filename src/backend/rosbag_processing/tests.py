@@ -680,6 +680,78 @@ class AIAssistantTests(SimpleTestCase):
             ],
         )
 
+    def test_repeated_auto_annotation_reuses_axis_and_skips_existing_blocks(self):
+        contexts = {
+            **self.contexts,
+            "timelineContext": [
+                {
+                    "id": 7,
+                    "axisName": "Participant Requests",
+                    "blocks": [
+                        {"start": 7.0, "end": 9.0, "text": "First request"}
+                    ],
+                }
+            ],
+        }
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **contexts)
+        response = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addAxi",
+                        "parameters": {
+                            "axisId": 8,
+                            "axisName": "Participant Requests",
+                            "axistype": "Type-in",
+                        },
+                    },
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 8,
+                            "start": 7.0,
+                            "end": 9.0,
+                            "text": "First request",
+                        },
+                    },
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 8,
+                            "start": 10.0,
+                            "end": 11.0,
+                            "text": "Another request",
+                        },
+                    },
+                ],
+            }
+        )
+
+        result = json.loads(
+            assistant._normalize_timeline_instruction(
+                response,
+                "Can you annotate all the request utterances made by participants "
+                "in a new time axis?",
+                requires_new_axis=True,
+            )
+        )
+
+        self.assertEqual(
+            result["steps"],
+            [
+                {
+                    "action": "addBlock",
+                    "parameters": {
+                        "axisId": 7,
+                        "start": 10.0,
+                        "end": 11.0,
+                        "text": "Another request",
+                    },
+                }
+            ],
+        )
+
     @patch("rosbag_processing.ai_assistant.OpenAI")
     def test_local_auto_annotation_grounds_blocks_to_transcript_times(
         self, openai_class

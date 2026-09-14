@@ -391,10 +391,18 @@ class LocalAI(AIAssistant):
                     for step in instruction["steps"]
                     if isinstance(step, dict)
                 ):
-                    raise LocalInferenceError(
-                        "The local model did not produce any annotation blocks. "
-                        "Try a more capable local model or select Remote."
-                    )
+                    if self._axis_id_by_name(
+                        self._auto_annotation_axis_name(message)
+                    ) is not None:
+                        response_text = (
+                            "No new annotations were added because the existing "
+                            "axis already contains all matching spans."
+                        )
+                    else:
+                        raise LocalInferenceError(
+                            "The local model did not produce any annotation blocks. "
+                            "Try a more capable local model or select Remote."
+                        )
 
         self.last_run_metadata = {
             "model": {
@@ -552,9 +560,16 @@ class LocalAI(AIAssistant):
                 }
             )
 
-        response_text = json.dumps(
-            {"type": "instruction", "steps": steps}, ensure_ascii=False
+        response_text = self._normalize_timeline_instruction(
+            json.dumps({"type": "instruction", "steps": steps}, ensure_ascii=False),
+            message,
+            requires_new_axis=True,
         )
+        if not json.loads(response_text)["steps"]:
+            response_text = (
+                "No new annotations were added because the existing axis already "
+                "contains all matching spans."
+            )
         self.last_run_metadata = {
             "model": {
                 "provider": "local",
@@ -837,8 +852,15 @@ TIMESTAMPED SEGMENTS:
             ],
         }
         response_text = self._normalize_timeline_instruction(
-            json.dumps(instruction, ensure_ascii=False)
+            json.dumps(instruction, ensure_ascii=False),
+            message,
+            requires_new_axis=True,
         )
+        if not json.loads(response_text)["steps"]:
+            response_text = (
+                "No new annotations were added because the existing axis already "
+                "contains all matching spans."
+            )
         self.last_run_metadata = {
             "model": {
                 "provider": "local",
@@ -1017,6 +1039,46 @@ TIMESTAMPED SEGMENTS:
                 matching_axes.append((len(axis_name), axis_id))
         return max(matching_axes, default=(0, None))[1]
 
+    def _axis_id_by_name(self, axis_name):
+        normalized_name = str(axis_name or "").strip().casefold()
+        for axis in self.timelineContext or []:
+            if not isinstance(axis, dict):
+                continue
+            if str(axis.get("axisName", "")).strip().casefold() != normalized_name:
+                continue
+            try:
+                return int(axis.get("id", axis.get("axisId")))
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def _block_overlaps_existing(self, axis_id, parameters):
+        try:
+            new_start = float(parameters.get("start"))
+            new_end = float(parameters.get("end"))
+        except (TypeError, ValueError):
+            return False
+        for axis in self.timelineContext or []:
+            if not isinstance(axis, dict):
+                continue
+            try:
+                matches_axis = int(axis.get("id", axis.get("axisId"))) == axis_id
+            except (TypeError, ValueError):
+                matches_axis = False
+            if not matches_axis:
+                continue
+            for block in axis.get("blocks", []):
+                if not isinstance(block, dict):
+                    continue
+                try:
+                    start = float(block.get("start"))
+                    end = float(block.get("end"))
+                except (TypeError, ValueError):
+                    continue
+                if new_start <= end and new_end >= start:
+                    return True
+        return False
+
     @staticmethod
     def _point_time_from_message(message):
         match = re.search(
@@ -1102,6 +1164,10 @@ TIMESTAMPED SEGMENTS:
 
         used_axis_ids = self._current_axis_ids()
         target_axis_id = self._target_axis_id_from_message(message)
+        if requires_new_axis and target_axis_id is None:
+            target_axis_id = self._axis_id_by_name(
+                self._auto_annotation_axis_name(message)
+            )
         if target_axis_id is not None:
             instruction["steps"] = [
                 step
@@ -1167,7 +1233,12 @@ TIMESTAMPED SEGMENTS:
             isinstance(step, dict) and step.get("action") == "addAxi"
             for step in instruction["steps"]
         )
-        if requires_new_axis and add_block_steps and not has_add_axis:
+        if (
+            requires_new_axis
+            and add_block_steps
+            and not has_add_axis
+            and target_axis_id is None
+        ):
             while next_axis_id in available_axis_ids:
                 next_axis_id += 1
             repaired_axis_id = next_axis_id
@@ -1252,6 +1323,11 @@ TIMESTAMPED SEGMENTS:
                     continue
                 parameters["start"] = start
                 parameters["end"] = end
+                if (
+                    target_axis_id is not None
+                    and self._block_overlaps_existing(target_axis_id, parameters)
+                ):
+                    continue
                 safe_steps.append(step)
             instruction["steps"] = safe_steps
 
