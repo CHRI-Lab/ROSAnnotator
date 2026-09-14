@@ -1045,7 +1045,7 @@ class ChunkApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data, {'error': 'Unable to process chunk.'})
 
-    def test_missing_remote_key_falls_back_to_local(self):
+    def test_missing_remote_key_offers_local_without_starting_it(self):
         from . import views
 
         views.gpt_history = ""
@@ -1066,18 +1066,16 @@ class ChunkApiTests(SimpleTestCase):
         with patch.object(views, "openai_api_key", None), patch.object(
             views, "RemoteAPI"
         ) as remote_api, patch.object(views, "create_local_ai") as local_ai:
-            local_ai.return_value.respond.return_value = "local response"
             response = views.gpt_chat(request)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 503)
         response_data = json.loads(response.content)
-        self.assertEqual(response_data["response"], "local response")
-        self.assertEqual(response_data["assistant_mode"], "local")
-        self.assertEqual(response_data["ai_record"]["model_selection"]["used"], "local")
+        self.assertTrue(response_data["can_fallback_to_local"])
+        self.assertEqual(response_data["assistant_mode"], "remote")
         remote_api.assert_not_called()
-        local_ai.return_value.respond.assert_called_once_with("Add an annotation", "")
+        local_ai.assert_not_called()
 
-    def test_invalid_remote_key_falls_back_to_local(self):
+    def test_invalid_remote_key_offers_local_without_starting_it(self):
         from . import views
 
         views.gpt_history = ""
@@ -1099,17 +1097,14 @@ class ChunkApiTests(SimpleTestCase):
             views, "RemoteAPI"
         ) as remote_api, patch.object(views, "create_local_ai") as local_ai:
             remote_api.return_value.respond.side_effect = RemoteAuthenticationError()
-            local_ai.return_value.respond.return_value = "local response"
             response = views.gpt_chat(request)
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 503)
         response_data = json.loads(response.content)
-        self.assertEqual(response_data["response"], "local response")
-        self.assertEqual(response_data["assistant_mode"], "local")
-        self.assertEqual(response_data["ai_record"]["model_selection"]["used"], "local")
-        local_ai.return_value.respond.assert_called_once_with("Add an annotation", "")
+        self.assertTrue(response_data["can_fallback_to_local"])
+        local_ai.assert_not_called()
 
-    def test_unavailable_remote_and_local_returns_clear_error(self):
+    def test_consented_remote_to_local_fallback_is_recorded(self):
         from . import views
 
         views.gpt_history = ""
@@ -1118,23 +1113,44 @@ class ChunkApiTests(SimpleTestCase):
             "/api/gpt_chat/",
             data=json.dumps(
                 {
-                    "message": "Add an annotation",
+                    "message": "Retry locally",
                     "audio_transcript": "Speaker 1: Hello",
                     "Axeinfo": [],
                     "Codebook": [],
+                    "assistant_mode": "local",
+                    "context_routes": {
+                        "transcript": "local",
+                        "frames": "local",
+                        "codebook": "local",
+                        "timeline": "local",
+                    },
+                    "fallback_consent": {
+                        "from": "remote",
+                        "to": "local",
+                        "user_consented": True,
+                    },
                 }
             ),
             content_type="application/json",
         )
 
-        with patch.object(views, "openai_api_key", None), patch.object(
+        with patch.object(views, "RemoteAPI") as remote_api, patch.object(
             views, "create_local_ai"
         ) as local_ai:
-            local_ai.return_value.respond.side_effect = LocalInferenceError()
+            local_ai.return_value.respond.return_value = "local response"
             response = views.gpt_chat(request)
 
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("local language model", response.content.decode())
+        self.assertEqual(response.status_code, 200)
+        response_data = json.loads(response.content)
+        self.assertEqual(response_data["assistant_mode"], "local")
+        self.assertEqual(
+            response_data["ai_record"]["model_selection"]["requested"], "remote"
+        )
+        self.assertEqual(
+            response_data["ai_record"]["model_selection"]["used"], "local"
+        )
+        local_ai.return_value.respond.assert_called_once_with("Retry locally", "")
+        remote_api.assert_not_called()
 
     def test_consented_local_to_remote_fallback_is_recorded(self):
         from . import views
@@ -1615,8 +1631,10 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
 
             response = views.gpt_chat(request)
 
-        self.assertEqual(response.status_code, 500)
-        self.assertEqual(json.loads(response.content)["error"], "remote timed out")
+        self.assertEqual(response.status_code, 503)
+        response_data = json.loads(response.content)
+        self.assertIn("remote timed out", response_data["error"])
+        self.assertTrue(response_data["can_fallback_to_local"])
         local_ai.assert_not_called()
         self.assertEqual(views.gpt_history, "")
 

@@ -36,9 +36,11 @@ type ChatboxProps = {
   ) => Promise<AssistantReply>;
 };
 
-type PendingRemoteFallback = {
+type PendingFallback = {
   message: string;
   reason: string;
+  from: "local" | "remote";
+  to: "local" | "remote";
 };
 
 const ASSISTANT_ROUTING_STORAGE_KEY = "rosannotator-assistant-routing";
@@ -80,8 +82,8 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
   const [hasAssistantSelection, setHasAssistantSelection] = useState(
     initialAssistantRouting !== null,
   );
-  const [pendingRemoteFallback, setPendingRemoteFallback] =
-    useState<PendingRemoteFallback | null>(null);
+  const [pendingFallback, setPendingFallback] =
+    useState<PendingFallback | null>(null);
 
   useEffect(() => {
     if (!hasAssistantSelection) {
@@ -135,9 +137,20 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
 
       onSendMessage(submittedMessage, assistantRouting).then((assistantResponse) => {
         if (assistantResponse.canFallbackToRemote) {
-          setPendingRemoteFallback({
+          setPendingFallback({
             message: submittedMessage,
             reason: assistantResponse.text,
+            from: "local",
+            to: "remote",
+          });
+          return;
+        }
+        if (assistantResponse.canFallbackToLocal) {
+          setPendingFallback({
+            message: submittedMessage,
+            reason: assistantResponse.text,
+            from: "remote",
+            to: "local",
           });
           return;
         }
@@ -155,29 +168,31 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
     }
   };
 
-  const handleRemoteFallback = () => {
-    if (!pendingRemoteFallback) {
+  const handleFallback = () => {
+    if (!pendingFallback) {
       return;
     }
 
-    const remoteRouting: AssistantRouting = {
-      mode: "remote",
+    const fallbackRouting: AssistantRouting = {
+      mode: pendingFallback.to,
       contextRoutes: {
-        transcript: "remote",
-        frames: "remote",
-        codebook: "remote",
-        timeline: "remote",
+        transcript: pendingFallback.to,
+        frames: pendingFallback.to,
+        codebook: pendingFallback.to,
+        timeline: pendingFallback.to,
       },
     };
-    const fallbackMessage = pendingRemoteFallback.message;
+    const fallbackMessage = pendingFallback.message;
+    const fallbackFrom = pendingFallback.from;
+    const fallbackTo = pendingFallback.to;
 
-    setPendingRemoteFallback(null);
+    setPendingFallback(null);
     setHasAssistantSelection(true);
-    setAssistantRouting(remoteRouting);
-    onSendMessage(fallbackMessage, remoteRouting, {
+    setAssistantRouting(fallbackRouting);
+    onSendMessage(fallbackMessage, fallbackRouting, {
       fallbackConsent: {
-        from: "local",
-        to: "remote",
+        from: fallbackFrom,
+        to: fallbackTo,
         userConsented: true,
       },
     }).then((assistantResponse) => {
@@ -193,8 +208,8 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
     });
   };
 
-  const handleDeclineRemoteFallback = () => {
-    if (!pendingRemoteFallback) {
+  const handleDeclineFallback = () => {
+    if (!pendingFallback) {
       return;
     }
 
@@ -202,12 +217,12 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
       ...history,
       {
         sender: "gpt",
-        text: pendingRemoteFallback.reason,
-        assistantMode: "local",
+        text: pendingFallback.reason,
+        assistantMode: pendingFallback.from,
         isError: true,
       },
     ]);
-    setPendingRemoteFallback(null);
+    setPendingFallback(null);
   };
 
   return (
@@ -221,21 +236,22 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
       height="100%"
     >
       <Dialog
-        open={pendingRemoteFallback !== null}
-        onClose={handleDeclineRemoteFallback}
+        open={pendingFallback !== null}
+        onClose={handleDeclineFallback}
       >
-        <DialogTitle>Switch to Remote?</DialogTitle>
+        <DialogTitle>Switch to {formatAssistantMode(pendingFallback?.to)}?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {pendingRemoteFallback?.reason} Continuing with Remote will send
-            the current transcript, video frames, codebook, and timeline
-            context to OpenAI.
+            {pendingFallback?.reason}{" "}
+            {pendingFallback?.to === "remote"
+              ? "Continuing with Remote will send the current transcript, video frames, codebook, and timeline context to OpenAI."
+              : "Continuing with Local will retry the same request using the selected local model."}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleDeclineRemoteFallback}>Stay Local</Button>
-          <Button onClick={handleRemoteFallback} variant="contained" autoFocus>
-            Switch to Remote
+          <Button onClick={handleDeclineFallback}>Keep Failed</Button>
+          <Button onClick={handleFallback} variant="contained" autoFocus>
+            Switch to {formatAssistantMode(pendingFallback?.to)}
           </Button>
         </DialogActions>
       </Dialog>

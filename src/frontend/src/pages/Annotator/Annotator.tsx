@@ -138,10 +138,12 @@ const Annotator = ({
           ) as Error & {
             assistantMode?: AssistantMode;
             canFallbackToRemote?: boolean;
+            canFallbackToLocal?: boolean;
           };
           error.assistantMode =
             responseData.assistant_mode ?? assistantRouting.mode;
           error.canFallbackToRemote = responseData.can_fallback_to_remote;
+          error.canFallbackToLocal = responseData.can_fallback_to_local;
           throw error;
         }
         return responseData;
@@ -207,6 +209,7 @@ const Annotator = ({
           assistantMode: error.assistantMode ?? assistantRouting.mode,
           isError: true,
           canFallbackToRemote: error.canFallbackToRemote,
+          canFallbackToLocal: error.canFallbackToLocal,
         } as AssistantReply;
       });
   };

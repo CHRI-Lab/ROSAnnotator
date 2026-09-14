@@ -29,8 +29,8 @@ export type AIRecord = {
 
 export type AssistantRequestOptions = {
   fallbackConsent?: {
-    from: "local";
-    to: "remote";
+    from: "local" | "remote";
+    to: "local" | "remote";
     userConsented: true;
   };
 };

@@ -11,6 +11,7 @@ from .serializers import BooklistSerializer, InputInspectionSerializer, Transcri
 import csv
 from django.views.decorators.csrf import csrf_exempt
 from dotenv import load_dotenv
+from openai import APIConnectionError, APIStatusError
 from .ai_assistant import (
     LocalInferenceError,
     RemoteAPI,
@@ -57,44 +58,6 @@ def inspect_input(request):
         'supports_chunking': duration_seconds > 0,
     })
 ANNOTATION_PATH = "/app/datas/annotation/"
-
-
-class AssistantUnavailableError(RuntimeError):
-    """Neither the requested remote provider nor local fallback can respond."""
-
-
-def respond_with_remote_fallback(common_context, message, chat_history):
-    """Use RemoteAI when configured, falling back to LocalAI on auth failure."""
-    if openai_api_key:
-        remote_assistant = RemoteAPI(
-            **common_context,
-            APIKey=openai_api_key,
-        )
-        try:
-            return (
-                remote_assistant.respond(message, chat_history),
-                "remote",
-                remote_assistant,
-            )
-        except RemoteAuthenticationError:
-            pass
-
-    local_assistant = create_local_ai(
-        **common_context,
-        checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
-    )
-    try:
-        return (
-            local_assistant.respond(message, chat_history),
-            "local",
-            local_assistant,
-        )
-    except LocalInferenceError as error:
-        raise AssistantUnavailableError(
-            "The remote model is unavailable, and the local language model "
-            "is not connected yet. Switch to Remote after adding a valid "
-            "OpenAI API key."
-        ) from error
 
 
 def build_ai_record(
@@ -310,13 +273,22 @@ def gpt_chat(request):
         fallback_consent = data.get("fallback_consent")
         requested_mode = assistant_mode
         hybrid_selection = assistant_mode == "hybrid"
-        if (
+        accepted_local_to_remote = (
             isinstance(fallback_consent, dict)
             and fallback_consent.get("from") == "local"
             and fallback_consent.get("to") == "remote"
             and fallback_consent.get("user_consented") is True
-        ):
+        )
+        accepted_remote_to_local = (
+            isinstance(fallback_consent, dict)
+            and fallback_consent.get("from") == "remote"
+            and fallback_consent.get("to") == "local"
+            and fallback_consent.get("user_consented") is True
+        )
+        if accepted_local_to_remote:
             requested_mode = "local"
+        elif accepted_remote_to_local:
+            requested_mode = "remote"
 
 
         if not message:
@@ -342,9 +314,10 @@ def gpt_chat(request):
                     {
                         "error": (
                             "Remote AI is unavailable because the OpenAI API key is "
-                            "empty. Add a valid OPENAI_API_KEY and restart the backend."
+                            "empty. Would you like to switch to Local?"
                         ),
                         "assistant_mode": "hybrid",
+                        "can_fallback_to_local": True,
                     },
                     status=503,
                 )
@@ -397,33 +370,47 @@ def gpt_chat(request):
                     status=501,
                 )
         else:
+            if not openai_api_key:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "Remote AI is unavailable because the OpenAI API key is "
+                            "empty. Would you like to switch to Local?"
+                        ),
+                        "assistant_mode": "remote",
+                        "can_fallback_to_local": True,
+                    },
+                    status=503,
+                )
             try:
-                if hybrid_selection:
-                    assistant = RemoteAPI(
-                        **common_context,
-                        APIKey=openai_api_key,
-                    )
-                    response_text = assistant.respond(message, gpt_history)
-                else:
-                    (
-                        response_text,
-                        assistant_mode,
-                        assistant,
-                    ) = respond_with_remote_fallback(common_context, message, gpt_history)
+                assistant = RemoteAPI(
+                    **common_context,
+                    APIKey=openai_api_key,
+                )
+                response_text = assistant.respond(message, gpt_history)
             except RemoteAuthenticationError:
                 return JsonResponse(
                     {
                         "error": (
                             "Remote AI is unavailable because the OpenAI API key is "
-                            "invalid. Check OPENAI_API_KEY and restart the backend."
+                            "invalid. Would you like to switch to Local?"
                         ),
                         "assistant_mode": "remote",
+                        "can_fallback_to_local": True,
                     },
                     status=503,
                 )
-            except AssistantUnavailableError as error:
+            except (APIConnectionError, APIStatusError, TimeoutError) as error:
                 return JsonResponse(
-                    {"error": str(error), "assistant_mode": "local"}, status=503
+                    {
+                        "error": (
+                            f"Remote AI is unavailable: {error}. "
+                            "Would you like to switch to Local?"
+                        ),
+                        "assistant_mode": "remote",
+                        "can_fallback_to_local": True,
+                    },
+                    status=503,
                 )
 
         gpt_history = gpt_history + message + response_text

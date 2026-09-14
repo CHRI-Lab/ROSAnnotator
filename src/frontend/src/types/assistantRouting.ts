@@ -20,6 +20,7 @@ export type AssistantReply = {
   assistantMode: AssistantMode;
   isError?: boolean;
   canFallbackToRemote?: boolean;
+  canFallbackToLocal?: boolean;
   aiRecord?: AIRecord;
 };
 
