@@ -67,7 +67,7 @@ jobs:
       - name: Ensure environment files are not tracked
         shell: bash
         run: |
-          if git ls-files | grep -E '(^|/)\.env($|\.)'; then
+          if git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '(^|/)\.env\.example$'; then
             echo "Environment files containing secrets must not be committed."
             exit 1
           fi
