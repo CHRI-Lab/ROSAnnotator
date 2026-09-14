@@ -14,6 +14,10 @@ class RemoteAuthenticationError(RuntimeError):
     """The remote provider rejected its configured credentials."""
 
 
+class RemoteResponseError(RuntimeError):
+    """The remote provider returned an unsafe timeline response."""
+
+
 class LocalInferenceError(RuntimeError):
     """The local inference server could not complete a request."""
 
@@ -74,9 +78,69 @@ class RemoteAPI(AIAssistant):
 
     def _respond(self, message, chatHistory=""):
         try:
-            return self._request_completion(message, chatHistory)
+            response_text = self._request_completion(message, chatHistory)
         except AuthenticationError as error:
             raise RemoteAuthenticationError from error
+        if self._requests_timeline_change(message):
+            self._validate_timeline_instruction(response_text)
+        return response_text
+
+    @staticmethod
+    def _requests_timeline_change(message):
+        normalized_message = message.lower()
+        return any(
+            word in normalized_message
+            for word in ("annotate", "add", "create", "delete", "remove")
+        ) and any(
+            word in normalized_message
+            for word in ("timeline", "axis", "axi", "block", "annotation")
+        )
+
+    @staticmethod
+    def _validate_timeline_instruction(response_text):
+        error_message = (
+            "The remote model returned an invalid timeline instruction. "
+            "No annotation changes were applied."
+        )
+        if not isinstance(response_text, str):
+            raise RemoteResponseError(error_message)
+
+        json_start = response_text.find("{")
+        json_end = response_text.rfind("}")
+        if json_start < 0 or json_end <= json_start:
+            raise RemoteResponseError(error_message)
+        try:
+            instruction = json.loads(response_text[json_start : json_end + 1])
+        except json.JSONDecodeError as error:
+            raise RemoteResponseError(error_message) from error
+
+        steps = instruction.get("steps") if isinstance(instruction, dict) else None
+        if not isinstance(instruction, dict) or instruction.get("type") != "instruction" or not steps:
+            raise RemoteResponseError(error_message)
+
+        required_parameters = {
+            "addAxi": {"axisId": int, "axisName": str, "axistype": str},
+            "addBlock": {
+                "axisId": int,
+                "start": (int, float),
+                "end": (int, float),
+                "text": str,
+            },
+            "deleteBlock": {"axisId": int, "blockIndex": int},
+            "deleteAxi": {"axisId": int},
+        }
+        for step in steps:
+            if not isinstance(step, dict) or step.get("action") not in required_parameters:
+                raise RemoteResponseError(error_message)
+            parameters = step.get("parameters")
+            if not isinstance(parameters, dict):
+                raise RemoteResponseError(error_message)
+            for name, expected_type in required_parameters[step["action"]].items():
+                value = parameters.get(name)
+                if isinstance(value, bool) or not isinstance(value, expected_type):
+                    raise RemoteResponseError(error_message)
+            if step["action"] == "addBlock" and parameters["end"] < parameters["start"]:
+                raise RemoteResponseError(error_message)
 
     def _request_completion(self, message, chatHistory=""):
         client = OpenAI(api_key=self.APIKey)

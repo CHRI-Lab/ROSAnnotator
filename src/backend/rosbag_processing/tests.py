@@ -14,6 +14,7 @@ from .ai_assistant import (
     QwenLocalAI,
     RemoteAPI,
     RemoteAuthenticationError,
+    RemoteResponseError,
     SmolVLM2LocalAI,
     create_local_ai,
 )
@@ -163,6 +164,40 @@ class AIAssistantTests(SimpleTestCase):
                 assistant.respond("Create an annotation axis")
 
         self.assertIn("not valid json", "\n".join(captured_logs.output))
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_remote_rejects_malformed_timeline_json(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="gpt-4o",
+                choices=[SimpleNamespace(message=SimpleNamespace(content="{bad json"))],
+            )
+        )
+        assistant = RemoteAPI(APIKey="test-key", **self.contexts)
+
+        with self.assertRaisesRegex(RemoteResponseError, "No annotation changes"):
+            assistant.respond("Create an annotation axis")
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_remote_rejects_unsupported_timeline_action(self, openai_class):
+        response_message = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [{"action": "runShell", "parameters": {}}],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="gpt-4o",
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=response_message))
+                ],
+            )
+        )
+        assistant = RemoteAPI(APIKey="test-key", **self.contexts)
+
+        with self.assertRaisesRegex(RemoteResponseError, "invalid timeline"):
+            assistant.respond("Create an annotation axis")
 
     @patch("rosbag_processing.ai_assistant.OpenAI")
     def test_local_summary_request_uses_general_answer_prompt(self, openai_class):
@@ -1102,6 +1137,46 @@ class ChunkApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 503)
         response_data = json.loads(response.content)
         self.assertTrue(response_data["can_fallback_to_local"])
+        local_ai.assert_not_called()
+
+    def test_invalid_remote_timeline_response_is_rejected_without_changes(self):
+        from . import views
+
+        views.gpt_history = "existing history"
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Create an annotation axis",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "Axeinfo": [],
+                    "Codebook": [],
+                    "assistant_mode": "remote",
+                    "context_routes": {
+                        "transcript": "remote",
+                        "frames": "remote",
+                        "codebook": "remote",
+                        "timeline": "remote",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", "test-key"), patch.object(
+            views, "RemoteAPI"
+        ) as remote_api, patch.object(views, "create_local_ai") as local_ai:
+            remote_api.return_value.respond.side_effect = RemoteResponseError(
+                "The remote model returned an invalid timeline instruction. "
+                "No annotation changes were applied."
+            )
+            response = views.gpt_chat(request)
+
+        response_data = json.loads(response.content)
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("No annotation changes were applied", response_data["error"])
+        self.assertNotIn("can_fallback_to_local", response_data)
+        self.assertEqual(views.gpt_history, "existing history")
         local_ai.assert_not_called()
 
     def test_consented_remote_to_local_fallback_is_recorded(self):

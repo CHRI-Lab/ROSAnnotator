@@ -16,6 +16,7 @@ from .ai_assistant import (
     LocalInferenceError,
     RemoteAPI,
     RemoteAuthenticationError,
+    RemoteResponseError,
     create_local_ai,
 )
 
@@ -399,6 +400,11 @@ def gpt_chat(request):
                         "can_fallback_to_local": True,
                     },
                     status=503,
+                )
+            except RemoteResponseError as error:
+                return JsonResponse(
+                    {"error": str(error), "assistant_mode": "remote"},
+                    status=502,
                 )
             except (APIConnectionError, APIStatusError, TimeoutError) as error:
                 return JsonResponse(
