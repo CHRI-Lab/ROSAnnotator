@@ -34,7 +34,22 @@ const RightAssistantPanel = ({
         <Tab label="AI Assistant" />
       </Tabs>
       <Box flex={1} minHeight={0} overflow="auto">
-        {selectedTab === 0 ? codebook : assistant}
+        <Box
+          display={selectedTab === 0 ? "block" : "none"}
+          height="100%"
+          role="tabpanel"
+          aria-hidden={selectedTab !== 0}
+        >
+          {codebook}
+        </Box>
+        <Box
+          display={selectedTab === 1 ? "block" : "none"}
+          height="100%"
+          role="tabpanel"
+          aria-hidden={selectedTab !== 1}
+        >
+          {assistant}
+        </Box>
       </Box>
     </Box>
   );

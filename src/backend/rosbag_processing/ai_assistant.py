@@ -681,6 +681,33 @@ class LocalAI(AIAssistant):
             )
 
         original_segment_count = len(segments)
+        point_time = self._point_time_from_message(message)
+        if point_time is not None:
+            matching_segments = [
+                segment
+                for segment in segments
+                if float(segment["start"]) <= point_time <= float(segment["end"])
+            ]
+            if not matching_segments:
+                nearest_distance = min(
+                    max(
+                        float(segment["start"]) - point_time,
+                        point_time - float(segment["end"]),
+                        0,
+                    )
+                    for segment in segments
+                )
+                matching_segments = [
+                    segment
+                    for segment in segments
+                    if max(
+                        float(segment["start"]) - point_time,
+                        point_time - float(segment["end"]),
+                        0,
+                    )
+                    == nearest_distance
+                ]
+            segments = matching_segments
         is_request_task = "request" in message.lower()
         if is_request_task:
             request_candidates = [
@@ -1081,11 +1108,18 @@ TIMESTAMPED SEGMENTS:
 
     @staticmethod
     def _point_time_from_message(message):
+        message_text = str(message or "")
         match = re.search(
             r"\b(?:at|from)\s+(\d+(?:\.\d+)?)\s*(?:s|sec|second)s?\b",
-            str(message or ""),
+            message_text,
             re.IGNORECASE,
         )
+        if not match:
+            match = re.search(
+                r"\b(\d+(?:\.\d+)?)\s*(?:s|sec|second)s?\b",
+                message_text,
+                re.IGNORECASE,
+            )
         return float(match.group(1)) if match else None
 
     def _block_index_at_time(self, axis_id, point_time):

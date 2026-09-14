@@ -753,6 +753,72 @@ class AIAssistantTests(SimpleTestCase):
         )
 
     @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_timestamped_request_annotation_only_adds_requested_segment(
+        self, openai_class
+    ):
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct-q4_k_m",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content='{"annotations": []}')
+                    )
+                ],
+            )
+        )
+        timeline = [
+            {
+                "id": 7,
+                "axisName": "Participant Requests",
+                "blocks": [
+                    {"start": 229.0, "end": 236.0, "text": "Existing request"}
+                ],
+            }
+        ]
+        cases = (
+            (
+                "Can you annotate at 239s the request utterances made by "
+                "participants in a new time axis?",
+                "[03:58] Speaker: Could you pass that to me? [04:01]",
+                238.0,
+                241.0,
+            ),
+            (
+                "Can you annotate the request utterances made by participants "
+                "309s in a new time axis?",
+                "[05:08] Speaker: Please rotate the object. [05:10]",
+                308.0,
+                310.0,
+            ),
+        )
+
+        for message, target_segment, expected_start, expected_end in cases:
+            with self.subTest(message=message):
+                contexts = {
+                    **self.contexts,
+                    "timelineContext": timeline,
+                    "transcriptContext": (
+                        "[03:49] Speaker: Can you turn it again? [03:56]\n"
+                        f"{target_segment}"
+                    ),
+                }
+                assistant = QwenLocalAI(
+                    checkpointPath="/models/local.gguf", **contexts
+                )
+
+                result = json.loads(assistant.respond(message))
+
+                self.assertEqual(len(result["steps"]), 1)
+                self.assertEqual(result["steps"][0]["action"], "addBlock")
+                self.assertEqual(result["steps"][0]["parameters"]["axisId"], 7)
+                self.assertEqual(
+                    result["steps"][0]["parameters"]["start"], expected_start
+                )
+                self.assertEqual(
+                    result["steps"][0]["parameters"]["end"], expected_end
+                )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
     def test_local_auto_annotation_grounds_blocks_to_transcript_times(
         self, openai_class
     ):
