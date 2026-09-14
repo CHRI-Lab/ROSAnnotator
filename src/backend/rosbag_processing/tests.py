@@ -585,6 +585,102 @@ class AIAssistantTests(SimpleTestCase):
         self.assertEqual(result["steps"][1]["parameters"]["end"], 9.0)
 
     @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_manual_block_resolves_named_axis_and_point_time(self, openai_class):
+        response_message = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addAxi",
+                        "parameters": {
+                            "axisId": 99,
+                            "axisName": "Topics",
+                            "axistype": "Type-in",
+                        },
+                    },
+                    {
+                        "action": "addBlock",
+                        "parameters": {"axisId": 99},
+                    },
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct-q4_k_m",
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=response_message))
+                ],
+            )
+        )
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **self.contexts)
+
+        result = json.loads(
+            assistant.respond("Add a new block at 1s on axis Topics")
+        )
+
+        self.assertEqual(len(result["steps"]), 1)
+        self.assertEqual(result["steps"][0]["action"], "addBlock")
+        self.assertEqual(
+            result["steps"][0]["parameters"],
+            {
+                "axisId": 1,
+                "start": 1.0,
+                "end": 2.0,
+                "text": "New annotation",
+            },
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_delete_block_resolves_named_axis_and_time(self, openai_class):
+        response_message = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "deleteBlock",
+                        "parameters": {"axisId": 99},
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct-q4_k_m",
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=response_message))
+                ],
+            )
+        )
+        contexts = {
+            **self.contexts,
+            "timelineContext": [
+                {
+                    "id": 7,
+                    "axisName": "Participant Requests",
+                    "blocks": [
+                        {"start": 1.0, "end": 2.0, "text": "New annotation"}
+                    ],
+                }
+            ],
+        }
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **contexts)
+
+        result = json.loads(
+            assistant.respond("Delete block at 1s on axis participant requests")
+        )
+
+        self.assertEqual(
+            result["steps"],
+            [
+                {
+                    "action": "deleteBlock",
+                    "parameters": {"axisId": 7, "blockIndex": 0},
+                }
+            ],
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
     def test_local_auto_annotation_grounds_blocks_to_transcript_times(
         self, openai_class
     ):

@@ -18,6 +18,32 @@ type TimelineAxis = {
 const cloneAxes = (axes: TimelineAxis[]) =>
   JSON.parse(JSON.stringify(axes)) as TimelineAxis[];
 
+export const requiresAIChangeConfirmation = (
+  instruction: AIInstruction,
+  currentAxes: Array<{ id: number }>,
+) => {
+  const existingAxisIds = new Set(currentAxes.map((axis) => axis.id));
+  const newAxisIds = new Set(
+    instruction.steps
+      .filter((step) => step.action === "addAxi")
+      .map((step) => Number(step.parameters?.axisId)),
+  );
+
+  return instruction.steps.some((step) => {
+    const action = step.action.toLowerCase();
+    return (
+      action === "deleteaxi" ||
+      action === "deleteblock" ||
+      (action === "addblock" &&
+        existingAxisIds.has(Number(step.parameters?.axisId)) &&
+        !newAxisIds.has(Number(step.parameters?.axisId))) ||
+      action.startsWith("update") ||
+      action.startsWith("edit") ||
+      action.startsWith("modify")
+    );
+  });
+};
+
 export const applyAIInstruction = (
   currentAxes: TimelineAxis[],
   instruction: AIInstruction,

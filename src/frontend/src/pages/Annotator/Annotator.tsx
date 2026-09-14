@@ -2,8 +2,14 @@ import { useState, useCallback, useEffect } from "react";
 import ReactPlayer from "react-player";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+
 import {
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   FormControl,
   MenuItem,
   Paper,
@@ -15,7 +21,10 @@ import {
 
 import Chatbox from "../../components/Chatbox";
 import Timeline from "../../components/Timeline";
-import { applyAIInstruction } from "../../components/Timeline/aiInstruction";
+import {
+  applyAIInstruction,
+  requiresAIChangeConfirmation,
+} from "../../components/Timeline/aiInstruction";
 import Transcript from "../../components/Transcript";
 import Booklist from "../../components/Booklist/Booklist";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
@@ -70,6 +79,10 @@ const Annotator = ({
   const [selectedTab, setSelectedTab] = useState(0);
   const [axesData, setAxesData] = useState([]);
   const [instruction, setInstruction] = useState<AIInstruction | null>(null);
+  const [pendingAIChange, setPendingAIChange] = useState<{
+    instruction: AIInstruction;
+    resolve: (accepted: boolean) => void;
+  } | null>(null);
   const [aiRecords, setAIRecords] = useState<AIRecord[]>(data.ai_records ?? []);
   useEffect(() => {
     if (bookListData) {
@@ -103,6 +116,16 @@ const Annotator = ({
     setAxesData(updatedAxes);
     return updatedAxes;
   }, []);
+
+  const requestAIChangeConfirmation = (pendingInstruction: AIInstruction) =>
+    new Promise<boolean>((resolve) => {
+      setPendingAIChange({ instruction: pendingInstruction, resolve });
+    });
+
+  const resolveAIChangeConfirmation = (accepted: boolean) => {
+    pendingAIChange?.resolve(accepted);
+    setPendingAIChange(null);
+  };
 
   const handleSendMessageToGPT = (
     message: string,
@@ -148,7 +171,7 @@ const Annotator = ({
         }
         return responseData;
       })
-      .then((data) => {
+      .then(async (data) => {
         const responseString = data.response;
         const assistantMode =
           (data.assistant_mode as AssistantMode) ?? assistantRouting.mode;
@@ -172,6 +195,17 @@ const Annotator = ({
             if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
               console.log("This is an instruction:", parsedObject);
               const parsedInstruction = parsedObject as AIInstruction;
+              if (
+                requiresAIChangeConfirmation(parsedInstruction, axesData) &&
+                !(await requestAIChangeConfirmation(parsedInstruction))
+              ) {
+                return {
+                  text: "AI timeline changes were cancelled. No annotation changes were applied.",
+                  assistantMode,
+                  aiRecord,
+                  isError: true,
+                };
+              }
               const updatedAxes = applyAIInstruction(axesData, parsedInstruction);
               if (JSON.stringify(updatedAxes) === JSON.stringify(axesData)) {
                 return {
@@ -181,6 +215,7 @@ const Annotator = ({
                   isError: true,
                 };
               }
+              setAxesData(updatedAxes);
               setInstruction(parsedInstruction);
 
               // Keep the model's machine-readable instruction internal. The
@@ -285,6 +320,28 @@ const Annotator = ({
 
   return (
     <AxesProvider key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}>
+      <Dialog
+        open={pendingAIChange !== null}
+        onClose={() => resolveAIChangeConfirmation(false)}
+      >
+        <DialogTitle>Allow AI timeline changes?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            The AI instruction will delete or modify existing annotation
+            timelines or blocks. Do you want to apply these changes?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => resolveAIChangeConfirmation(false)}>Cancel</Button>
+          <Button
+            onClick={() => resolveAIChangeConfirmation(true)}
+            color="error"
+            variant="contained"
+          >
+            Apply changes
+          </Button>
+        </DialogActions>
+      </Dialog>
       <Box display="flex" height="100vh" overflow="hidden">
         {/* 左侧的主内容区域 */}
         <Box

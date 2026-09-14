@@ -1001,6 +1001,87 @@ TIMESTAMPED SEGMENTS:
                 continue
         return axis_ids
 
+    def _target_axis_id_from_message(self, message):
+        normalized_message = str(message or "").casefold()
+        matching_axes = []
+        for axis in self.timelineContext or []:
+            if not isinstance(axis, dict):
+                continue
+            axis_name = str(axis.get("axisName", "")).strip()
+            raw_axis_id = axis.get("id", axis.get("axisId"))
+            try:
+                axis_id = int(raw_axis_id)
+            except (TypeError, ValueError):
+                continue
+            if axis_name and axis_name.casefold() in normalized_message:
+                matching_axes.append((len(axis_name), axis_id))
+        return max(matching_axes, default=(0, None))[1]
+
+    @staticmethod
+    def _point_time_from_message(message):
+        match = re.search(
+            r"\b(?:at|from)\s+(\d+(?:\.\d+)?)\s*(?:s|sec|second)s?\b",
+            str(message or ""),
+            re.IGNORECASE,
+        )
+        return float(match.group(1)) if match else None
+
+    def _block_index_at_time(self, axis_id, point_time):
+        if point_time is None:
+            return None
+        for axis in self.timelineContext or []:
+            if not isinstance(axis, dict):
+                continue
+            raw_axis_id = axis.get("id", axis.get("axisId"))
+            try:
+                matches_axis = int(raw_axis_id) == axis_id
+            except (TypeError, ValueError):
+                matches_axis = False
+            if not matches_axis:
+                continue
+            for block_index, block in enumerate(axis.get("blocks", [])):
+                if not isinstance(block, dict):
+                    continue
+                try:
+                    start = float(block.get("start"))
+                    end = float(block.get("end"))
+                except (TypeError, ValueError):
+                    continue
+                if start <= point_time <= end:
+                    return block_index
+        return None
+
+    @staticmethod
+    def _repair_manual_block(parameters, message):
+        start_match = re.search(
+            r"\b(?:at|from)\s+(\d+(?:\.\d+)?)\s*(?:s|sec|second)s?\b",
+            str(message or ""),
+            re.IGNORECASE,
+        )
+        end_match = re.search(
+            r"\bto\s+(\d+(?:\.\d+)?)\s*(?:s|sec|second)s?\b",
+            str(message or ""),
+            re.IGNORECASE,
+        )
+        try:
+            start = float(parameters.get("start"))
+        except (TypeError, ValueError):
+            start = float(start_match.group(1)) if start_match else None
+        if start is None:
+            return
+
+        try:
+            end = float(parameters.get("end"))
+        except (TypeError, ValueError):
+            end = float(end_match.group(1)) if end_match else start + 1.0
+        if end <= start:
+            end = start + 1.0
+
+        parameters["start"] = start
+        parameters["end"] = end
+        if not str(parameters.get("text", "")).strip():
+            parameters["text"] = "New annotation"
+
     def _normalize_timeline_instruction(
         self, response_text, message="", requires_new_axis=False
     ):
@@ -1020,6 +1101,30 @@ TIMESTAMPED SEGMENTS:
             )
 
         used_axis_ids = self._current_axis_ids()
+        target_axis_id = self._target_axis_id_from_message(message)
+        if target_axis_id is not None:
+            instruction["steps"] = [
+                step
+                for step in instruction["steps"]
+                if not isinstance(step, dict) or step.get("action") != "addAxi"
+            ]
+            for step in instruction["steps"]:
+                if not isinstance(step, dict):
+                    continue
+                parameters = step.get("parameters")
+                if not isinstance(parameters, dict):
+                    continue
+                if step.get("action") == "addBlock":
+                    parameters["axisId"] = target_axis_id
+                    self._repair_manual_block(parameters, message)
+                elif step.get("action") == "deleteBlock":
+                    parameters["axisId"] = target_axis_id
+                    block_index = self._block_index_at_time(
+                        target_axis_id,
+                        self._point_time_from_message(message),
+                    )
+                    if block_index is not None:
+                        parameters["blockIndex"] = block_index
         next_axis_id = max(used_axis_ids, default=0) + 1
         remapped_axis_ids = {}
         for step in instruction["steps"]:
@@ -1286,7 +1391,7 @@ PREVIOUS CHAT HISTORY:
             next_axis_id = max(self._current_axis_ids(), default=0) + 1
             return f"""You control the qualitative annotation timeline.
 Complete the entire requested auto-annotation task. Create exactly one new
-axis unless the user explicitly requests more. For a request that only asks
+axis unless the user explicitly names an existing axis. For a request that only asks
 for an axis, return one addAxi step and do not add blocks. Otherwise return the
 addAxi step first, followed by one addBlock step for every applicable utterance
 or span in the full transcript. Do not stop after the first match.
