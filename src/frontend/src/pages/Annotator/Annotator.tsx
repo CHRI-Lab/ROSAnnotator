@@ -15,6 +15,7 @@ import {
   Select,
   Tab,
   Tabs,
+  TextField,
   Typography,
 } from "@mui/material";
 
@@ -37,6 +38,10 @@ import {
   requiresAIChangeConfirmation,
 } from "../../components/Timeline/aiInstruction";
 import Transcript from "../../components/Transcript";
+import Booklist from "../../components/Booklist/Booklist";
+import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
+import { AxesProvider } from "../../components/AxesProvider/AxesContext";
+import type { AxisData } from "../../components/AxesProvider/AxesContext";
 import {
   AssistantMode,
   AssistantReply,
