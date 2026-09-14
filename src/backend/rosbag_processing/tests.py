@@ -449,6 +449,107 @@ class AIAssistantTests(SimpleTestCase):
         self.assertEqual(schema["properties"]["steps"]["minItems"], 2)
 
     @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_auto_annotation_repairs_blocks_without_an_axis(self, openai_class):
+        response_message = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            # SmolVLM2 may reuse an existing speaker axis
+                            # instead of creating the requested new axis.
+                            "axisId": 1,
+                            "start": 7,
+                            "end": 9,
+                            "text": "Could you move the camera closer?",
+                        },
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="SmolVLM2-500M-Video-Instruct-Q8_0",
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=response_message))
+                ],
+            )
+        )
+        assistant = SmolVLM2LocalAI(
+            checkpointPath="/models/smolvlm2.gguf", **self.contexts
+        )
+
+        result = json.loads(
+            assistant.respond(
+                "Annotate all request utterances made by participants in a new time axis"
+            )
+        )
+
+        self.assertEqual(result["steps"][0]["action"], "addAxi")
+        self.assertEqual(result["steps"][1]["action"], "addBlock")
+        self.assertEqual(
+            result["steps"][0]["parameters"]["axisId"],
+            result["steps"][1]["parameters"]["axisId"],
+        )
+        self.assertNotEqual(result["steps"][0]["parameters"]["axisId"], 1)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_short_request_annotation_uses_candidate_fallback(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="SmolVLM2-500M-Video-Instruct-Q8_0",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {
+                                    "type": "instruction",
+                                    "steps": [
+                                        {
+                                            "action": "addBlock",
+                                            "parameters": {
+                                                "axisId": 1,
+                                                "blockIndex": 1,
+                                            },
+                                        },
+                                        {
+                                            "action": "deleteAxi",
+                                            "parameters": {"axisId": 1},
+                                        },
+                                    ],
+                                }
+                            )
+                        )
+                    )
+                ],
+            )
+        )
+        contexts = {
+            **self.contexts,
+            "transcriptContext": (
+                "[00:07] Speaker: Could you move the camera closer? [00:09]"
+            ),
+        }
+        assistant = SmolVLM2LocalAI(
+            checkpointPath="/models/smolvlm2.gguf", **contexts
+        )
+
+        result = json.loads(
+            assistant.respond(
+                "Can you annotate all the request utterances made by participants "
+                "in a new time axis?"
+            )
+        )
+
+        self.assertEqual(
+            [step["action"] for step in result["steps"]],
+            ["addAxi", "addBlock"],
+        )
+        self.assertEqual(result["steps"][1]["parameters"]["start"], 7.0)
+        self.assertEqual(result["steps"][1]["parameters"]["end"], 9.0)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
     def test_local_auto_annotation_grounds_blocks_to_transcript_times(
         self, openai_class
     ):
@@ -1145,7 +1246,7 @@ class ChunkApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 501)
         self.assertFalse(json.loads(response.content)["can_fallback_to_remote"])
 
-    def test_hybrid_mode_never_calls_remote_until_orchestrator_exists(self):
+    def test_mixed_hybrid_mode_never_calls_remote_until_orchestrator_exists(self):
         from . import views
 
         views.gpt_history = ""
@@ -1170,12 +1271,179 @@ class ChunkApiTests(SimpleTestCase):
             content_type="application/json",
         )
 
-        with patch.object(views, "RemoteAPI") as remote_api:
+        with patch.object(views, "openai_api_key", "test-key"), patch.object(
+            views, "RemoteAPI"
+        ) as remote_api:
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 501)
-        self.assertIn("Hybrid mode requires", response.content.decode())
+        self.assertIn("Mixed Local/Remote", response.content.decode())
         remote_api.assert_not_called()
+
+    def test_mixed_hybrid_routes_explain_empty_remote_api_key(self):
+        from . import views
+
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Use hybrid routing",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "assistant_mode": "hybrid",
+                    "context_routes": {
+                        "transcript": "local",
+                        "frames": "local",
+                        "codebook": "remote",
+                        "timeline": "remote",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", None):
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("API key is empty", response.content.decode())
+
+    def test_all_local_hybrid_routes_use_local_model(self):
+        from . import views
+
+        views.gpt_history = ""
+        views.video_frames = ["frame-1"]
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Use local routing",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "Axeinfo": [],
+                    "Codebook": [],
+                    "assistant_mode": "hybrid",
+                    "context_routes": {
+                        "transcript": "local",
+                        "frames": "local",
+                        "codebook": "local",
+                        "timeline": "local",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "RemoteAPI") as remote_api, patch.object(
+            views, "create_local_ai"
+        ) as local_ai:
+            local_ai.return_value.respond.return_value = "local response"
+            response = views.gpt_chat(request)
+
+        response_data = json.loads(response.content)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response_data["response"], "local response")
+        self.assertEqual(response_data["assistant_mode"], "local")
+        self.assertEqual(
+            response_data["ai_record"]["model_selection"]["requested"], "hybrid"
+        )
+        self.assertEqual(
+            response_data["ai_record"]["model_selection"]["used"], "local"
+        )
+        remote_api.assert_not_called()
+        local_ai.return_value.respond.assert_called_once_with("Use local routing", "")
+
+    def test_all_local_hybrid_routes_explain_local_model_setup_failure(self):
+        from . import views
+
+        views.gpt_history = ""
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Use local routing",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "assistant_mode": "hybrid",
+                    "context_routes": {
+                        "transcript": "local",
+                        "frames": "local",
+                        "codebook": "local",
+                        "timeline": "local",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", None), patch.object(
+            views, "create_local_ai"
+        ) as local_ai:
+            local_ai.return_value.respond.side_effect = LocalInferenceError()
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 501)
+        self.assertIn("Choose a local model", response.content.decode())
+        self.assertIn("models/ directory", response.content.decode())
+
+    def test_all_remote_hybrid_routes_explain_empty_api_key(self):
+        from . import views
+
+        views.gpt_history = ""
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Use remote routing",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "assistant_mode": "hybrid",
+                    "context_routes": {
+                        "transcript": "remote",
+                        "frames": "remote",
+                        "codebook": "remote",
+                        "timeline": "remote",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", None), patch.object(
+            views, "RemoteAPI"
+        ) as remote_api:
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("API key is empty", response.content.decode())
+        remote_api.assert_not_called()
+
+    def test_all_remote_hybrid_routes_explain_invalid_api_key(self):
+        from . import views
+
+        views.gpt_history = ""
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps(
+                {
+                    "message": "Use remote routing",
+                    "audio_transcript": "Speaker 1: Hello",
+                    "assistant_mode": "hybrid",
+                    "context_routes": {
+                        "transcript": "remote",
+                        "frames": "remote",
+                        "codebook": "remote",
+                        "timeline": "remote",
+                    },
+                }
+            ),
+            content_type="application/json",
+        )
+
+        with patch.object(views, "openai_api_key", "invalid-key"), patch.object(
+            views, "RemoteAPI"
+        ) as remote_api:
+            remote_api.return_value.respond.side_effect = RemoteAuthenticationError()
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("API key is invalid", response.content.decode())
 
 
 class AIRecordPersistenceTests(SimpleTestCase):

@@ -309,6 +309,7 @@ def gpt_chat(request):
         context_routes = data.get("context_routes", {})
         fallback_consent = data.get("fallback_consent")
         requested_mode = assistant_mode
+        hybrid_selection = assistant_mode == "hybrid"
         if (
             isinstance(fallback_consent, dict)
             and fallback_consent.get("from") == "local"
@@ -335,15 +336,32 @@ def gpt_chat(request):
                     {"error": "Invalid hybrid context routes"}, status=400
                 )
 
-            # Do not silently send hybrid-selected data to the remote provider.
-            # The selection is ready for the future local/hybrid orchestrator.
-            return JsonResponse(
-                {
-                    "error": "Hybrid mode requires an available local model.",
-                    "assistant_mode": "hybrid",
-                },
-                status=501,
-            )
+            selected_targets = set(context_routes.values())
+            if "remote" in selected_targets and not openai_api_key:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "Remote AI is unavailable because the OpenAI API key is "
+                            "empty. Add a valid OPENAI_API_KEY and restart the backend."
+                        ),
+                        "assistant_mode": "hybrid",
+                    },
+                    status=503,
+                )
+            if len(selected_targets) == 1:
+                # A homogeneous hybrid selection needs no cross-provider
+                # orchestration; run it through the selected provider.
+                assistant_mode = selected_targets.pop()
+            else:
+                # Do not silently send locally routed data to the remote
+                # provider until a mixed-context orchestrator is available.
+                return JsonResponse(
+                    {
+                        "error": "Mixed Local/Remote hybrid routing is not implemented yet.",
+                        "assistant_mode": "hybrid",
+                    },
+                    status=501,
+                )
 
         common_context = {
             "transcriptContext": audio_transcript,
@@ -360,7 +378,13 @@ def gpt_chat(request):
                 response_text = assistant.respond(message, gpt_history)
             except LocalInferenceError as error:
                 remote_configured = bool(openai_api_key)
-                error_message = str(error) or "The local language model is not connected."
+                if hybrid_selection:
+                    error_message = (
+                        "Local AI is unavailable. Choose a local model before starting "
+                        "Docker, and check that its .gguf file is in the models/ directory."
+                    )
+                else:
+                    error_message = str(error) or "The local language model is not connected."
                 return JsonResponse(
                     {
                         "error": (
@@ -374,11 +398,29 @@ def gpt_chat(request):
                 )
         else:
             try:
-                (
-                    response_text,
-                    assistant_mode,
-                    assistant,
-                ) = respond_with_remote_fallback(common_context, message, gpt_history)
+                if hybrid_selection:
+                    assistant = RemoteAPI(
+                        **common_context,
+                        APIKey=openai_api_key,
+                    )
+                    response_text = assistant.respond(message, gpt_history)
+                else:
+                    (
+                        response_text,
+                        assistant_mode,
+                        assistant,
+                    ) = respond_with_remote_fallback(common_context, message, gpt_history)
+            except RemoteAuthenticationError:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "Remote AI is unavailable because the OpenAI API key is "
+                            "invalid. Check OPENAI_API_KEY and restart the backend."
+                        ),
+                        "assistant_mode": "remote",
+                    },
+                    status=503,
+                )
             except AssistantUnavailableError as error:
                 return JsonResponse(
                     {"error": str(error), "assistant_mode": "local"}, status=503

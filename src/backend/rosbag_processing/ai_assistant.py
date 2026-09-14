@@ -258,10 +258,15 @@ class LocalAI(AIAssistant):
         is_auto_annotation = self._requests_auto_annotation(message)
         if requests_visual_analysis and is_timeline_request:
             return self._respond_visual_annotation(message, chatHistory)
+        has_timestamped_segments = bool(self._transcript_segments())
         if (
             is_auto_annotation
             and not requests_visual_analysis
-            and len(str(self.transcriptContext or "")) > 4000
+            and has_timestamped_segments
+            and (
+                "request" in message.casefold()
+                or len(str(self.transcriptContext or "")) > 4000
+            )
         ):
             return self._respond_chunked_auto_annotation(message)
 
@@ -303,7 +308,11 @@ class LocalAI(AIAssistant):
 
         if is_timeline_request:
             try:
-                response_text = self._normalize_timeline_instruction(response_text)
+                response_text = self._normalize_timeline_instruction(
+                    response_text,
+                    message,
+                    requires_new_axis=is_auto_annotation,
+                )
             except LocalInferenceError:
                 logger.error(
                     "Invalid local timeline response from model %s: %r",
@@ -928,7 +937,9 @@ TIMESTAMPED SEGMENTS:
                 continue
         return axis_ids
 
-    def _normalize_timeline_instruction(self, response_text):
+    def _normalize_timeline_instruction(
+        self, response_text, message="", requires_new_axis=False
+    ):
         """Make model-selected IDs safe for the current timeline."""
         try:
             instruction = json.loads(response_text)
@@ -967,6 +978,113 @@ TIMESTAMPED SEGMENTS:
 
             if step.get("action") == "addBlock":
                 self._ground_block_timestamp(parameters)
+
+        available_axis_ids = used_axis_ids | {
+            int(step["parameters"]["axisId"])
+            for step in instruction["steps"]
+            if isinstance(step, dict)
+            and step.get("action") == "addAxi"
+            and isinstance(step.get("parameters"), dict)
+            and isinstance(step["parameters"].get("axisId"), int)
+        }
+        add_block_steps = [
+            step
+            for step in instruction["steps"]
+            if isinstance(step, dict)
+            and step.get("action") == "addBlock"
+            and isinstance(step.get("parameters"), dict)
+        ]
+        has_add_axis = any(
+            isinstance(step, dict) and step.get("action") == "addAxi"
+            for step in instruction["steps"]
+        )
+        if requires_new_axis and add_block_steps and not has_add_axis:
+            while next_axis_id in available_axis_ids:
+                next_axis_id += 1
+            repaired_axis_id = next_axis_id
+            next_axis_id += 1
+            available_axis_ids.add(repaired_axis_id)
+            for step in add_block_steps:
+                step["parameters"]["axisId"] = repaired_axis_id
+            instruction["steps"].insert(
+                0,
+                {
+                    "action": "addAxi",
+                    "parameters": {
+                        "axisId": repaired_axis_id,
+                        "axisName": self._auto_annotation_axis_name(message),
+                        "axistype": "Type-in",
+                    },
+                },
+            )
+
+        orphan_axis_ids = []
+        for step in instruction["steps"]:
+            if not isinstance(step, dict) or step.get("action") != "addBlock":
+                continue
+            parameters = step.get("parameters")
+            if not isinstance(parameters, dict):
+                continue
+            try:
+                axis_id = int(parameters.get("axisId"))
+            except (TypeError, ValueError):
+                continue
+            if axis_id not in available_axis_ids and axis_id not in orphan_axis_ids:
+                orphan_axis_ids.append(axis_id)
+
+        for orphan_axis_id in orphan_axis_ids:
+            while next_axis_id in available_axis_ids:
+                next_axis_id += 1
+            repaired_axis_id = next_axis_id
+            next_axis_id += 1
+            available_axis_ids.add(repaired_axis_id)
+            for step in instruction["steps"]:
+                parameters = step.get("parameters") if isinstance(step, dict) else None
+                if not isinstance(parameters, dict):
+                    continue
+                try:
+                    references_orphan = int(parameters.get("axisId")) == orphan_axis_id
+                except (TypeError, ValueError):
+                    references_orphan = False
+                if references_orphan:
+                    parameters["axisId"] = repaired_axis_id
+            instruction["steps"].insert(
+                0,
+                {
+                    "action": "addAxi",
+                    "parameters": {
+                        "axisId": repaired_axis_id,
+                        "axisName": self._auto_annotation_axis_name(message),
+                        "axistype": "Type-in",
+                    },
+                },
+            )
+
+        if requires_new_axis:
+            safe_steps = []
+            for step in instruction["steps"]:
+                if not isinstance(step, dict):
+                    continue
+                action = step.get("action")
+                parameters = step.get("parameters")
+                if not isinstance(parameters, dict):
+                    continue
+                if action == "addAxi":
+                    safe_steps.append(step)
+                    continue
+                if action != "addBlock":
+                    continue
+                try:
+                    start = float(parameters.get("start"))
+                    end = float(parameters.get("end"))
+                except (TypeError, ValueError):
+                    continue
+                if end < start or not str(parameters.get("text", "")).strip():
+                    continue
+                parameters["start"] = start
+                parameters["end"] = end
+                safe_steps.append(step)
+            instruction["steps"] = safe_steps
 
         return json.dumps(instruction, ensure_ascii=False)
 
