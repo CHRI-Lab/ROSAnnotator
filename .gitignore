@@ -10,3 +10,4 @@ rosbag-data*/
 processed*/
 datas/
 models/
+*.sh text eol=lf

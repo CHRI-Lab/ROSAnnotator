@@ -137,6 +137,12 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    LOCAL_AI_MODEL=SmolVLM2-500M-Video-Instruct-Q8_0 docker compose up --build
    ```
 
+   **additional steps on windows**:
+   ```powershell
+   $path = Resolve-Path .\scripts\start-local-llm.sh
+   $content = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
+   [IO.File]::WriteAllText($path, $content, [Text.UTF8Encoding]::new($false))
+   ```
 6. **Starting the Server**
 
    Run the following commands in the root directory of the project:
