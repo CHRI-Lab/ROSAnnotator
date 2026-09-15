@@ -39,6 +39,8 @@ interface TimelineProps {
   duration: number;
   played: number;
   onSeek: (time: number) => void;
+  rosBagFileName: string;
+  bookListFileName: string;
   booklist: any;
   annotationData: any;
   speakerData?: Array<any>;
@@ -49,6 +51,7 @@ interface TimelineProps {
   switchingChunk?: boolean;
   onAxesUpdate: (axes: any) => void;
   instruction: AIInstruction | null;
+  aiRecords: AIRecord[];
   onSave: () => void;
 }
 
@@ -110,6 +113,8 @@ const Timeline: React.FC<TimelineProps> = ({
   duration,
   played,
   onSeek,
+  rosBagFileName,
+  bookListFileName,
   booklist,
   annotationData,
   speakerData,
@@ -331,25 +336,6 @@ const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => {
     setSeekTime(played);
   }, [played]);
-
-  // Save data through API
-  const handleSaveData = async () => {
-    const data = collectData();
-    console.log(JSON.stringify(data));
-    try {
-      const response = await fetch("http://localhost:8000/api/save_annotation/", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          annotation_name: `${rosBagFileName}+${
-            bookListFileName ? bookListFileName : "noBookList"
-          }`,
-          annotation_data: data,
-          ai_records: aiRecords,
-        }),
-      });
 
   // Prompts user for annotation file name, with prefilled defined filename set.
   const handleOpenSaveDialog = () => {
