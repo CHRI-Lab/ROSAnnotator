@@ -1,15 +1,12 @@
 """On-demand processing for one ROSBag time range at a time."""
 import json
+import math
 import os
 import subprocess
 from pathlib import Path
+from typing import Optional
 
-import cv2
-from cv_bridge import CvBridge
-from genpy import Time
-from rosbag.bag import Bag
-
-from .data_utils import plot_waveform, transcribe_audio_to_srt
+from .processing_sessions import BaseDataProcessingSession, ProcessingRequest, ProcessingResult
 
 
 VIDEO_TOPIC = '/xtion/rgb/image_raw_throttled'
@@ -24,14 +21,51 @@ def _relative_processed_path(path):
     return os.path.relpath(path, '/app/processed_data').replace(os.sep, '/')
 
 
+class ChunkProcessingSession(BaseDataProcessingSession):
+    def _validate(self, request: ProcessingRequest) -> None:
+        super()._validate(request)
+        if not request.manifest_id or request.chunk is None:
+            raise ValueError('manifest_id and chunk are required')
+        chunk = request.chunk
+        if not all(type(chunk.get(key)) in (int, float) and math.isfinite(chunk[key])
+                   for key in ('start_seconds', 'end_seconds')):
+            raise ValueError('Chunk bounds must be finite seconds')
+        if chunk['start_seconds'] < 0 or chunk['end_seconds'] <= chunk['start_seconds']:
+            raise ValueError('Chunk must have a positive duration')
+        if type(chunk.get('index')) is not int or chunk['index'] < 0:
+            raise ValueError('Chunk index must be a non-negative integer')
+
+    def _load_cached(self, request: ProcessingRequest) -> Optional[ProcessingResult]:
+        result_path = (Path(request.processed_root) / str(request.manifest_id)
+                       / f"{request.chunk['index']:04d}" / 'result.json')
+        if result_path.is_file():
+            with result_path.open(encoding='utf-8') as stream:
+                return json.load(stream)
+        return None
+
+    def _run(self, request: ProcessingRequest) -> ProcessingResult:
+        return _process_chunk(request.bag_path, request.manifest_id,
+                              request.chunk, request.processed_root)
+
+
 def process_chunk(bag_path, manifest_id, chunk, processed_root='/app/processed_data/chunks'):
-    """Create and cache media/transcript artifacts for one manifest chunk."""
+    """Compatibility adapter; all processing goes through the parent contract."""
+    return ChunkProcessingSession().process(ProcessingRequest(
+        bag_path=str(bag_path), manifest_id=str(manifest_id), chunk=chunk,
+        processed_root=str(processed_root),
+    ))
+
+
+def _process_chunk(bag_path, manifest_id, chunk, processed_root):
+    # Cache reads and contract checks do not require the ROS/ML runtime.
+    import cv2
+    from cv_bridge import CvBridge
+    from genpy import Time
+    from rosbag.bag import Bag
+    from .data_utils import plot_waveform, transcribe_audio_to_srt
+
     chunk_root = Path(processed_root) / str(manifest_id) / f"{chunk['index']:04d}"
     result_path = chunk_root / 'result.json'
-    if result_path.is_file():
-        with result_path.open(encoding='utf-8') as stream:
-            return json.load(stream)
-
     chunk_root.mkdir(parents=True, exist_ok=True)
     lock_path = chunk_root / '.processing'
     try:

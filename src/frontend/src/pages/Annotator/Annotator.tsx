@@ -15,14 +15,15 @@ import {
 
 import Chatbox from "../../components/Chatbox";
 import Timeline from "../../components/Timeline";
-import Transcript from "../../components/Transcript";
 import Booklist from "../../components/Booklist/Booklist";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
-import AnnotationTable from "../../components/AnnotationTable";
 import { AxesProvider } from "../../components/AxesProvider/AxesContext";
-import StatisticsAnnotation from "../../components/StatisticsAnnotation";
-import StatisticsTier from "../../components/StatisticsTier";
 import type { ChunkManifest } from "../../api/chunks";
+
+import {
+  VideoView, TranscriptView, AnnotationView, AnnotationStatisticsView, TierStatisticsView,
+} from "../../components/FrontEndWorkspace/dataViews";
+import type { ViewPanelContext } from "../../components/FrontEndWorkspace/viewTypes";
 
 interface AnnotatorProps {
   rosBagFileName?: string;
@@ -52,6 +53,7 @@ const Annotator = ({
   onAutosaveReady,
 }: AnnotatorProps) => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
+  const [isPlaying, setIsPlaying] = useState(true);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
   const [editMode, setEditMode] = useState(false);
@@ -176,7 +178,7 @@ const Annotator = ({
     setEditMode(true);
   };
 
-  const playerRef = useCallback((playerInstance: ReactPlayer) => {
+  const playerRef = useCallback((playerInstance: ReactPlayer | null) => {
     setPlayer(playerInstance);
   }, []);
 
@@ -186,6 +188,19 @@ const Annotator = ({
       player.seekTo(time);
     }
   }, [player]);
+
+  const viewContext: ViewPanelContext = {
+    videoPath: data.video_path,
+    transcript: data.audio_transcript,
+    played,
+    isPlaying,
+    onProgress: setPlayed,
+    onPlay: () => setIsPlaying(true),
+    onPause: () => setIsPlaying(false),
+    onSeek: handleSeek,
+    onDurationChange: setDuration,
+    playerRef,
+  };
 
   const formatChunkTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
@@ -226,16 +241,7 @@ const Annotator = ({
             overflow="auto"
           >
             <Box width="100%" flexGrow={1} maxWidth={602} margin={1}>
-              <ReactPlayer
-                ref={playerRef}
-                width="100%"
-                height="auto"
-                url={`/public/processed/${data.video_path}`}
-                onDuration={setDuration}
-                onProgress={({ playedSeconds }) => setPlayed(playedSeconds)}
-                controls
-                playing
-              />
+              <VideoView {...viewContext} />
             </Box>
             <Box width={600} flexGrow={1} overflow="auto" margin={1} maxHeight="50vh">
               <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
@@ -251,13 +257,9 @@ const Annotator = ({
                   <Tab label="Statistics (Tiers)" />
                 </Tabs>
               </Box>
-              {selectedTab === 0 && <AnnotationTable />}
+              {selectedTab === 0 && <AnnotationView {...viewContext} />}
               {selectedTab === 1 && (
-                <Transcript
-                  LRC={data.audio_transcript}
-                  played={played}
-                  setPlayed={handleSeek}
-                />
+                <TranscriptView {...viewContext} />
               )}
               {selectedTab === 2 &&
                 (editMode ? (
@@ -277,8 +279,8 @@ const Annotator = ({
                     <Booklist bookListData={bookList} />
                   </Box>
                 ))}
-              {selectedTab === 3 && <StatisticsAnnotation />}
-              {selectedTab === 4 && <StatisticsTier />}
+              {selectedTab === 3 && <AnnotationStatisticsView {...viewContext} />}
+              {selectedTab === 4 && <TierStatisticsView {...viewContext} />}
             </Box>
           </Box>
   

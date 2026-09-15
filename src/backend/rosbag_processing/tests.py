@@ -10,6 +10,48 @@ from .chunk_views import annotations_for_chunk
 from .data_utils import configure_huggingface_compatibility, get_rosbag_duration
 
 
+class ProcessingSessionApiTests(SimpleTestCase):
+    @patch('rosbag_processing.rosbag_session.RosbagProcessingSession')
+    def test_whole_bag_adapter_preserves_request_and_response(self, session_class):
+        session = session_class.return_value
+        session.video_frames = []
+        session.video_fps = 25
+        result = {
+            'video_path': 'sample.bag/output.mp4',
+            'audio_path': 'sample.bag/audio.mp3',
+            'waveform_image_path': 'sample.bag/output_waveform.png',
+            'audio_transcript': '', 'speaker_data': [],
+            'booklist_data': {}, 'annotation_data': None,
+            'message': 'File already processed',
+        }
+        session.process.return_value = result
+        response = APIClient().post('/api/process_rosbag/', {
+            'bag_filename': 'sample.bag', 'booklist_filename': 'codes.json',
+            'annotation_filename': 'annotations.csv',
+        }, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, result)
+        request = session.process.call_args.args[0]
+        self.assertEqual(request.bag_path, os.path.join('/app/datas/rosbag-data/', 'sample.bag'))
+        self.assertEqual(request.booklist_filename, 'codes.json')
+        self.assertEqual(request.annotation_filename, 'annotations.csv')
+
+    @patch('rosbag_processing.rosbag_session.RosbagProcessingSession')
+    def test_expected_processing_error_keeps_legacy_http_shape(self, session_class):
+        from .processing_sessions import ProcessingError
+        session_class.return_value.process.side_effect = ProcessingError('Invalid bag filename')
+        response = APIClient().post('/api/process_rosbag/', {'bag_filename': 'missing.bag'}, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'error': 'Invalid bag filename'})
+
+    @patch('rosbag_processing.rosbag_session.RosbagProcessingSession')
+    def test_missing_filename_does_not_start_a_session(self, session_class):
+        response = APIClient().post('/api/process_rosbag/', {}, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'error': 'bag_filename is required'})
+        session_class.assert_not_called()
+
+
 class GetRosbagDurationTests(SimpleTestCase):
     @patch('rosbag_processing.data_utils.Bag')
     def test_returns_duration_and_closes_bag(self, bag_class):

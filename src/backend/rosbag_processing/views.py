@@ -54,144 +54,27 @@ def inspect_input(request):
 
 @api_view(['POST'])
 def process_rosbag(request):
-    global video_frames
-    global video_fps
+    """Legacy HTTP adapter for the shared whole-bag session contract."""
+    from .processing_sessions import ProcessingError, ProcessingRequest
+    from .rosbag_session import RosbagProcessingSession
 
-    def detect_faces(frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)):
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=scaleFactor, minNeighbors=minNeighbors, minSize=minSize)
-        return len(faces) > 0
-    if request.method != 'POST':
-        return Response({'error': 'Invalid request method'}, status=405)
-    
+    global video_frames, video_fps
     bag_filename = request.data.get('bag_filename')
     if not bag_filename:
         return Response({'error': 'bag_filename is required'}, status=400)
-
-    bag_filepath = os.path.join('/app/datas/rosbag-data/', bag_filename)
-    if not os.path.exists(bag_filepath):
-        return Response({'error': 'Invalid bag filename'}, status=400)
-    
-    booklist_filename = request.data.get('booklist_filename')
-    annotation_filename = request.data.get('annotation_filename')
-    
-    output_folder = os.path.join('/app/processed_data/', os.path.basename(bag_filename))
-    images_folder = os.path.join(output_folder, 'images')
-    video_path = os.path.join(output_folder, 'output.mp4')
-    audio_path = os.path.join(output_folder, 'audio.mp3')
-    waveform_image_path = os.path.join(output_folder, 'output_waveform.png')
-    srt_file_path = os.path.join(output_folder, 'transcript_with_speakers.srt')
-
-    if booklist_filename:
-        booklist_path = os.path.join('/app/datas/booklist/', booklist_filename)
-        if not os.path.exists(booklist_path):
-            return Response({'error': 'Invalid booklist filename'}, status=400)
-        with open(booklist_path, 'r') as booklist_file:
-            booklist_data = json.load(booklist_file)
-    else:
-        booklist_data = {}
-
-    annotation_data = None
-    if annotation_filename:
-        annotation_path = os.path.join('/app/datas/annotation/', annotation_filename)
-        if not os.path.exists(annotation_path):
-            return Response({'error': 'Invalid annotation filename'}, status=400)
-        
-        try:
-            annotation_data = load_annotation(annotation_filename)
-        except Exception as e:
-            return Response({'error': f'Error loading annotation data: {str(e)}'}, status=500)
-
-    # Check if the bag file has already been processed
-    if all(os.path.exists(path) for path in [video_path, audio_path, waveform_image_path, srt_file_path]):
-        video = cv2.VideoCapture(video_path)
-
-        base64Frames = []
-        while video.isOpened():
-            success, frame = video.read()
-            if not success:
-                break
-            
-            # Detect face
-            if detect_faces(frame):
-                print("Frame with face detected, skipping.")
-                continue
-            
-            _, buffer = cv2.imencode(".jpg", frame)
-            base64Frames.append(base64.b64encode(buffer).decode("utf-8"))
-
-        video.release()
-
-        video_frames = base64Frames
-
-        video_fps = int(video.get(cv2.CAP_PROP_FPS))
-        if video_fps == 0:
-            video_fps = 30
-        print(len(base64Frames), "frames read.")
-        with open(srt_file_path, 'r') as transcript_file:
-            transcript = transcript_file.read()
-        return Response({
-            'video_path': get_relative_path(video_path),
-            'audio_path': get_relative_path(audio_path),
-            'waveform_image_path': get_relative_path(waveform_image_path),
-            'audio_transcript': transcript,
-            'booklist_data': booklist_data,
-            'annotation_data': annotation_data,
-            'message': 'File already processed'
-        })
-    
-    os.makedirs(images_folder, exist_ok=True)
-
+    session = RosbagProcessingSession()
     try:
-        # Extract images, video, and audio from the rosbag file
-        extract_images_from_rosbag(bag_filepath, output_folder)
-        extract_audio(bag_filepath, output_folder)
-        # Plot the audio waveform
-        plot_waveform(audio_path, waveform_image_path)
-        extract_video(bag_filepath, output_folder)
-
-        # Transcribe the audio to an SRT file
-        srt_file_path, transcript, speaker_data = transcribe_audio_to_srt(audio_path, output_folder)
-
-        # Combine the video and audio files
-        combine_video_audio(output_folder)
-        video = cv2.VideoCapture(video_path)
-
-        base64Frames = []
-        while video.isOpened():
-            success, frame = video.read()
-            if not success:
-                break
-            
-            if detect_faces(frame):
-                print("Frame with face detected, skipping.")
-                continue
-
-            _, buffer = cv2.imencode(".jpg", frame)
-            base64Frames.append(base64.b64encode(buffer).decode("utf-8"))
-
-        video.release()
-
-        video_frames = base64Frames
-
-        video_fps = int(video.get(cv2.CAP_PROP_FPS))
-        if video_fps == 0:
-            video_fps = 30
-        print(len(base64Frames), "frames read.")
-        return Response({
-            'video_path': get_relative_path(video_path),
-            'audio_path': get_relative_path(audio_path),
-            'waveform_image_path': get_relative_path(waveform_image_path),
-            'audio_transcript': transcript,
-            'booklist_data': booklist_data,
-            'annotation_data': annotation_data,
-            'speaker_data': speaker_data,
-            'message': 'Processing complete'
-        })
-    
-    except Exception as e:
-        return Response({'error': str(e)}, status=500)
+        result = session.process(ProcessingRequest(
+            bag_path=os.path.join(ROSBAG_DATA_DIR, bag_filename),
+            booklist_filename=request.data.get('booklist_filename'),
+            annotation_filename=request.data.get('annotation_filename'),
+        ))
+    except ProcessingError as exc:
+        return Response({'error': str(exc)}, status=exc.status_code)
+    except Exception as exc:
+        return Response({'error': str(exc)}, status=500)
+    video_frames, video_fps = session.video_frames, session.video_fps
+    return Response(result)
 
 
 @api_view(['POST'])
