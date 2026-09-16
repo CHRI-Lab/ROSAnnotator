@@ -1,28 +1,53 @@
-import { useState, useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import ReactPlayer from "react-player";
-import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
 import {
+  Box,
+  Button,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   FormControl,
   MenuItem,
   Paper,
   Select,
   Tab,
   Tabs,
+  TextField,
   Typography,
 } from "@mui/material";
 
-import Chatbox from "../../components/Chatbox";
-import Timeline from "../../components/Timeline";
-import Transcript from "../../components/Transcript";
+import type { ChunkManifest } from "../../api/chunks";
+import AppHeader from "../../components/AppHeader";
+import {
+  AxesProvider,
+  type AxisData,
+} from "../../components/AxesProvider/AxesContext";
 import Booklist from "../../components/Booklist/Booklist";
+import Chatbox from "../../components/Chatbox";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
-import AnnotationTable from "../../components/AnnotationTable";
-import { AxesProvider } from "../../components/AxesProvider/AxesContext";
+import FrontEndWorkspace from "../../components/FrontEndWorkspace";
+import RightAssistantPanel from "../../components/RightAssistantPanel";
 import StatisticsAnnotation from "../../components/StatisticsAnnotation";
 import StatisticsTier from "../../components/StatisticsTier";
-import type { ChunkManifest } from "../../api/chunks";
+import Timeline from "../../components/Timeline";
+import {
+  applyAIInstruction,
+  requiresAIChangeConfirmation,
+} from "../../components/Timeline/aiInstruction";
+import Transcript from "../../components/Transcript";
+import {
+  AssistantMode,
+  AssistantReply,
+  AssistantRouting,
+} from "../../types/assistantRouting";
+import {
+  AIInstruction,
+  AIRecord,
+  AssistantRequestOptions,
+} from "../../types/aiRecords";
 
 interface AnnotatorProps {
   rosBagFileName?: string;
@@ -54,19 +79,40 @@ const Annotator = ({
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(true);
   const [editMode, setEditMode] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [bookList, setBookList] = useState(bookListData);
-  const [selectedTab, setSelectedTab] = useState(0);
-  const [axesData, setAxesData] = useState([]);
-  const [instruction, setInstruction] = useState(null);
+  const [axesData, setAxesData] = useState<AxisData[]>([]);
+  const [instruction, setInstruction] = useState<AIInstruction | null>(null);
+  const [pendingAIChange, setPendingAIChange] = useState<{
+    instruction: AIInstruction;
+    resolve: (accepted: boolean) => void;
+  } | null>(null);
+  const [aiRecords, setAIRecords] = useState<AIRecord[]>(data.ai_records ?? []);
   useEffect(() => {
     if (bookListData) {
       setBookList(bookListData);
     } else {
       setBookList([]);
     }
+    setAIRecords(data.ai_records ?? []);
   }, [data, bookListData]);
-  
+
+  const upsertAIRecord = (record: AIRecord) => {
+    setAIRecords((currentRecords) => {
+      const existingIndex = currentRecords.findIndex(
+        (currentRecord) => currentRecord.run_id === record.run_id,
+      );
+      if (existingIndex === -1) {
+        return [...currentRecords, record];
+      }
+
+      return currentRecords.map((currentRecord, index) =>
+        index === existingIndex ? record : currentRecord,
+      );
+    });
+  };
 
   const handleTabChange = (_event, newValue) => {
     setSelectedTab(newValue);
@@ -77,7 +123,59 @@ const Annotator = ({
     return updatedAxes;
   }, []);
 
-  const handleSendMessageToGPT = (message) => {
+  const requestAIChangeConfirmation = (pendingInstruction: AIInstruction) =>
+    new Promise<boolean>((resolve) => {
+      setPendingAIChange({ instruction: pendingInstruction, resolve });
+    });
+
+  const resolveAIChangeConfirmation = (accepted: boolean) => {
+    pendingAIChange?.resolve(accepted);
+    setPendingAIChange(null);
+  };
+
+  const handleSaveAnnotations = async () => {
+    const annotationData = axesData.map((axis) => ({
+      id: axis.id,
+      axisType: axis.type,
+      axisName: axis.axisName || "",
+      axisBooklistName: axis.typeName || "",
+      annotationBlocks: (axis.blocks || []).map((block) => ({
+        start: block.start,
+        end: block.end,
+        text: block.text,
+      })),
+    }));
+
+    setIsSaving(true);
+    try {
+      const response = await fetch("http://localhost:8000/api/save_annotation/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          annotation_name: `${rosBagFileName}+${
+            bookListFileName || "noBookList"
+          }`,
+          annotation_data: annotationData,
+          ai_records: aiRecords,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Save failed (${response.status})`);
+      }
+      alert("Data saved successfully.");
+    } catch (error) {
+      alert(`Failed to save data. Please try again.\n${error}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSendMessageToGPT = (
+    message: string,
+    assistantRouting: AssistantRouting,
+    options?: AssistantRequestOptions,
+  ) => {
     return fetch("http://localhost:8000/api/gpt_chat/", {
       method: "POST",
       headers: {
@@ -87,20 +185,44 @@ const Annotator = ({
         message: message, 
         audio_transcript: data.audio_transcript, 
         Axeinfo: axesData,
-        Codebook: bookList
+        Codebook: bookList,
+        assistant_mode: assistantRouting.mode,
+        context_routes: assistantRouting.contextRoutes,
+        fallback_consent: options?.fallbackConsent
+          ? {
+              from: options.fallbackConsent.from,
+              to: options.fallbackConsent.to,
+              user_consented: options.fallbackConsent.userConsented,
+            }
+          : undefined,
       }),
     })
-      .then((response) => {
+      .then(async (response) => {
+        const responseData = await response.json().catch(() => ({}));
         if (!response.ok) {
-          return response.text().then((text) => {
-            throw new Error(`Error ${response.status}: ${text}`);
-          });
+          const error = new Error(
+            responseData.error || "The AI assistant could not complete the request.",
+          ) as Error & {
+            assistantMode?: AssistantMode;
+            canFallbackToRemote?: boolean;
+            canFallbackToLocal?: boolean;
+          };
+          error.assistantMode =
+            responseData.assistant_mode ?? assistantRouting.mode;
+          error.canFallbackToRemote = responseData.can_fallback_to_remote;
+          error.canFallbackToLocal = responseData.can_fallback_to_local;
+          throw error;
         }
-        return response.json();
+        return responseData;
       })
-      .then((data) => {
+      .then(async (data) => {
         const responseString = data.response;
-  
+        const assistantMode =
+          (data.assistant_mode as AssistantMode) ?? assistantRouting.mode;
+        const aiRecord = data.ai_record as AIRecord | undefined;
+        if (aiRecord) {
+          upsertAIRecord(aiRecord);
+        }
 
         const jsonStartIndex = responseString.indexOf("{");
         const jsonEndIndex = responseString.lastIndexOf("}");
@@ -116,22 +238,58 @@ const Annotator = ({
   
             if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
               console.log("This is an instruction:", parsedObject);
-              setInstruction(parsedObject);
-              
+              const parsedInstruction = parsedObject as AIInstruction;
+              if (
+                requiresAIChangeConfirmation(parsedInstruction, axesData) &&
+                !(await requestAIChangeConfirmation(parsedInstruction))
+              ) {
+                return {
+                  text: "AI timeline changes were cancelled. No annotation changes were applied.",
+                  assistantMode,
+                  aiRecord,
+                  isError: true,
+                };
+              }
+              const updatedAxes = applyAIInstruction(axesData, parsedInstruction);
+              if (JSON.stringify(updatedAxes) === JSON.stringify(axesData)) {
+                return {
+                  text: "The model returned a timeline instruction, but none of its steps could be applied.",
+                  assistantMode,
+                  aiRecord,
+                  isError: true,
+                };
+              }
+              setAxesData(updatedAxes);
+              setInstruction(parsedInstruction);
 
-              return responseString || "Done";
+              // Keep the model's machine-readable instruction internal. The
+              // Timeline executes it through the instruction state above,
+              // while the chat shows the concise confirmation used by the demo.
+              return { text: "Done", assistantMode, aiRecord };
             }
           } catch (error) {
             console.error("Failed to parse JSON:", error);
-            return normalMessage; 
+            return { text: normalMessage, assistantMode, aiRecord };
           }
-        } else {
-          return responseString;
+
+          return {
+            text: normalMessage || responseString,
+            assistantMode,
+            aiRecord,
+          };
         }
+
+        return { text: responseString, assistantMode, aiRecord };
       })
       .catch((error) => {
         console.error("Error in GPT API call:", error);
-        return `Error: ${error.message}`;
+        return {
+          text: error.message || "The AI assistant could not complete the request.",
+          assistantMode: error.assistantMode ?? assistantRouting.mode,
+          isError: true,
+          canFallbackToRemote: error.canFallbackToRemote,
+          canFallbackToLocal: error.canFallbackToLocal,
+        } as AssistantReply;
       });
   };
   
@@ -176,7 +334,7 @@ const Annotator = ({
     setEditMode(true);
   };
 
-  const playerRef = useCallback((playerInstance: ReactPlayer) => {
+  const playerRef = useCallback((playerInstance: ReactPlayer | null) => {
     setPlayer(playerInstance);
   }, []);
 
@@ -205,9 +363,47 @@ const Annotator = ({
   };
 
   return (
-    <AxesProvider key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}>
-      <Box display="flex" height="100vh" overflow="hidden">
-        {/* 左侧的主内容区域 */}
+<AxesProvider
+  key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}
+>
+  <Dialog
+    open={pendingAIChange !== null}
+    onClose={() => resolveAIChangeConfirmation(false)}
+  >
+    <DialogTitle>Allow AI timeline changes?</DialogTitle>
+    <DialogContent>
+      <DialogContentText>
+        The AI instruction will delete or modify existing annotation
+        timelines or blocks. Do you want to apply these changes?
+      </DialogContentText>
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={() => resolveAIChangeConfirmation(false)}>
+        Cancel
+      </Button>
+      <Button
+        onClick={() => resolveAIChangeConfirmation(true)}
+        color="error"
+        variant="contained"
+      >
+        Apply changes
+      </Button>
+    </DialogActions>
+  </Dialog>
+
+  <Box
+    display="flex"
+    flexDirection="column"
+    height="100vh"
+    overflow="hidden"
+  >
+    <AppHeader
+      rosBagFileName={rosBagFileName}
+      isSaving={isSaving}
+      onSave={handleSaveAnnotations}
+    />
+
+    <Box display="flex" flex={1} minHeight={0} overflow="hidden">
         <Box
           display="flex"
           justifyContent="center"
@@ -217,70 +413,20 @@ const Annotator = ({
           height="100%"  
           overflow="auto"
         >
-          <Box
-            display="flex"
-            justifyContent="center"
-            alignItems="center"
-            flexDirection="row"
-            flex="1 1 auto"
-            overflow="auto"
-          >
-            <Box width="100%" flexGrow={1} maxWidth={602} margin={1}>
-              <ReactPlayer
-                ref={playerRef}
-                width="100%"
-                height="auto"
-                url={`/public/processed/${data.video_path}`}
-                onDuration={setDuration}
-                onProgress={({ playedSeconds }) => setPlayed(playedSeconds)}
-                controls
-                playing
-              />
-            </Box>
-            <Box width={600} flexGrow={1} overflow="auto" margin={1} maxHeight="50vh">
-              <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
-                <Tabs
-                  value={selectedTab}
-                  onChange={handleTabChange}
-                  aria-label="annotation tabs"
-                >
-                  <Tab label="Annotations" />
-                  <Tab label="Transcript" />
-                  <Tab label="Codebook" />
-                  <Tab label="Statistics (Annotations)" />
-                  <Tab label="Statistics (Tiers)" />
-                </Tabs>
-              </Box>
-              {selectedTab === 0 && <AnnotationTable />}
-              {selectedTab === 1 && (
-                <Transcript
-                  LRC={data.audio_transcript}
-                  played={played}
-                  setPlayed={handleSeek}
-                />
-              )}
-              {selectedTab === 2 &&
-                (editMode ? (
-                  <EditBooklistForm
-                    bookListData={bookList}
-                    onSave={handleSaveBooklist}
-                  />
-                ) : (
-                  <Box>
-                    <Button
-                      onClick={handleOnEdit}
-                      variant="contained"
-                      sx={{ marginTop: 2 }}
-                    >
-                      Edit
-                    </Button>
-                    <Booklist bookListData={bookList} />
-                  </Box>
-                ))}
-              {selectedTab === 3 && <StatisticsAnnotation />}
-              {selectedTab === 4 && <StatisticsTier />}
-            </Box>
-          </Box>
+          <FrontEndWorkspace
+            context={{
+              videoPath: data.video_path,
+              transcript: data.audio_transcript,
+              played,
+              isPlaying,
+              onProgress: setPlayed,
+              onPlay: () => setIsPlaying(true),
+              onPause: () => setIsPlaying(false),
+              onSeek: handleSeek,
+              onDurationChange: setDuration,
+              playerRef,
+            }}
+          />
   
 
           {chunkManifest?.chunking_enabled && (
@@ -362,23 +508,31 @@ const Annotator = ({
               } : undefined}
               onAutosaveReady={onAutosaveReady}
               switchingChunk={switchingChunk}
+              aiRecords={aiRecords}
+              onSave={handleSaveAnnotations}
             />
           </Box>
         </Box>
   
 
-        <Box
-          flex={0.3}
-          height="100%"
-          bgcolor="background.paper"
-          borderLeft={1}
-          borderColor="divider"
-          display="flex"
-          flexDirection="column"
-          justifyContent="space-between"
-          overflow="auto"
-        >
-          <Chatbox onSendMessage={handleSendMessageToGPT} />
+        <RightAssistantPanel
+          codebook={
+            editMode ? (
+              <EditBooklistForm
+                bookListData={bookList}
+                onSave={handleSaveBooklist}
+              />
+            ) : (
+              <Box padding={2}>
+                <Button onClick={handleOnEdit} variant="contained">
+                  Edit
+                </Button>
+                <Booklist bookListData={bookList} />
+              </Box>
+            )
+          }
+          assistant={<Chatbox onSendMessage={handleSendMessageToGPT} />}
+        />
         </Box>
       </Box>
     </AxesProvider>

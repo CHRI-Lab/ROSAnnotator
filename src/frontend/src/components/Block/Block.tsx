@@ -163,7 +163,14 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
         ) : (
           <span>{`${selectedAnnotation} (${start} - ${end})`}</span>
         )}
-        <IconButton onClick={onDelete} size="small">
+        <IconButton
+          onClick={(event) => {
+            event.stopPropagation();
+            onDelete();
+          }}
+          size="small"
+          aria-label="Delete annotation block"
+        >
           x
         </IconButton>
       </BlockDisplay>

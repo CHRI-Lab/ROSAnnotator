@@ -1,12 +1,12 @@
 import React, { useState, createContext, ReactNode } from "react";
 
-interface BlockProps {
+export interface BlockProps {
   start: number;
   end: number;
   text?: string;
 }
 
-interface AxisData {
+export interface AxisData {
   id: number;
   type: string;
   typeName?: string;

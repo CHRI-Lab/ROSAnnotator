@@ -103,7 +103,9 @@ jobs:
         with:
           context: ./src/backend
           file: ./src/backend/Dockerfile
-          build-args: BACKEND_BASE_IMAGE=python:3.9-slim
+          build-args: |
+            BACKEND_BASE_IMAGE=python:3.9-slim
+            INSTALL_RUNTIME_PINS=0
           push: false
           tags: backend-ci:${{ github.sha }}
 

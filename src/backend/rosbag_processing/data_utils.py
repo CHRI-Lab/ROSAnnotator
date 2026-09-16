@@ -27,17 +27,6 @@ load_dotenv()
 
 huggingface_auth_token = os.getenv("HUGGINGFACE_AUTH_TOKEN")
 
-
-def configure_huggingface_compatibility():
-    """Allow older pyannote releases to use newer huggingface_hub clients."""
-    def compatible_hf_hub_download(*args, **kwargs):
-        legacy_token = kwargs.pop("use_auth_token", None)
-        if legacy_token is not None and "token" not in kwargs:
-            kwargs["token"] = legacy_token
-        return hf_hub_download(*args, **kwargs)
-
-    pyannote_pipeline_module.hf_hub_download = compatible_hf_hub_download
-
 def get_rosbag_duration(bag_filename):
     """Return the ROSBag duration in seconds without processing its messages."""
     bag = Bag(bag_filename, 'r')
@@ -143,8 +132,9 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
 
 
     model = whisper.load_model("base")
-    configure_huggingface_compatibility()
-    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=huggingface_auth_token)
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=huggingface_auth_token)
+    if huggingface_auth_token is None:
+        raise ValueError("Huggingface token not found in environment variables.")
     if model is None or pipeline is None:
         raise RuntimeError("Failed to load models.")
         

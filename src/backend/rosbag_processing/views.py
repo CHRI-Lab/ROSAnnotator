@@ -2,20 +2,28 @@ from .data_utils import *
 import json
 import os
 from django.http import JsonResponse
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import uuid4
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from .serializers import BooklistSerializer, InputInspectionSerializer, TranscriptionRequestSerializer
 import csv
 from django.views.decorators.csrf import csrf_exempt
-import openai
-from openai import OpenAI
 from dotenv import load_dotenv
+from openai import APIConnectionError, APIStatusError
+from .ai_assistant import (
+    LocalInferenceError,
+    RemoteAPI,
+    RemoteAuthenticationError,
+    RemoteResponseError,
+    create_local_ai,
+)
 
 load_dotenv()
 
 gpt_history = ""
+video_frames = []
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 ROSBAG_DATA_DIR = '/app/datas/rosbag-data/'
@@ -50,6 +58,60 @@ def inspect_input(request):
         'duration_minutes': round(duration_seconds / 60, 3),
         'supports_chunking': duration_seconds > 0,
     })
+ANNOTATION_PATH = "/app/datas/annotation/"
+
+
+def build_ai_record(
+    assistant,
+    requested_mode,
+    actual_mode,
+    response_text,
+    context_routes,
+):
+    """Build a secret-free record of one successful model interaction."""
+    provider_metadata = assistant.get_run_metadata()
+    if not isinstance(provider_metadata, dict):
+        provider_metadata = {}
+
+    return {
+        "schema_version": 1,
+        "run_id": str(uuid4()),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "model_selection": {
+            "requested": requested_mode,
+            "used": actual_mode,
+            "context_routes": context_routes,
+        },
+        "model": provider_metadata.get("model", {
+            "provider": actual_mode,
+            "requested": None,
+            "resolved": None,
+        }),
+        "parameters": provider_metadata.get("parameters", {}),
+        "prompts": provider_metadata.get("prompts", {}),
+        "ai_response": response_text,
+    }
+
+
+def ai_records_file_path(annotation_name):
+    return os.path.join(ANNOTATION_PATH, f"ai_records_{annotation_name}.json")
+
+
+def load_ai_records(annotation_filename):
+    annotation_name = (
+        annotation_filename[:-4]
+        if annotation_filename.endswith(".csv")
+        else annotation_filename
+    )
+    file_path = ai_records_file_path(annotation_name)
+    if not os.path.exists(file_path):
+        return []
+
+    with open(file_path, "r") as record_file:
+        payload = json.load(record_file)
+    if isinstance(payload, dict):
+        return payload.get("ai_runs", [])
+    return payload if isinstance(payload, list) else []
 
 
 @api_view(['POST'])
@@ -93,6 +155,7 @@ def process_rosbag(request):
         booklist_data = {}
 
     annotation_data = None
+    ai_records = []
     if annotation_filename:
         annotation_path = os.path.join('/app/datas/annotation/', annotation_filename)
         if not os.path.exists(annotation_path):
@@ -100,6 +163,7 @@ def process_rosbag(request):
         
         try:
             annotation_data = load_annotation(annotation_filename)
+            ai_records = load_ai_records(annotation_filename)
         except Exception as e:
             return Response({'error': f'Error loading annotation data: {str(e)}'}, status=500)
 
@@ -138,6 +202,7 @@ def process_rosbag(request):
             'audio_transcript': transcript,
             'booklist_data': booklist_data,
             'annotation_data': annotation_data,
+            'ai_records': ai_records,
             'message': 'File already processed'
         })
     
@@ -186,6 +251,7 @@ def process_rosbag(request):
             'audio_transcript': transcript,
             'booklist_data': booklist_data,
             'annotation_data': annotation_data,
+            'ai_records': ai_records,
             'speaker_data': speaker_data,
             'message': 'Processing complete'
         })
@@ -203,109 +269,171 @@ def gpt_chat(request):
         audio_transcript = data.get("audio_transcript")
         Axiinfo = data.get("Axeinfo")
         Codebook = data.get("Codebook")
+        assistant_mode = data.get("assistant_mode", "remote")
+        context_routes = data.get("context_routes", {})
+        fallback_consent = data.get("fallback_consent")
+        requested_mode = assistant_mode
+        hybrid_selection = assistant_mode == "hybrid"
+        accepted_local_to_remote = (
+            isinstance(fallback_consent, dict)
+            and fallback_consent.get("from") == "local"
+            and fallback_consent.get("to") == "remote"
+            and fallback_consent.get("user_consented") is True
+        )
+        accepted_remote_to_local = (
+            isinstance(fallback_consent, dict)
+            and fallback_consent.get("from") == "remote"
+            and fallback_consent.get("to") == "local"
+            and fallback_consent.get("user_consented") is True
+        )
+        if accepted_local_to_remote:
+            requested_mode = "local"
+        elif accepted_remote_to_local:
+            requested_mode = "remote"
 
 
         if not message:
             return JsonResponse({"error": "No message provided"}, status=400)
         if not audio_transcript:
             return JsonResponse({"error": "No audio transcript provided"}, status=400)
+        if assistant_mode not in {"remote", "local", "hybrid"}:
+            return JsonResponse({"error": "Invalid assistant mode"}, status=400)
 
-        client = OpenAI(api_key=openai_api_key)
+        if assistant_mode == "hybrid":
+            required_contexts = {"transcript", "frames", "codebook", "timeline"}
+            if set(context_routes) != required_contexts or any(
+                target not in {"remote", "local"}
+                for target in context_routes.values()
+            ):
+                return JsonResponse(
+                    {"error": "Invalid hybrid context routes"}, status=400
+                )
 
-        Axiinfo_str = json.dumps(Axiinfo, indent=2)
+            selected_targets = set(context_routes.values())
+            if "remote" in selected_targets and not openai_api_key:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "Remote AI is unavailable because the OpenAI API key is "
+                            "empty. Would you like to switch to Local?"
+                        ),
+                        "assistant_mode": "hybrid",
+                        "can_fallback_to_local": True,
+                    },
+                    status=503,
+                )
+            if len(selected_targets) == 1:
+                # A homogeneous hybrid selection needs no cross-provider
+                # orchestration; run it through the selected provider.
+                assistant_mode = selected_targets.pop()
+            else:
+                # Do not silently send locally routed data to the remote
+                # provider until a mixed-context orchestrator is available.
+                return JsonResponse(
+                    {
+                        "error": "Mixed Local/Remote hybrid routing is not implemented yet.",
+                        "assistant_mode": "hybrid",
+                    },
+                    status=501,
+                )
 
+        common_context = {
+            "transcriptContext": audio_transcript,
+            "frameContext": video_frames,
+            "codebookContext": Codebook,
+            "timelineContext": Axiinfo,
+        }
+        if assistant_mode == "local":
+            assistant = create_local_ai(
+                **common_context,
+                checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
+            )
+            try:
+                response_text = assistant.respond(message, gpt_history)
+            except LocalInferenceError as error:
+                remote_configured = bool(openai_api_key)
+                if hybrid_selection:
+                    error_message = (
+                        "Local AI is unavailable. Choose a local model before starting "
+                        "Docker, and check that its .gguf file is in the models/ directory."
+                    )
+                else:
+                    error_message = str(error) or "The local language model is not connected."
+                return JsonResponse(
+                    {
+                        "error": (
+                            f"{error_message} "
+                            + ("Would you like to switch to Remote?" if remote_configured else "")
+                        ),
+                        "assistant_mode": "local",
+                        "can_fallback_to_remote": remote_configured,
+                    },
+                    status=501,
+                )
+        else:
+            if not openai_api_key:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "Remote AI is unavailable because the OpenAI API key is "
+                            "empty. Would you like to switch to Local?"
+                        ),
+                        "assistant_mode": "remote",
+                        "can_fallback_to_local": True,
+                    },
+                    status=503,
+                )
+            try:
+                assistant = RemoteAPI(
+                    **common_context,
+                    APIKey=openai_api_key,
+                )
+                response_text = assistant.respond(message, gpt_history)
+            except RemoteAuthenticationError:
+                return JsonResponse(
+                    {
+                        "error": (
+                            "Remote AI is unavailable because the OpenAI API key is "
+                            "invalid. Would you like to switch to Local?"
+                        ),
+                        "assistant_mode": "remote",
+                        "can_fallback_to_local": True,
+                    },
+                    status=503,
+                )
+            except RemoteResponseError as error:
+                return JsonResponse(
+                    {"error": str(error), "assistant_mode": "remote"},
+                    status=502,
+                )
+            except (APIConnectionError, APIStatusError, TimeoutError) as error:
+                return JsonResponse(
+                    {
+                        "error": (
+                            f"Remote AI is unavailable: {error}. "
+                            "Would you like to switch to Local?"
+                        ),
+                        "assistant_mode": "remote",
+                        "can_fallback_to_local": True,
+                    },
+                    status=503,
+                )
 
-        prompt = f"""
-        User want you based on the audio_transcript and video frames answer some qustion 
-        Now, based on this transcript and frames, answer the following question:
-
-        {message}
-        If the question not relative with audio and video, you dont need to watch the following data.
-        Here is the audio transcription:
-        {audio_transcript}
-        Here is the video frames
-        """
-
-        chat_completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": f"""
-                    You are an assistant that can manipulate timelines. Based on the audio transcript, here are the actions you can perform:
-                    
-                    1. Add a new `axi`: Method: `addAxi`, Parameters: `axisId` (integer),'axisName' (string),'axistype' (string).
-                    2. Add a new `block`: Method: `addBlock`, Parameters: `axisId` (integer), `start` (float), `end` (float), `text` (string).
-                    3. Delete a old 'block':Mthod:'deleteBlock', Parameters: `axisId` (integer), 'blockIndex' (integer).
-                    4. Delete a old 'axi':Mthod:'deleteAxi', Parameters: `axisId` (integer).
-                    When you need to perform multiple actions to complete the task, return the response in the following format:
-                    {{
-                      "type": "instruction",
-                      "steps": [
-                        {{
-                          "action": "addAxi",
-                          "parameters": 
-                          {{
-                            "axisId": 1,
-                            "axisName": Greeting
-                            "axistype": Topic annotate
-                            }}
-                        }},
-                        {{
-                          "action": "addBlock",
-                          "parameters": {{
-                            "axisId": 1,
-                            "start": 10,
-                            "end": 20,
-                            "text": "This is a new block"
-                          }}
-                        }}
-                        {{
-                          "action": "deleteBlock",
-                          "parameters": {{
-                            "axisId": 1,
-                            "blockIndex": 0
-                          }}
-                        }}
-                        {{
-                          "action": "deleteAxi",
-                          "parameters": {{
-                            "axisId": 1
-                          }}
-                        }}
-                      ]
-                    }}
-
-                    axis Name are normally the topic of this axi.
-                    Remove axi could remove all blocks in the axi.
-                    Axi type always equal "Type-in"
-                    Always create steps, even there only one step.
-                    The newest axi id will be current largest id+1.
-                    Overlap with other block in one axi will lead to error.
-                    If the response is a normal conversation, return the plain text as usual.
-                    Here is the current Axi information, you can consider axiId based on this:
-
-                    {Axiinfo_str}
-
-                    Here is the Codebook predefined by user:
-
-                    {Codebook}
-                    
-                    Here is previous chat history between you and user:
-
-                    {gpt_history}
-
-
-                    """,
-                    
-                },
-                {"role": "user", "content": [prompt,*map(lambda x: {"image": x}, video_frames[0::max(1, len(video_frames) // 50)][:50])]}
-            ],
-        )
-        
-        response_text = chat_completion.choices[0].message.content
         gpt_history = gpt_history + message + response_text
-        return JsonResponse({"response": response_text})
+        ai_record = build_ai_record(
+            assistant=assistant,
+            requested_mode=requested_mode,
+            actual_mode=assistant_mode,
+            response_text=response_text,
+            context_routes=context_routes,
+        )
+        return JsonResponse(
+            {
+                "response": response_text,
+                "assistant_mode": assistant_mode,
+                "ai_record": ai_record,
+            }
+        )
     
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -384,6 +512,10 @@ def save_annotation(request):
     if request.method == 'POST':
         annotation_name = request.data.get('annotation_name')
         annotation_data = request.data.get('annotation_data')
+        ai_records = request.data.get('ai_records', [])
+
+        if not isinstance(ai_records, list):
+            return JsonResponse({'error': 'Invalid AI records format'}, status=400)
 
         try:
             annotation_list_str = json.dumps(annotation_data)
@@ -392,8 +524,8 @@ def save_annotation(request):
             return JsonResponse({'error': 'Invalid JSON format'}, status=400)
 
         # Save annotation data to a new CSV file
-        annotation_path = '/app/datas/annotation/'
-        file_path = os.path.join(annotation_path, f'{annotation_name}.csv')
+        os.makedirs(ANNOTATION_PATH, exist_ok=True)
+        file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
 
         try:
             with open(file_path, 'w', newline='') as csvfile:
@@ -413,7 +545,21 @@ def save_annotation(request):
                             'text': block['text']
                         })
 
-            return JsonResponse({'message': 'Annotation data saved successfully'}, status=200)
+            with open(ai_records_file_path(annotation_name), 'w') as record_file:
+                json.dump(
+                    {
+                        'schema_version': 1,
+                        'annotation_name': annotation_name,
+                        'ai_runs': ai_records,
+                    },
+                    record_file,
+                    indent=2,
+                )
+
+            return JsonResponse(
+                {'message': 'Annotation data and AI records saved successfully'},
+                status=200,
+            )
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=500)
     else:
@@ -434,4 +580,3 @@ def get_annotation(request):
         return Response({'error': 'File not found'}, status=404)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
-

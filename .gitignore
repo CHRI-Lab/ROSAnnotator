@@ -9,3 +9,5 @@ db.sqlite3
 rosbag-data*/
 processed*/
 datas/
+models/
+*.sh text eol=lf

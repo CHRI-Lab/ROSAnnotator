@@ -11,6 +11,7 @@ import {
   DialogContent,
   DialogContentText,
   Typography,
+  Tabs,
   TextField,
 } from "@mui/material";
 import { styled } from "@mui/system";
@@ -29,15 +30,17 @@ import {
   deleteAutosave,
   AutosaveScope,
 } from "../Autosave/autosaveUtils";
+import { AIInstruction, AIRecord } from "../../types/aiRecords";
+import { applyAIInstruction } from "./aiInstruction";
 
 let globalAxisId = 1;
 
 interface TimelineProps {
-  rosBagFileName: string;
-  bookListFileName: string;
   duration: number;
   played: number;
   onSeek: (time: number) => void;
+  rosBagFileName: string;
+  bookListFileName: string;
   booklist: any;
   annotationData: any;
   speakerData?: Array<any>;
@@ -47,8 +50,14 @@ interface TimelineProps {
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
   switchingChunk?: boolean;
   onAxesUpdate: (axes: any) => void;
-  instruction: any;
+  instruction: AIInstruction | null;
+  aiRecords: AIRecord[];
+  onSave: () => void;
 }
+
+type PendingDeletion =
+  | { kind: "block"; axisId: number; blockIndex: number }
+  | { kind: "axis"; axisId: number };
 
 const MainContainer = styled(Paper)(({ theme }) => ({
   display: "flex",
@@ -101,11 +110,11 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
 
 
 const Timeline: React.FC<TimelineProps> = ({
-  rosBagFileName,
-  bookListFileName,
   duration,
   played,
   onSeek,
+  rosBagFileName,
+  bookListFileName,
   booklist,
   annotationData,
   speakerData,
@@ -116,6 +125,8 @@ const Timeline: React.FC<TimelineProps> = ({
   autosaveScope,
   onAutosaveReady,
   switchingChunk = false,
+  aiRecords,
+  onSave,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval, setMarkInterval] = useState(1);
@@ -126,6 +137,10 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState("");
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
+  const [pendingDeletion, setPendingDeletion] =
+    useState<PendingDeletion | null>(null);
+  const lastExecutedInstruction = useRef<AIInstruction | null>(null);
+
   const { axes, setAxes } = useContext(AxesContext)!;
 
   // SAVE FUNCTIONALITY
@@ -166,10 +181,11 @@ const Timeline: React.FC<TimelineProps> = ({
   }, [restoredAxes, markSynced]);
 
   useEffect(() => {
-    if (instruction) {
-      handleExecuteInstruction(instruction);
+    if (instruction && lastExecutedInstruction.current !== instruction) {
+      lastExecutedInstruction.current = instruction;
+      setAxes((currentAxes) => applyAIInstruction(currentAxes, instruction));
     }
-  }, [instruction]);
+  }, [instruction, setAxes]);
 
   useEffect(() => {
     if (onAxesUpdate) {
@@ -321,7 +337,6 @@ const Timeline: React.FC<TimelineProps> = ({
     setSeekTime(played);
   }, [played]);
 
-
   // Prompts user for annotation file name, with prefilled defined filename set.
   const handleOpenSaveDialog = () => {
     // Pre-fill with the existing auto-generated name as a sensible default
@@ -466,21 +481,36 @@ const Timeline: React.FC<TimelineProps> = ({
     );
   };
   const handleDeleteBlock = (axisId: number, blockIndex: number) => {
-    setAxes(
-      axes.map((axis) => {
-        if (axis.id === axisId) {
-          const newBlocks = axis.blocks.filter(
-            (_, index) => index !== blockIndex
-          );
-          return { ...axis, blocks: newBlocks };
-        }
-        return axis;
-      })
-    );
+    setPendingDeletion({ kind: "block", axisId, blockIndex });
   };
 
   const handleDeleteAxis = (axisId: number) => {
-    setAxes((axes) => axes.filter((axis) => axis.id !== axisId));
+    setPendingDeletion({ kind: "axis", axisId });
+  };
+
+  const confirmDeletion = () => {
+    if (!pendingDeletion) return;
+
+    if (pendingDeletion.kind === "axis") {
+      setAxes((currentAxes) =>
+        currentAxes.filter((axis) => axis.id !== pendingDeletion.axisId)
+      );
+    } else {
+      setAxes((currentAxes) =>
+        currentAxes.map((axis) =>
+          axis.id === pendingDeletion.axisId
+            ? {
+                ...axis,
+                blocks: axis.blocks.filter(
+                  (_, index) => index !== pendingDeletion.blockIndex
+                ),
+              }
+            : axis
+        )
+      );
+    }
+
+    setPendingDeletion(null);
   };
 
   const handleTypeChange = (
@@ -618,27 +648,55 @@ const Timeline: React.FC<TimelineProps> = ({
           <Button onClick={() => setIsErrorDialogOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
-    <Dialog open={isSaveDialogOpen} onClose={() => setIsSaveDialogOpen(false)}>
-      <DialogTitle>Name Your Annotation</DialogTitle>
-      <DialogContent>
-        <DialogContentText>
-          Enter a name to save this annotation under. You can reuse this name later to overwrite it, or choose a new one to save a separate version.
-        </DialogContentText>
-        <TextField
-          autoFocus
-          margin="dense"
-          label="Annotation Name"
-          fullWidth
-          variant="outlined"
-          value={annotationName}
-          onChange={(e) => setAnnotationName(e.target.value)}
-        />
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={() => setIsSaveDialogOpen(false)}>Cancel</Button>
-        <Button onClick={handleConfirmSave} variant="contained">Save</Button>
-      </DialogActions>
-    </Dialog>
+<Dialog
+  open={isSaveDialogOpen}
+  onClose={() => setIsSaveDialogOpen(false)}
+>
+  <DialogTitle>Name Your Annotation</DialogTitle>
+  <DialogContent>
+    <DialogContentText>
+      Enter a name to save this annotation under. You can reuse this name later
+      to overwrite it, or choose a new one to save a separate version.
+    </DialogContentText>
+    <TextField
+      autoFocus
+      margin="dense"
+      label="Annotation Name"
+      fullWidth
+      variant="outlined"
+      value={annotationName}
+      onChange={(event) => setAnnotationName(event.target.value)}
+    />
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={() => setIsSaveDialogOpen(false)}>Cancel</Button>
+    <Button onClick={handleConfirmSave} variant="contained">
+      Save
+    </Button>
+  </DialogActions>
+</Dialog>
+
+<Dialog
+  open={pendingDeletion !== null}
+  onClose={() => setPendingDeletion(null)}
+>
+  <DialogTitle>
+    {pendingDeletion?.kind === "axis"
+      ? "Delete annotation timeline?"
+      : "Delete annotation block?"}
+  </DialogTitle>
+  <DialogContent>
+    <DialogContentText>
+      This action cannot be undone. Are you sure you want to continue?
+    </DialogContentText>
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={() => setPendingDeletion(null)}>Cancel</Button>
+    <Button onClick={confirmDeletion} color="error" variant="contained">
+      Delete
+    </Button>
+  </DialogActions>
+</Dialog>
       <ControlsContainer>
         <Button onClick={handleOpenSaveDialog} variant="contained">
           Save and Send Data
