@@ -15,13 +15,16 @@ RUN apt-get update \
 
 # Keep the existing published base image compatible with the versions tested
 # with ROSAnnotator. These pins should also be included in the next base image.
-RUN /root/conda/envs/ros_env/bin/python -m pip install \
-    --no-cache-dir \
-    "huggingface_hub==0.24.6" \
-    "speechbrain==1.0.0" \
-    "torch==2.5.1" \
-    "torchvision==0.20.1" \
-    "torchaudio==2.5.1"
+ARG INSTALL_RUNTIME_PINS=1
+RUN if [ "${INSTALL_RUNTIME_PINS}" = "1" ]; then \
+      /root/conda/envs/ros_env/bin/python -m pip install \
+        --no-cache-dir \
+        "huggingface_hub==0.24.6" \
+        "speechbrain==1.0.0" \
+        "torch==2.5.1" \
+        "torchvision==0.20.1" \
+        "torchaudio==2.5.1"; \
+    fi
 
 WORKDIR /app
 
