@@ -1,16 +1,6 @@
 """
 Complete autosave test suite based on functional requirements.
 
-API contract notes (verified against rosbag_processing/autosave.py):
-  - check_autosave returns: exists, bag_filename, booklist_filename,
-    annotation_filename, annotation_name, saved_at, axis_count,
-    block_count, recovered_from_backup
-  - 'saved_at' is the save timestamp. It prefers the client-supplied value
-    (browser-stamped, carries a local offset) and falls back to a
-    timezone-aware server value. It is NOT a naive local string.
-  - Idempotency lives in the save_autosave view, not in write_autosave().
-    Unchanged state returns {'saved': False, 'unchanged': True}.
-
 Part A: Autosave Writing
 Part B: Detection and Restore
 Part C: Clearing on Real Save
@@ -41,6 +31,50 @@ from rosbag_processing.autosave import (
 # ============================================================================
 # Core Functional Tests
 # ============================================================================
+
+class TestCachedResultsNeverOverwriteManualSave(TestCase):
+    """Test list: "results cached - should not overwrite manually saved
+    results". autosave.py's own docstring guarantees this by naming
+    convention (autosaves are *.autosave.json, manual saves are *.csv),
+    but that guarantee was never actually exercised until now: this
+    writes a real .csv alongside an autosave and checks it survives
+    untouched, no matter how many autosave writes happen.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+
+    def test_writing_autosave_does_not_touch_a_same_stem_csv(self):
+        """A manually-saved CSV with the same bag stem must be untouched by
+        any number of autosave writes for that bag."""
+        csv_path = os.path.join(self.temp_dir, 'test.csv')
+        original_csv_content = 'axis,start,end,code\nSpeech,0.0,5.0,greeting\n'
+        with open(csv_path, 'w') as f:
+            f.write(original_csv_content)
+
+        payload = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('test.bag', payload)
+            write_autosave('test.bag', dict(payload, annotation_name='v2'))
+            write_autosave('test.bag', dict(payload, annotation_name='v3'))
+
+        with open(csv_path) as f:
+            self.assertEqual(f.read(), original_csv_content,
+                "A manually-saved CSV must never be modified by autosave writes")
+
+    def test_autosave_suffix_cannot_collide_with_csv_namespace(self):
+        """The two file families must be structurally distinct, not just
+        distinct by convention -- this backs the guarantee above."""
+        from rosbag_processing.autosave import AUTOSAVE_SUFFIX, BACKUP_SUFFIX
+        self.assertFalse(AUTOSAVE_SUFFIX.endswith('.csv'))
+        self.assertFalse(BACKUP_SUFFIX.endswith('.csv'))
+
 
 class Test1_ModifyAndWait(TestCase):
     """Scenario 1: Modify annotation, wait for interval, autosave writes latest state."""
@@ -271,7 +305,9 @@ class Test6_SelectRestoreRestoresAllFields(TestCase):
 
 
 class Test7_SelectDiscardRemovesRecovery(TestCase):
-    """Scenario 7: Select discard - recovery data removed."""
+    """Scenario 7: Select discard - recovery data removed, main annotation
+    loads unchanged.
+    """
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -293,11 +329,36 @@ class Test7_SelectDiscardRemovesRecovery(TestCase):
 
             self.assertIsNone(read_autosave('test.bag'))
 
+    def test_discard_leaves_main_annotation_csv_untouched(self):
+        """The "main annotation loads unchanged" half of the scenario:
+        discarding the autosave must not delete or modify a real,
+        already-saved annotation CSV for the same bag."""
+        csv_path = os.path.join(self.temp_dir, 'test.csv')
+        csv_content = 'axis,start,end,code\nSpeech,0.0,5.0,greeting\n'
+        with open(csv_path, 'w') as f:
+            f.write(csv_content)
+
+        payload = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'axis1', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('test.bag', payload)
+            delete_autosave('test.bag')
+
+        with open(csv_path) as f:
+            self.assertEqual(f.read(), csv_content,
+                "Discarding the autosave must not affect the saved CSV")
+
 
 class Test8_WriteFailureNoDataLoss(TestCase):
     """Scenario 8: Write failure - report error without losing in-memory data."""
 
     def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
         self.client = Client()
 
     def test_write_failure_returns_error(self):
@@ -317,9 +378,51 @@ class Test8_WriteFailureNoDataLoss(TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertIn('error', response.json())
 
+    def test_write_failure_preserves_previously_saved_state(self):
+        """"Without losing in-memory annotations" also means: whatever was
+        successfully saved before the failure must still be exactly what
+        read_autosave returns afterwards -- the failed attempt must not
+        corrupt or erase the last good save."""
+        good_payload = {
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'good_state', 'type': 'select', 'blocks': [
+                {'start': 0.0, 'end': 5.0, 'code': 'kept'}
+            ]}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            first = self.client.post(
+                '/api/autosave/save/',
+                data=json.dumps(good_payload),
+                content_type='application/json',
+            )
+            self.assertTrue(first.json()['saved'])
+
+            with patch('rosbag_processing.autosave.write_autosave',
+                       side_effect=OSError('disk full')):
+                failed = self.client.post(
+                    '/api/autosave/save/',
+                    data=json.dumps({
+                        'bag_filename': 'test.bag',
+                        'axes': [{'name': 'lost_edit', 'type': 'select', 'blocks': []}],
+                        'saved_at': '2024-01-01T12:05:00+11:00',
+                    }),
+                    content_type='application/json',
+                )
+            self.assertEqual(failed.status_code, 500)
+
+            still_there = read_autosave('test.bag')
+
+        self.assertIsNotNone(still_there)
+        self.assertEqual(still_there['axes'][0]['name'], 'good_state')
+        self.assertEqual(still_there['axes'][0]['blocks'][0]['code'], 'kept')
+
 
 class Test9_AtomicWriteProtection(TestCase):
-    """Scenario 9: Crash during write - previous valid cache readable."""
+    """Scenario 9: Crash during write - previous valid cache readable, no
+    partially written cache is treated as valid.
+    """
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -349,6 +452,49 @@ class Test9_AtomicWriteProtection(TestCase):
                 backup_data = json.load(f)
 
             self.assertEqual(backup_data['axes'][0]['name'], 'axis1')
+
+    def test_stray_tmp_file_is_ignored_when_no_primary_exists(self):
+        """The "no partially written cache is treated as valid" half of
+        this scenario: a dangling .autosave-*.tmp file left behind by a
+        write that crashed before os.replace() could run must never be
+        surfaced as recoverable data."""
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            os.makedirs(self.temp_dir, exist_ok=True)
+            stray_tmp = os.path.join(self.temp_dir, '.autosave-abc123.tmp')
+            with open(stray_tmp, 'w') as f:
+                json.dump({
+                    'schema_version': 1,
+                    'bag_filename': 'test.bag',
+                    'axes': [{'name': 'half_written', 'type': 'select', 'blocks': []}],
+                }, f)
+
+            result = read_autosave('test.bag')
+
+        self.assertIsNone(result,
+            "A stray incomplete .tmp file must never be treated as a valid autosave")
+
+    def test_stray_tmp_file_does_not_shadow_a_valid_primary(self):
+        """If a crash leaves a stray .tmp file NEXT TO a completed, valid
+        primary, the valid primary must still be what gets returned -- the
+        incomplete .tmp must never be preferred over it."""
+        good_payload = {
+            'schema_version': 1,
+            'bag_filename': 'test.bag',
+            'axes': [{'name': 'complete_write', 'type': 'select', 'blocks': []}],
+            'saved_at': '2024-01-01T12:00:00+11:00',
+        }
+
+        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+            write_autosave('test.bag', good_payload)
+
+            stray_tmp = os.path.join(self.temp_dir, '.autosave-crashed.tmp')
+            with open(stray_tmp, 'w') as f:
+                f.write('{"incomplete')
+
+            result = read_autosave('test.bag')
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result['axes'][0]['name'], 'complete_write')
 
 
 class Test10_MalformedFileHandling(TestCase):
@@ -503,7 +649,14 @@ class Test12_SpecialCharactersPreserved(TestCase):
 
 
 class Test13_MissingTimestampFallback(TestCase):
-    """Scenario 13: Missing/invalid timestamp - replaced with a safe default."""
+    """Scenario: missing/invalid 'saved_at' timestamp - replaced with a
+    safe server-side default.
+
+    NOTE: this is a different requirement from the "autosave interval"
+    test list item (see module docstring above for why that item is not
+    covered here). This one is specifically about the 'saved_at' field
+    on each save request, not about how often autosave fires.
+    """
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -1429,12 +1582,18 @@ class TestD3_AutosaveFilesNotInLoadableList(TestCase):
     2. Pass: the "Annotation File" column lists only .csv files
 
     This asserts against the real list_filenames endpoint rather than a
-    reimplementation of its filter.
+    reimplementation of its filter. list_filenames() checks three
+    hardcoded real paths (rosbag-data/, booklist/, annotation/) and
+    returns 500 if any is missing, so this test ensures they exist
+    rather than relying on the environment already having them.
     """
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.client = Client()
+        os.makedirs('/app/datas/rosbag-data', exist_ok=True)
+        os.makedirs('/app/datas/booklist', exist_ok=True)
+        os.makedirs('/app/datas/annotation', exist_ok=True)
 
     def test_autosave_not_listed_as_annotation_file(self):
         """list_filenames must not offer .autosave.json or .bak files."""

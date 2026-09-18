@@ -1,14 +1,5 @@
 """
 Complete chunks test suite based on functional requirements.
-Tests to identify actual dev code issues.
-
-Req 14 and Req 16 are intentionally NOT covered here. Both require
-observing frontend interaction sequencing (whether a JS "await" actually
-blocks a click handler, whether a button becomes disabled/pending, how
-many network calls a burst of clicks produces) that a Django backend
-test cannot see. They are covered by manual testing instead -- see the
-manual test plan (Part A/B navigation cases). If the frontend later
-gains Jest/Cypress/Playwright coverage, they belong there, not here.
 """
 
 import json
@@ -137,7 +128,7 @@ class TestInputValidation(TestCase):
     """
 
     def _post_create_chunks(self, chunking_enabled=True, chunk_seconds='__omit__',
-                             duration_mock=3600):
+                            duration_mock=3600):
         payload = {
             'bag_filename': 'test.bag',
             'chunking_enabled': chunking_enabled,
@@ -146,8 +137,8 @@ class TestInputValidation(TestCase):
             payload['chunk_seconds'] = chunk_seconds
 
         with patch('rosbag_processing.chunk_views.read_duration', return_value=duration_mock), \
-             patch('pathlib.Path.is_file', return_value=True), \
-             patch('pathlib.Path.stat') as mock_stat:
+            patch('pathlib.Path.is_file', return_value=True), \
+            patch('pathlib.Path.stat') as mock_stat:
             mock_stat.return_value.st_size = 1234
             mock_stat.return_value.st_mtime_ns = 1234567890
             return self.client.post('/api/chunks/', payload, content_type='application/json')
