@@ -9,13 +9,13 @@ from django.test import SimpleTestCase
 from rest_framework.test import APIRequestFactory
 
 from rosbag_processing.autosave import (
-    save_autosave, load_autosave, discard_autosave,
+    save_autosave, load_autosave, discard_autosave, check_autosave,
 )
 
 
 class ChunkAutosaveTests(SimpleTestCase):
     """Base test class with common setup and utility methods."""
-    
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -38,6 +38,13 @@ class ChunkAutosaveTests(SimpleTestCase):
     def load(self, scope=None):
         """Helper to load autosave data."""
         return load_autosave(self.factory.get('/', {
+            'bag_filename': 'test.bag', **(scope or {}),
+        }))
+
+    def check(self, scope=None):
+        """Helper to check autosave existence/metadata, as the import-page
+        prompt does before offering to restore."""
+        return check_autosave(self.factory.get('/', {
             'bag_filename': 'test.bag', **(scope or {}),
         }))
 
@@ -97,6 +104,95 @@ class BasicChunkAutosaveTests(ChunkAutosaveTests):
         self.assertEqual(self.load(self.scope(0)).data['axes'], [])
 
 
+class RecoveryDetectionTests(ChunkAutosaveTests):
+    """Test list: "when chunking enabled, autosave content present ->
+    before loading, successfully detect presence of autosave content and
+    ask user if they want to load it."
+
+    check_autosave() supports the same (manifest_id, chunk_index) scope
+    as save/load/discard, but nothing previously exercised it for chunk
+    scope -- these tests close that gap.
+    """
+
+    def test_check_detects_existing_chunk_autosave(self):
+        """check_autosave with a chunk scope must report exists=True and
+        return the metadata the restore prompt needs, once that chunk has
+        been saved."""
+        axes = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': 'x'}]}]
+        self.save(axes, self.scope(0))
+
+        response = self.check(self.scope(0))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['exists'])
+
+    def test_check_reports_false_for_chunk_with_no_autosave(self):
+        """A chunk that was never saved must report exists=False -- the
+        prompt must not fall back to another chunk's data, or to the
+        whole-bag (unscoped) autosave, and offer that instead."""
+        response = self.check(self.scope(5))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.data['exists'])
+
+    def test_check_is_scoped_per_chunk_not_shared_across_chunks(self):
+        """Saving chunk 0 must not make chunk 1 report exists=True."""
+        self.save([{'id': 1, 'blocks': []}], self.scope(0))
+
+        chunk0 = self.check(self.scope(0))
+        chunk1 = self.check(self.scope(1))
+
+        self.assertTrue(chunk0.data['exists'])
+        self.assertFalse(chunk1.data['exists'])
+
+    def test_check_is_scoped_per_manifest_not_shared_across_manifests(self):
+        """The same chunk_index under a different manifest_id must be
+        reported separately -- two different recording sessions must not
+        be confused with each other."""
+        manifest2 = str(uuid4())
+
+        self.save([{'id': 1, 'blocks': []}], self.scope(0))
+
+        own_manifest = self.check(self.scope(0))
+        other_manifest = self.check({'manifest_id': manifest2, 'chunk_index': 0})
+
+        self.assertTrue(own_manifest.data['exists'])
+        self.assertFalse(other_manifest.data['exists'])
+
+    def test_check_after_discard_reports_false(self):
+        """Once a chunk's autosave is discarded, checking it again must
+        report exists=False, not stale metadata from before the discard."""
+        self.save([{'id': 1, 'blocks': []}], self.scope(0))
+        self.discard(
+            bag_filename='test.bag',
+            manifest_id=self.manifest_id,
+            chunk_index=0,
+        )
+
+        response = self.check(self.scope(0))
+
+        self.assertFalse(response.data['exists'])
+
+    def test_check_reflects_latest_saved_content_not_first_save(self):
+        """If a chunk was saved, then edited and saved again, the check
+        metadata must reflect the latest state, not the first one --
+        otherwise the restore prompt would undercount blocks."""
+        first = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': 'v1'}]}]
+        second = [{'id': 1, 'blocks': [
+            {'start': 0, 'end': 1, 'text': 'v2'},
+            {'start': 1, 'end': 2, 'text': 'v2_extra'},
+        ]}]
+
+        self.save(first, self.scope(0))
+        self.save(second, self.scope(0))
+
+        response = self.check(self.scope(0))
+
+        self.assertTrue(response.data['exists'])
+        # block_count should reflect the second save's 2 blocks, not the first's 1.
+        self.assertEqual(response.data.get('block_count'), 2)
+
+
 class ConcurrencyTests(ChunkAutosaveTests):
     """Test concurrent and interleaved access patterns."""
 
@@ -105,12 +201,12 @@ class ConcurrencyTests(ChunkAutosaveTests):
         axes1 = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': 'chunk0_v1'}]}]
         axes2 = [{'id': 2, 'blocks': [{'start': 2, 'end': 3, 'text': 'chunk1_v1'}]}]
         axes1_v2 = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': 'chunk0_v2'}]}]
-        
+
         # Interleaved saves
         self.assertEqual(self.save(axes1, self.scope(0)).status_code, 200)
         self.assertEqual(self.save(axes2, self.scope(1)).status_code, 200)
         self.assertEqual(self.save(axes1_v2, self.scope(0)).status_code, 200)
-        
+
         # Each chunk should have its own version
         self.assertEqual(
             self.load(self.scope(0)).data['axes'][0]['blocks'][0]['text'],
@@ -124,7 +220,7 @@ class ConcurrencyTests(ChunkAutosaveTests):
     def test_concurrent_saves_to_different_chunks_with_same_manifest(self):
         """Multiple chunks in same manifest should be independently stored."""
         manifest = {'manifest_id': str(uuid4())}
-        
+
         for chunk_idx in range(5):
             axes = [{'id': chunk_idx, 'blocks': [
                 {'start': 0, 'end': 1, 'text': f'chunk_{chunk_idx}'}
@@ -133,7 +229,7 @@ class ConcurrencyTests(ChunkAutosaveTests):
                 self.save(axes, {**manifest, 'chunk_index': chunk_idx}).status_code,
                 200
             )
-        
+
         # Verify each chunk loaded independently
         for chunk_idx in range(5):
             loaded = self.load({**manifest, 'chunk_index': chunk_idx})
@@ -148,7 +244,7 @@ class ConcurrencyTests(ChunkAutosaveTests):
         for i in range(10):
             axes = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': f'v{i}'}]}]
             self.assertEqual(self.save(axes, self.scope(0)).status_code, 200)
-        
+
         # Only the last save should persist
         loaded = self.load(self.scope(0))
         self.assertEqual(loaded.data['axes'][0]['blocks'][0]['text'], 'v9')
@@ -271,16 +367,16 @@ class IsolationTests(ChunkAutosaveTests):
         """Same chunk index in different manifests should be completely isolated."""
         manifest1 = {'manifest_id': str(uuid4())}
         manifest2 = {'manifest_id': str(uuid4())}
-        
+
         axes1 = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': 'manifest1_data'}]}]
         axes2 = [{'id': 2, 'blocks': [{'start': 2, 'end': 3, 'text': 'manifest2_data'}]}]
-        
+
         self.assertEqual(self.save(axes1, {**manifest1, 'chunk_index': 0}).status_code, 200)
         self.assertEqual(self.save(axes2, {**manifest2, 'chunk_index': 0}).status_code, 200)
-        
+
         loaded1 = self.load({**manifest1, 'chunk_index': 0})
         loaded2 = self.load({**manifest2, 'chunk_index': 0})
-        
+
         self.assertEqual(loaded1.data['axes'][0]['blocks'][0]['text'], 'manifest1_data')
         self.assertEqual(loaded2.data['axes'][0]['blocks'][0]['text'], 'manifest2_data')
 
@@ -289,7 +385,7 @@ class IsolationTests(ChunkAutosaveTests):
         # Save to 'test.bag'
         axes1 = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': 'test_bag'}]}]
         self.assertEqual(self.save(axes1, self.scope(0)).status_code, 200)
-        
+
         # Load from 'other.bag' using different factory call
         axes2 = [{'id': 2, 'blocks': [{'start': 2, 'end': 3, 'text': 'other_bag'}]}]
         response = load_autosave(self.factory.get('/', {
@@ -304,14 +400,14 @@ class IsolationTests(ChunkAutosaveTests):
         for idx in range(3):
             axes = [{'id': idx, 'blocks': [{'start': 0, 'end': 1, 'text': f'chunk_{idx}'}]}]
             self.assertEqual(self.save(axes, self.scope(idx)).status_code, 200)
-        
+
         # Delete chunk 1
         self.discard(
             bag_filename='test.bag',
             manifest_id=self.manifest_id,
             chunk_index=1
         )
-        
+
         # Chunks 0 and 2 should still exist
         self.assertEqual(self.load(self.scope(0)).status_code, 200)
         self.assertEqual(self.load(self.scope(1)).status_code, 404)
@@ -321,18 +417,18 @@ class IsolationTests(ChunkAutosaveTests):
         """Delete with manifest scope should only delete chunks from that manifest."""
         manifest1 = {'manifest_id': str(uuid4())}
         manifest2 = {'manifest_id': str(uuid4())}
-        
+
         # Save to both manifests, chunk 0
         self.save([], {**manifest1, 'chunk_index': 0})
         self.save([], {**manifest2, 'chunk_index': 0})
-        
+
         # Delete manifest1's chunk 0
         self.discard(
             bag_filename='test.bag',
             manifest_id=manifest1['manifest_id'],
             chunk_index=0
         )
-        
+
         # Only manifest1's chunk should be gone
         self.assertEqual(
             self.load({**manifest1, 'chunk_index': 0}).status_code,
@@ -404,10 +500,10 @@ class OverwriteBehaviorTests(ChunkAutosaveTests):
         axes_v2 = [
             {'id': 3, 'blocks': [{'start': 4, 'end': 5, 'text': 'v2_axis3'}]},
         ]
-        
+
         self.assertEqual(self.save(axes_v1, self.scope(0)).status_code, 200)
         self.assertEqual(self.save(axes_v2, self.scope(0)).status_code, 200)
-        
+
         restored = self.load(self.scope(0)).data['axes']
         # Should only have the new data, not merged
         self.assertEqual(len(restored), 1)
@@ -419,7 +515,7 @@ class OverwriteBehaviorTests(ChunkAutosaveTests):
         axes = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': 'data'}]}]
         self.assertEqual(self.save(axes, self.scope(0)).status_code, 200)
         self.assertEqual(self.save([], self.scope(0)).status_code, 200)
-        
+
         restored = self.load(self.scope(0)).data['axes']
         self.assertEqual(len(restored), 0)
 
@@ -432,10 +528,10 @@ class OverwriteBehaviorTests(ChunkAutosaveTests):
             'blocks': [{'start': 0, 'end': 1, 'text': 'full'}]
         }]
         axes_minimal = [{'id': 2, 'blocks': []}]
-        
+
         self.assertEqual(self.save(axes_full, self.scope(0)).status_code, 200)
         self.assertEqual(self.save(axes_minimal, self.scope(0)).status_code, 200)
-        
+
         restored = self.load(self.scope(0)).data['axes']
         self.assertEqual(restored[0]['id'], 2)
         self.assertNotIn('shortcutKey', restored[0])
@@ -496,7 +592,7 @@ class BoundaryValueTests(ChunkAutosaveTests):
 
     def test_manifest_id_special_characters(self):
         """Manifest IDs with special chars should be handled safely."""
-        special_manifest = {'manifest_id': str(uuid4()), 'chunk_index': 0}  # 删除特殊字符部分
+        special_manifest = {'manifest_id': str(uuid4()), 'chunk_index': 0}
         axes = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': 'test'}]}]
         self.assertEqual(self.save(axes, special_manifest).status_code, 200)
         loaded = self.load(special_manifest)
@@ -510,12 +606,12 @@ class ErrorHandlingTests(ChunkAutosaveTests):
         """Failed write should preserve previous autosave, not leave partial state."""
         old_axes = [{'id': 1, 'blocks': [{'start': 0, 'end': 1, 'text': 'old_data'}]}]
         new_axes = [{'id': 2, 'blocks': [{'start': 2, 'end': 3, 'text': 'new_data'}]}]
-        
+
         self.assertEqual(self.save(old_axes, self.scope(0)).status_code, 200)
-        
+
         with patch('rosbag_processing.autosave.os.replace', side_effect=OSError('disk full')):
             response = self.save(new_axes, self.scope(0))
-        
+
         self.assertEqual(response.status_code, 500)
         # Old data should still be there
         self.assertEqual(self.load(self.scope(0)).data['axes'], old_axes)
@@ -534,7 +630,7 @@ class ErrorHandlingTests(ChunkAutosaveTests):
 
     def test_save_with_invalid_json_returns_400(self):
         """Save with invalid JSON should return 400."""
-        response = save_autosave(self.factory.post('/', 
+        response = save_autosave(self.factory.post('/',
             'not valid json',
             content_type='application/json'
         ))

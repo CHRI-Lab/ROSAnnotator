@@ -1,6 +1,26 @@
-version: "2.0"
-
 services:
+  local-llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    entrypoint: /usr/local/bin/start-local-llm
+    volumes:
+      - ./models:/models:ro
+      - ./scripts/start-local-llm.sh:/usr/local/bin/start-local-llm:ro
+    environment:
+      LOCAL_AI_MODEL: ${LOCAL_AI_MODEL:-qwen2.5-0.5b-instruct-q4_k_m}
+    command:
+      - -c
+      - "8192"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - -n
+      - "1024"
+      - --parallel
+      - "1"
+    expose:
+      - "8080"
+
   backend:
     platform: linux/amd64
     build:
@@ -19,6 +39,13 @@ services:
     image: backend:ros-annotator
     container_name: annotator-back
     command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      LOCAL_AI_BASE_URL: http://local-llm:8080/v1
+      LOCAL_AI_MODEL: ${LOCAL_AI_MODEL:-qwen2.5-0.5b-instruct-q4_k_m}
+      LOCAL_AI_CHECKPOINT_PATH: /models/${LOCAL_AI_MODEL:-qwen2.5-0.5b-instruct-q4_k_m}.gguf
+    depends_on:
+      local-llm:
+        condition: service_healthy
 
   frontend:
     build:

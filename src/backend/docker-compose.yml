@@ -1,6 +1,6 @@
-version: "3.11"
 services:
   backend:
+    platform: linux/amd64
     build: .
     volumes:
       - .:/app
