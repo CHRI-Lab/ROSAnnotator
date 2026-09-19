@@ -1,3 +1,4 @@
+import { DataViewContent } from "./DataViewContent";
 import Box from "@mui/material/Box";
 import Typography from "@mui/material/Typography";
 import { SxProps, Theme } from "@mui/material/styles";
@@ -11,7 +12,6 @@ type ViewPanelProps = {
 };
 
 const ViewPanel = ({ view, context, sx }: ViewPanelProps) => {
-  const SelectedView = view.component;
 
   return (
     <Box
@@ -28,7 +28,7 @@ const ViewPanel = ({ view, context, sx }: ViewPanelProps) => {
         <Typography color="primary">{view.label}</Typography>
       </Box>
       <Box flex={1} minHeight={0} overflow="auto">
-        <SelectedView {...context} />
+        <DataViewContent view={view} context={context} />
       </Box>
     </Box>
   );

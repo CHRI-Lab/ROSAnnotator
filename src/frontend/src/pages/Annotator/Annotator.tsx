@@ -13,9 +13,6 @@ import {
   MenuItem,
   Paper,
   Select,
-  Tab,
-  Tabs,
-  TextField,
   Typography,
 } from "@mui/material";
 
@@ -30,14 +27,11 @@ import Chatbox from "../../components/Chatbox";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
 import FrontEndWorkspace from "../../components/FrontEndWorkspace";
 import RightAssistantPanel from "../../components/RightAssistantPanel";
-import StatisticsAnnotation from "../../components/StatisticsAnnotation";
-import StatisticsTier from "../../components/StatisticsTier";
 import Timeline from "../../components/Timeline";
 import {
   applyAIInstruction,
   requiresAIChangeConfirmation,
 } from "../../components/Timeline/aiInstruction";
-import Transcript from "../../components/Transcript";
 import {
   AssistantMode,
   AssistantReply,
@@ -48,6 +42,8 @@ import {
   AIRecord,
   AssistantRequestOptions,
 } from "../../types/aiRecords";
+
+import type { BackendDataView } from "../../components/FrontEndWorkspace/viewTypes";
 
 interface AnnotatorProps {
   rosBagFileName?: string;
@@ -77,7 +73,7 @@ const Annotator = ({
   onAutosaveReady,
 }: AnnotatorProps) => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(data.duration_seconds || 0);
   const [played, setPlayed] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [editMode, setEditMode] = useState(false);
@@ -114,9 +110,7 @@ const Annotator = ({
     });
   };
 
-  const handleTabChange = (_event, newValue) => {
-    setSelectedTab(newValue);
-  };
+  const processingPending = Object.values((data.views || {}) as Record<string, BackendDataView>).some(view => view.status === 'loading');
 
   const handleAxesUpdate = useCallback((updatedAxes) => {
     setAxesData(updatedAxes);
@@ -134,6 +128,7 @@ const Annotator = ({
   };
 
   const handleSaveAnnotations = async () => {
+    if (processingPending) return;
     const annotationData = axesData.map((axis) => ({
       id: axis.id,
       axisType: axis.type,
@@ -176,6 +171,7 @@ const Annotator = ({
     assistantRouting: AssistantRouting,
     options?: AssistantRequestOptions,
   ) => {
+    if (processingPending) return Promise.resolve({ text: "Please wait for annotation data to finish loading.", isError: true } as AssistantReply);
     return fetch("http://localhost:8000/api/gpt_chat/", {
       method: "POST",
       headers: {
@@ -186,6 +182,7 @@ const Annotator = ({
         audio_transcript: data.audio_transcript, 
         Axeinfo: axesData,
         Codebook: bookList,
+        chat_context_id: data.chat_context_id,
         assistant_mode: assistantRouting.mode,
         context_routes: assistantRouting.contextRoutes,
         fallback_consent: options?.fallbackConsent
@@ -250,7 +247,7 @@ const Annotator = ({
                   isError: true,
                 };
               }
-              const updatedAxes = applyAIInstruction(axesData, parsedInstruction);
+              const updatedAxes = applyAIInstruction(axesData, parsedInstruction, duration);
               if (JSON.stringify(updatedAxes) === JSON.stringify(axesData)) {
                 return {
                   text: "The model returned a timeline instruction, but none of its steps could be applied.",
@@ -354,7 +351,7 @@ const Annotator = ({
   const currentChunk = chunkManifest?.chunks?.[currentChunkIndex];
   const handleChunkSelection = (index: number | null | undefined) => {
     if (
-      switchingChunk ||
+      switchingChunk || processingPending ||
       index == null ||
       index === currentChunkIndex ||
       !chunkManifest?.chunks.some((chunk) => chunk.index === index)
@@ -416,6 +413,9 @@ const Annotator = ({
           <FrontEndWorkspace
             context={{
               videoPath: data.video_path,
+              audioPath: data.audio_path,
+              waveformPath: data.waveform_image_path,
+              views: data.views,
               transcript: data.audio_transcript,
               played,
               isPlaying,
@@ -448,7 +448,7 @@ const Annotator = ({
               <Button
                 variant="outlined"
                 onClick={() => handleChunkSelection(currentChunk?.previous_index)}
-                disabled={switchingChunk || currentChunk?.previous_index == null}
+                disabled={switchingChunk || processingPending || currentChunk?.previous_index == null}
                 sx={{ justifySelf: "start" }}
               >
                 ← Previous
@@ -460,7 +460,7 @@ const Annotator = ({
                   <Select
                     value={currentChunkIndex}
                     onChange={(event) => handleChunkSelection(Number(event.target.value))}
-                    disabled={switchingChunk}
+                    disabled={switchingChunk || processingPending}
                     aria-label="Select video chunk"
                   >
                     {chunkManifest.chunks.map((chunk) => (
@@ -479,7 +479,7 @@ const Annotator = ({
               <Button
                 variant="outlined"
                 onClick={() => handleChunkSelection(currentChunk?.next_index)}
-                disabled={switchingChunk || currentChunk?.next_index == null}
+                disabled={switchingChunk || processingPending || currentChunk?.next_index == null}
                 sx={{ justifySelf: "end" }}
               >
                 Next →
@@ -488,7 +488,7 @@ const Annotator = ({
           )}
 
           <Box width="100%" maxWidth={1200} overflow="auto" maxHeight="50vh">
-            <Timeline
+            {processingPending ? <Typography>Preparing annotation data?</Typography> : <Timeline
               key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}
               rosBagFileName={rosBagFileName}
               bookListFileName={bookListFileName}
@@ -510,7 +510,7 @@ const Annotator = ({
               switchingChunk={switchingChunk}
               aiRecords={aiRecords}
               onSave={handleSaveAnnotations}
-            />
+            />}
           </Box>
         </Box>
   
@@ -524,7 +524,7 @@ const Annotator = ({
               />
             ) : (
               <Box padding={2}>
-                <Button onClick={handleOnEdit} variant="contained">
+                <Button onClick={handleOnEdit} disabled={processingPending} variant="contained">
                   Edit
                 </Button>
                 <Booklist bookListData={bookList} />

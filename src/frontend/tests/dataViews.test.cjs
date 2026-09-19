@@ -40,7 +40,7 @@ function context() {
 
 test('registry retains Cassie IDs, labels and renderable component contract', () => {
   assert.deepEqual(Array.from(availableViews, view => view.id), [
-    'video', 'transcript', 'annotations', 'statistics-annotations', 'statistics-tiers',
+    'video', 'transcript', 'annotations', 'statistics-annotations', 'statistics-tiers', 'audio', 'waveform',
   ]);
   for (const view of availableViews) {
     assert.equal(typeof view.label, 'string');
@@ -79,4 +79,18 @@ test('transcript keeps media-local seconds and shared seek callback', () => {
   assert.equal(transcript.props.played, 12);
   assert.equal(transcript.props.isPlaying, false);
   assert.equal(transcript.props.setPlayed, state.onSeek);
+});
+
+
+test('backend availability disables missing or invalid views with reasons', () => {
+  const { viewsWithAvailability } = load('viewRegistry');
+  const states = viewsWithAvailability({
+    video: { status: 'ready', available: true, processed_data: { path: 'video.mp4' } },
+    transcript: { status: 'failed', available: false, processed_data: null, reason: 'No speech' },
+    audio: { status: 'ready', available: true, processed_data: null },
+  });
+  assert.equal(states.find(v => v.id === 'video').available, true);
+  assert.equal(states.find(v => v.id === 'audio').available, false);
+  assert.equal(states.find(v => v.id === 'transcript').reason, 'No speech');
+  assert.equal(states.find(v => v.id === 'waveform').available, false);
 });

@@ -1608,12 +1608,20 @@ class TestD3_AutosaveFilesNotInLoadableList(TestCase):
             write_autosave('test.bag', payload)
             write_autosave('test.bag', dict(payload, annotation_name='v2'))
 
-        with patch('rosbag_processing.autosave.AUTOSAVE_DIR', self.temp_dir):
+        # The listing endpoint has separate input directories; the autosave
+        # directory override alone does not create its Docker-only paths.
+        with open(os.path.join(self.temp_dir, 'saved.csv'), 'w') as stream:
+            stream.write('id,start,end,text\n')
+        filenames = os.listdir(self.temp_dir)
+        with patch('rosbag_processing.views.os.path.isdir', return_value=True), \
+             patch('rosbag_processing.views.os.listdir',
+                   side_effect=lambda directory: filenames if directory == '/app/datas/annotation/' else []):
             response = self.client.get('/api/list_filenames/')
 
         self.assertEqual(response.status_code, 200)
 
         body = json.dumps(response.json())
+        self.assertIn('saved.csv', response.json()['annotation_files'])
         self.assertNotIn('.autosave.json', body,
                          "Autosave files must never be listed as loadable")
 

@@ -112,7 +112,7 @@ const DataViewSelector = ({
         sx={{ marginBottom: 1.5 }}
       >
         {views.map((view) => (
-          <MenuItem key={view.id} value={view.id}>
+          <MenuItem key={view.id} value={view.id} disabled={view.available === false && view.status !== "loading"} title={view.reason || undefined}>
             {view.label}
           </MenuItem>
         ))}

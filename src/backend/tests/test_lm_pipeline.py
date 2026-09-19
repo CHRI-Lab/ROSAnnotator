@@ -21,6 +21,7 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
 
     def make_request(self, **overrides):
         body = {
+            "chat_context_id": "test-context",
             "message": "Annotate the greeting",
             "audio_transcript": "Speaker 1: Hello",
             "Axeinfo": [{"axisId": 1, "axisName": "Topics"}],
@@ -44,8 +45,8 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
         '''select local processing for entire input, nothing should be send through network, even when remote credential is available'''
         from rosbag_processing import views
 
-        views.gpt_history = ""
-        views.video_frames = ["private-frame"]
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["private-frame"]})
         request = self.make_request()
         metadata = {
             "model": {
@@ -89,8 +90,8 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
         '''if user reject local to remote fall back, no remote request is made'''
         from rosbag_processing import views
 
-        views.gpt_history = "existing history"
-        views.video_frames = ["private-frame"]
+        views.cache.set('chat:test-context', {'history': "existing history", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["private-frame"]})
         request = self.make_request(message="Keep this request local")
 
         with patch.object(views, "openai_api_key", "configured-remote-key"), patch.object(
@@ -107,15 +108,15 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
         self.assertEqual(response_data["assistant_mode"], "local")
         self.assertTrue(response_data["can_fallback_to_remote"])
         self.assertIn("Local inference failed.", response_data["error"])
-        self.assertEqual(views.gpt_history, "existing history")
+        self.assertEqual(views.cache.get('chat:test-context')['history'], "existing history")
         remote_api.assert_not_called()
 
     def test_remote_timeout_does_not_start_local_automatically(self):
         '''remote API timeout or unreachable shows failure message and offer local fallback; fallback does not start automatically'''
         from rosbag_processing import views
 
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
         request = self.make_request(
             message="Use the remote provider",
             assistant_mode="remote",
@@ -141,7 +142,7 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
         self.assertIn("remote timed out", response_data["error"])
         self.assertTrue(response_data["can_fallback_to_local"])
         local_ai.assert_not_called()
-        self.assertEqual(views.gpt_history, "")
+        self.assertEqual(views.cache.get('chat:test-context')['history'], "")
 
     def test_multiline_unicode_prompt_round_trips_through_request_and_record(self):
         '''multiline prompt or unicode prompt preserves content without breaking request serialization or audit records.'''
@@ -149,8 +150,8 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
 
         message = "First line\n第二行：café 🤖"
         response_text = "完成\nResult preserved ✅"
-        views.gpt_history = ""
-        views.video_frames = []
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': []})
         request = self.make_request(message=message)
         metadata = {
             "model": {

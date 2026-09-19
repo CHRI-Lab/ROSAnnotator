@@ -1,4 +1,3 @@
-import json
 import logging
 import ssl
 from pathlib import Path
@@ -13,33 +12,12 @@ from rest_framework.response import Response
 
 from .chunks import load_manifest, save_manifest
 from .chunk_processing import process_chunk
-from .data_utils import load_annotation
 from .serializers import InputInspectionSerializer
 
 logger = logging.getLogger(__name__)
 
 
-def annotations_for_chunk(annotation_data, chunk):
-    """Return annotations overlapping a chunk, rebased to chunk-local time."""
-    chunk_start = chunk['start_seconds']
-    chunk_end = chunk['end_seconds']
-    chunk_annotations = []
-
-    for axis in annotation_data or []:
-        blocks = []
-        for block in axis.get('annotationBlocks', []):
-            block_start = block['start']
-            block_end = block['end']
-            if block_end <= chunk_start or block_start >= chunk_end:
-                continue
-            blocks.append({
-                **block,
-                'start': max(block_start, chunk_start) - chunk_start,
-                'end': min(block_end, chunk_end) - chunk_start,
-            })
-        chunk_annotations.append({**axis, 'annotationBlocks': blocks})
-
-    return chunk_annotations
+from .view_metadata import annotations_for_chunk, attach_metadata
 
 
 class ChunkRequestSerializer(InputInspectionSerializer):
@@ -132,6 +110,7 @@ def create_chunks(request):
             source_mtime_ns=bag_path.stat().st_mtime_ns,
             booklist_filename=values.get('booklist_filename'),
             annotation_filename=values.get('annotation_filename'),
+            view_options=values.get('view_options'),
         )
     except ValueError as exc:
         return Response({'error': str(exc)}, status=400)
@@ -163,6 +142,14 @@ def get_chunks(request, manifest_id, chunk_index=None):
 
 @api_view(['POST'])
 def process_chunk_view(request, manifest_id, chunk_index):
+    view_ids = request.data.get('view_ids')
+    if view_ids is not None and (not isinstance(view_ids, list) or not view_ids or
+                                 not all(isinstance(value, str) for value in view_ids)):
+        return Response({'error': 'view_ids must be a nonempty list of view IDs.'}, status=400)
+    if view_ids is not None:
+        from .view_registry import PROCESSORS
+        if not set(view_ids).issubset({p.view_id for p in PROCESSORS}):
+            return Response({'error': 'Unknown view ID.'}, status=400)
     try:
         manifest = load_manifest(manifest_directory(), manifest_id)
     except FileNotFoundError:
@@ -194,6 +181,8 @@ def process_chunk_view(request, manifest_id, chunk_index):
             manifest_id,
             manifest['chunks'][chunk_index],
             processed_root=manifest_directory(),
+            view_options=manifest.get('view_options'),
+            view_ids=view_ids,
         )
     except RuntimeError as exc:
         status_code = status.HTTP_409_CONFLICT if 'already being processed' in str(exc) else 400
@@ -212,31 +201,11 @@ def process_chunk_view(request, manifest_id, chunk_index):
             }, status=503)
         return Response({'error': 'Unable to process chunk.'}, status=500)
 
-    booklist_data = {}
-    booklist_filename = manifest.get('booklist_filename')
-    if booklist_filename:
-        booklist_path = Path('/app/datas/booklist') / booklist_filename
-        try:
-            with booklist_path.open(encoding='utf-8') as stream:
-                booklist_data = json.load(stream)
-        except (OSError, ValueError):
-            return Response({'error': 'Unable to read booklist.'}, status=400)
-
-    annotation_data = None
-    annotation_filename = manifest.get('annotation_filename')
-    if annotation_filename:
-        try:
-            annotation_data = annotations_for_chunk(
-                load_annotation(annotation_filename),
-                manifest['chunks'][chunk_index],
-            )
-        except (OSError, ValueError):
-            return Response({'error': 'Unable to read annotation.'}, status=400)
+    result = attach_metadata(result, manifest.get('booklist_filename'),
+                             manifest.get('annotation_filename'), manifest['chunks'][chunk_index])
     return Response({
         'manifest_id': manifest['id'],
         'bag_filename': manifest['bag_filename'],
         'time_reference': manifest['time_reference'],
-        'booklist_data': booklist_data,
-        'annotation_data': annotation_data,
         **result,
     })

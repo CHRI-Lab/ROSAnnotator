@@ -1,126 +1,164 @@
-# DataView and processing session contracts
+# Data-view processing contracts
 
-This refactor is limited to data views and data processing sessions. The
-frontend compatibility reference is the locally available
-`origin/frontend-pannels-revamp` at `9c713d5`. Its panel layout is not copied;
-its registry and context interfaces are preserved so these views can be used
-by that workspace and by the current Annotator.
+See [the implementation design diagram](design-diagram.md).
 
-## DataView
+## Extension points
 
-`BaseDataView` declares the interface inherited by `VideoDataView`,
-`TranscriptDataView`, `AnnotationDataView`, `AnnotationStatisticsDataView`, and
-`TierStatisticsDataView`.
+Add a `DataViewProcessor` child, register it in `view_registry.PROCESSORS`, and
+add a frontend `BaseDataView` component to `dataViewDefinitions`. No changes to
+`process_views`, the HTTP workflow, the loader, or the tab renderer are required.
 
-| Member | Input | Output |
-| --- | --- | --- |
-| `id`, `label` | — | Stable string identifier and display label |
-| `render` | `ViewPanelContext` | `ReactElement` |
-| `toDefinition` | — | `{ id, label, component: ComponentType<ViewPanelContext> }` |
+The backend parent defines `supported_message_types`, `check_availability`,
+`extract`, `preprocess`, and `serialize`. `dependencies` declare shared inputs;
+the workflow resolves their order. A processor may treat a dependency as optional
+(video remains usable if audio fails). `legacy_fields` adapts existing response
+fields without adding view-specific branches to the workflow.
 
-`ViewPanelContext` carries `videoPath`, `transcript`, `played`, `isPlaying`,
-`onProgress`, `onPlay`, `onPause`, `onSeek`, `onDurationChange`, and `playerRef`.
-All numeric times are seconds within the currently loaded media. A video path
-is relative to the processed-data directory; the player serves it under
-`/processed/`. `playerRef` accepts a player or `null` on unmount. Progress, seek,
-duration, play and pause callbacks return `void`.
+Registered views are audio, video, transcript, waveform, annotations,
+statistics-annotations, and statistics-tiers. Existing five frontend registry IDs,
+named component exports, and the shared playback/seek context remain supported.
+The annotation/statistics processors describe an editable timeline; its live data
+continues to come from `AxesProvider`. Imported annotations are attached after
+processing, and the existing annotation/speaker/recovery initialization is retained.
 
-The parent creates a stable component function for each instance, avoiding
-player remounts when playback state updates. Subclass `render` methods return
-elements; hooks belong inside the React components they render. The existing
-five registry IDs, named component exports, `availableViews`, and type
-re-exports remain available to Cassie's selector and panels. The current
-Transcript ignores the forwarded `isPlaying` prop; the revamped Transcript
-can consume it through the same adapter.
+## Reader and time contract
 
-To add a view, extend `BaseDataView`, implement `id`, `label`, and `render`, and
-add one instance to `dataViewDefinitions`. No selector changes are required.
+`RosbagReader` owns ROS metadata access, iteration, and safe closing. Loading
+inspects topic names, ROS types, and message counts. Unsupported ROS types are
+ignored. The default input is the first nonempty compatible topic in sorted name
+order; `view_options[view_id].topics` can explicitly select one compatible topic.
+No ROS topic name is hard-coded.
 
-## Data processing session
+A finite, positive `header.stamp` inside the bag time range takes precedence.
+Otherwise the bag-record timestamp is used and a warning is recorded. Invalid
+record times are skipped. Chunk filtering follows the selected timestamp, not
+an earlier filter on bag-record time. Chunk ends are exclusive except at the
+final bag endpoint. All output times are seconds relative to the bag or chunk
+origin, and `bag_offset_seconds` allows conversion back to the bag timeline.
 
-`RosbagProcessingSession` and `ChunkProcessingSession` inherit
-`BaseDataProcessingSession`. Callers invoke the parent's
-`process(request: ProcessingRequest) -> ProcessingResult`. Subclasses implement
-hooks instead of overriding `process`.
+Extracted references are stably ordered by timestamp. Equal-time audio packets
+retain their original order; equal-time images use the last image for playback,
+while all original frame timestamps/IDs remain in response metadata. Video frame
+durations follow the normalized timestamps; an initial image gap holds the first
+image, and audio is padded with initial silence. Encoded audio packets are joined
+as a stream, as in the existing MP3 input contract; packet timestamps are not PCM
+sample timestamps. Arbitrary packet loss/gaps are not reconstructed.
 
-| Hook | Input | Output / behavior |
-| --- | --- | --- |
-| `_validate` | `ProcessingRequest` | `None`; raise on invalid input |
-| `_load_cached` | `ProcessingRequest` | `ProcessingResult`, or `None` for a cache miss |
-| `_run` | `ProcessingRequest` | Fresh `ProcessingResult`; abstract |
-| `_finalize` | Request and result | Result with session metadata |
-| `_validate_result` | Result | `None`; reject invalid common fields with `TypeError` |
+Image processors preserve frame IDs and reject mixed nonempty coordinate frames
+or a mismatch with an explicitly requested `frame_id`. They do not silently mix
+coordinate systems or pretend to perform a spatial transformation.
 
-The parent runs these stages in order, skipping `_run` for a cache hit and
-validating the result for both paths. ROS/ML processing errors propagate to
-the existing HTTP adapters, which retain their error/status mappings.
+## Response contract
 
-### Request
+Each `views[view_id]` contains:
 
-- `bag_path`: nonempty string path to the input bag.
-- `processed_root`: output directory; defaults to `/app/processed_data`.
-- `booklist_filename`, `annotation_filename`: optional whole-bag metadata files.
-- `manifest_id`, `chunk`: required for chunk sessions, absent for whole-bag sessions.
-- `chunk`: `index` (nonnegative integer), `start_seconds`, `end_seconds`
-  (finite, nonnegative start and end greater than start), plus optional
-  duration, navigation and status metadata.
-
-The existing `process_chunk(...)` adapter supplies
-`/app/processed_data/chunks` as its default output root. Direct chunk session
-callers should supply that root explicitly. The dataclass fields are frozen;
-callers should also treat the nested chunk dictionary as read-only.
-
-### Result
-
-Every session returns these common fields:
-
-| Field | Type / meaning |
+| Field | Meaning |
 | --- | --- |
-| `video_path` | String, relative to `/app/processed_data` |
-| `audio_path`, `waveform_image_path` | Relative path string, or `None` when unavailable |
-| `audio_transcript` | String in the existing timestamped transcript format |
-| `speaker_data` | List of segments with numeric `start_time`/`end_time`, string `speaker_label`/`text` |
+| `view_id` | Stable registry ID |
+| `status` | `ready`, `unavailable`, or `failed`; frontend additionally uses `loading` |
+| `available` | True only after usable input and processing succeed |
+| `reason` | Explanation for an unavailable/failed view |
+| `selected_topics` | Selected ROS topic names |
+| `duration` | Seconds within the bag or chunk |
+| `time_origin` | `reference`, `bag_offset_seconds`, and `absolute_seconds` |
+| `processed_data` | View-specific JSON, or null when unavailable |
+| `warnings` | Timestamp fallbacks and other nonfatal issues |
 
-Whole-bag sessions also return `booklist_data`, `annotation_data`, and the
-existing `message`. Fresh results save structured speakers alongside the
-transcript; subsequent cache reads return them. Older caches without that
-sidecar return an empty speaker list without rerunning transcription.
+The response preserves `video_path`, `audio_path`, `waveform_image_path`,
+`audio_transcript`, `speaker_data`, `booklist_data`, `annotation_data`, and chunk
+navigation fields. Missing video uses an empty string; missing audio/waveform
+uses null. Media paths remain relative to `/app/processed_data`.
 
-Chunk sessions retain the original chunk fields and `status: "ready"`.
-The chunk HTTP adapter continues to attach manifest information, codebook and
-rebased annotations. Chunk bounds refer to bag start; transcript, speaker and
-annotation positions refer to the current chunk's media. Existing API URLs,
-chunk cache layout, locking and HTTP error handling remain in place.
+A failed view does not abort other views. No available views produces HTTP 200
+with `status: unavailable`, per-view reasons, and
+`error: {code: "no_available_views", message: "..."}`. Invalid HTTP input and
+unreadable bags still use HTTP errors. Optional annotation/codebook read failures
+are attached as warnings while usable media remains available.
 
-Whole-bag video frames/FPS are kept on the session and copied by the HTTP
-adapter to the globals used by existing chat code. This preserves that
-integration; it does not introduce isolated chat state for concurrent users.
+## API and frontend loading
+
+`GET /api/views/` publishes registered IDs and supported ROS types.
+`POST /api/inputs/inspect/` includes topic metadata as well as duration.
+Whole-bag and chunk processing accept optional `view_ids`; omitted means all
+views. `view_options` is accepted for whole-bag requests and stored in chunk
+manifests. For example:
+
+```json
+{"bag_filename":"sample.bag","view_ids":["video"],
+ "view_options":{"video":{"topics":["/camera/color"],"frame_id":"camera"}}}
+```
+
+The frontend discovers the catalog and requests views concurrently. Each request
+owns its view's loading/failure state. Successful video/audio can render before
+transcription finishes. `ViewPanel` refuses to mount unavailable or null-data
+views and contains rendering exceptions. Disabled tabs and notices show reasons;
+a global data error dialog is used only if no usable views are returned.
+
+One media player drives shared playback time and seek callbacks. Video includes
+usable audio; if muxing fails, a companion audio player follows the same clock.
+An audio player supplies the clock for audio-only inputs. The
+annotation editor waits for initial data and recovery to finish, preventing a
+late transcript response from replacing edits. Chunk switching still waits for
+autosave to flush and retains the current editor on failure.
+
+## Cache and migration
+
+Caching lives in `ViewCache`, outside child processors. Keys include resolved bag
+path, size, nanosecond mtime, view ID/version, selected topics, options, chunk
+bounds, and dependency results. Only successful results are cached; failures can
+be retried. Missing artifacts or invalid JSON cause a cache miss. Update a
+processor's `cache_version` when its processing semantics change.
+
+OS file locks serialize identical work and release on worker termination. Unique
+temporary files plus atomic replacement publish results. Per-manifest chunk
+`result.json` files now summarize status; reusable media is stored under
+`views/<cache-key>/`. A different manifest ID can reuse the same processed views.
+Manifest generation itself remains UUID4, so recovery identity semantics have
+not changed in this refactor.
+
+Legacy caches lack source/topic/options identity and are left on disk but are
+not reused automatically. The first load regenerates data into the new cache.
+Existing annotation exports and autosave files retain their layouts and scopes.
+
+Chat frames/history are keyed by a returned `chat_context_id` in Django's cache,
+not request-specific module globals. Deployments with multiple workers should
+configure a shared Django cache backend; the default local-memory cache only
+shares context within one process.
 
 ## Verification
 
-From `src/backend` (standard library only, media operations mocked):
+From `src/backend` with Django/REST framework and HTTP dependencies installed:
 
 ```sh
-python -m unittest tests.test_processing_sessions -v
+python manage.py test rosbag_processing.tests tests.test_processing_sessions tests.test_data_view_processing tests.test_data_view_api tests.test_chunks tests.test_autosave tests.test_chunk_autosave
+```
+
+The reader/workflow tests also run without Django or ROS:
+
+```sh
+python -m unittest tests.test_processing_sessions tests.test_data_view_processing
 ```
 
 From `src/frontend`:
 
 ```sh
 node tests/dataViews.test.cjs
+node tests/dataViewLoading.test.cjs
 node tests/autosave.test.cjs
 npm run build
 ```
 
-The view tests exercise the actual classes and registry with UI/media leaves
-stubbed. They check compatibility, stable component identity, URL generation
-and playback/seek callbacks. Session tests cover fresh/cache equivalence,
-legacy caches, input/output validation, errors and video resource release.
-The Django API tests in `rosbag_processing.tests` require the backend runtime.
+Tests cover partial/total failure, generic extension, source/topic/options/chunk
+cache invalidation, concurrent requests, safe closing, time fallbacks and chunk
+boundaries, frame rejection, API contracts, incremental frontend loading, and
+existing autosave/navigation behavior. ROS decoding, FFmpeg playback, model
+inference, and browser visual validation still require the actual runtime.
 
-At implementation time, 10 session tests, 4 view tests and 4 existing autosave
-tests passed. Vite production bundling also passed. The full frontend build was
-blocked by 18 pre-existing TypeScript diagnostics; comparison against HEAD
-found no added diagnostics. Django/ROS integration and browser media playback
-still require validation in the backend runtime (Django was unavailable and
-the local Docker daemon was not running).
+Initial validation on 2026-09-19: backend 165 passed and 4 pre-existing skips;
+frontend 12 passed; TypeScript and Vite production build passed. After integrating
+origin/main at 88d5eea, backend 231 passed and the production build passed. The
+12 view/loading/autosave frontend tests passed. AI instructions now receive the
+input duration from both callers and reject times outside 0 <= start <= end <=
+duration; all 9 AI time-validation tests and the production build passed after
+this fix. Browser validation was
+blocked by the browser runtime's startup error. No real ROS/ML run was performed.

@@ -1,4 +1,5 @@
 import ReactPlayer from "react-player";
+import { useEffect, useRef } from 'react';
 
 import AnnotationTable from "../AnnotationTable";
 import StatisticsAnnotation from "../StatisticsAnnotation";
@@ -7,7 +8,19 @@ import Transcript from "../Transcript";
 import { BaseDataView } from "./BaseDataView";
 import type { ViewPanelContext } from "./viewTypes";
 
-const VideoContent = ({
+const CompanionAudio = ({ audioPath, played, isPlaying }: ViewPanelContext) => {
+  const player = useRef<ReactPlayer | null>(null);
+  useEffect(() => {
+    if (player.current && Math.abs(player.current.getCurrentTime() - played) > 0.25) {
+      player.current.seekTo(played, 'seconds');
+    }
+  }, [played]);
+  return <ReactPlayer ref={player} url={`/processed/${audioPath}`} playing={isPlaying}
+    width={0} height={0} onReady={instance => instance.seekTo(played, 'seconds')} />;
+};
+
+const VideoContent = (context: ViewPanelContext) => {
+  const {
   videoPath,
   onDurationChange,
   onProgress,
@@ -15,7 +28,8 @@ const VideoContent = ({
   onPlay,
   onPause,
   playerRef,
-}: ViewPanelContext) => (
+  } = context;
+  const player = (
   <ReactPlayer
     ref={playerRef}
     width="100%"
@@ -27,8 +41,12 @@ const VideoContent = ({
     onPause={onPause}
     controls
     playing={isPlaying}
+    onReady={instance => instance.seekTo(context.played, 'seconds')}
   />
-);
+  );
+  return context.audioPath && context.views?.video?.processed_data?.has_audio === false
+    ? <>{player}<CompanionAudio {...context} /></> : player;
+};
 
 const TranscriptContent = ({
   transcript,
@@ -43,6 +61,25 @@ const TranscriptContent = ({
     setPlayed={onSeek}
   />
 );
+
+export class AudioDataView extends BaseDataView {
+  readonly id = 'audio';
+  readonly label = 'Audio';
+  render(context: ViewPanelContext): React.ReactElement {
+    // Video includes audio when available; use one playback source at a time.
+    return context.videoPath
+      ? <span>Audio plays with the video.</span>
+      : <VideoContent {...context} videoPath={context.audioPath || ''} />;
+  }
+}
+
+export class WaveformDataView extends BaseDataView {
+  readonly id = 'waveform';
+  readonly label = 'Waveform';
+  render(context: ViewPanelContext): React.ReactElement {
+    return <img style={{ width: '100%' }} src={`/processed/${context.waveformPath}`} alt="Audio waveform" />;
+  }
+}
 
 // Concrete views inherit the agreed render input/output from BaseDataView.
 export class VideoDataView extends BaseDataView {
@@ -94,6 +131,7 @@ const tierStatistics = new TierStatisticsDataView().toDefinition();
 
 export const dataViewDefinitions = [
   video, transcript, annotations, annotationStatistics, tierStatistics,
+  new AudioDataView().toDefinition(), new WaveformDataView().toDefinition(),
 ];
 
 // Preserve Cassie's existing named component exports.

@@ -5,6 +5,7 @@ import DataViewSelector from "./DataViewSelector";
 import ViewPanel from "./ViewPanel";
 import {
   availableViews,
+  viewsWithAvailability,
   DataViewDefinition,
   ViewPanelContext,
 } from "./viewRegistry";
@@ -72,6 +73,11 @@ const FrontEndWorkspace = ({ context }: FrontEndWorkspaceProps) => {
   >("left");
   const [selections, setSelections] = useState(initialSelections);
   const layout = getGridLayout(panelCount);
+  const views = viewsWithAvailability(context.views);
+  const effectiveSelections = selections.map(selection =>
+    selection === 'video' && context.views?.video?.status !== 'loading' &&
+    context.views?.video?.available === false && context.views?.audio?.available
+      ? 'audio' : selection);
 
   const handleSelectionChange = (panelIndex: number, viewId: string) => {
     setSelections((currentSelections) =>
@@ -86,8 +92,8 @@ const FrontEndWorkspace = ({ context }: FrontEndWorkspaceProps) => {
       <DataViewSelector
         panelCount={panelCount}
         threePanelLargeSide={threePanelLargeSide}
-        selections={selections}
-        views={availableViews}
+        selections={effectiveSelections}
+        views={views}
         onPanelCountChange={setPanelCount}
         onThreePanelLargeSideChange={setThreePanelLargeSide}
         onSelectionChange={handleSelectionChange}
@@ -101,7 +107,7 @@ const FrontEndWorkspace = ({ context }: FrontEndWorkspaceProps) => {
         minHeight={0}
         overflow="hidden"
       >
-        {selections.slice(0, panelCount).map((selection, panelIndex) => (
+        {effectiveSelections.slice(0, panelCount).map((selection, panelIndex) => (
           <ViewPanel
             key={panelIndex}
             view={findView(selection)}

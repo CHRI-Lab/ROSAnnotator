@@ -59,6 +59,8 @@ class ProcessingRequest:
     annotation_filename: Optional[str] = None
     manifest_id: Optional[str] = None
     chunk: Optional[ChunkSpec] = None
+    view_options: Optional[dict] = None
+    view_ids: Optional[List[str]] = None
 
 
 class ProcessingError(Exception):

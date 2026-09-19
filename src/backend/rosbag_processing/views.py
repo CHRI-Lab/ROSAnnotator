@@ -1,9 +1,11 @@
-from .data_utils import *
+from .data_utils import get_rosbag_duration, load_annotation, transcribe_audio_to_srt
+from django.core.cache import cache
+from django.conf import settings
+from uuid import uuid4
 import json
 import os
 from django.http import JsonResponse
 from datetime import datetime, timezone
-from uuid import uuid4
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -22,8 +24,6 @@ from .ai_assistant import (
 
 load_dotenv()
 
-gpt_history = ""
-video_frames = []
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 ROSBAG_DATA_DIR = '/app/datas/rosbag-data/'
@@ -45,7 +45,10 @@ def inspect_input(request):
         )
 
     try:
-        duration_seconds = round(get_rosbag_duration(bag_filepath), 3)
+        from .rosbag_reader import RosbagReader
+        with RosbagReader(bag_filepath) as reader:
+            duration_seconds = round(reader.duration, 3)
+            topics = list(reader.topics.values())
     except Exception as exc:
         return Response(
             {'error': f'Unable to read ROSBag duration: {str(exc)}'},
@@ -57,6 +60,7 @@ def inspect_input(request):
         'duration_seconds': duration_seconds,
         'duration_minutes': round(duration_seconds / 60, 3),
         'supports_chunking': duration_seconds > 0,
+        'topics': topics,
     })
 ANNOTATION_PATH = "/app/datas/annotation/"
 
@@ -120,31 +124,49 @@ def process_rosbag(request):
     from .processing_sessions import ProcessingError, ProcessingRequest
     from .rosbag_session import RosbagProcessingSession
 
-    global video_frames, video_fps
-    bag_filename = request.data.get('bag_filename')
-    if not bag_filename:
+    if not request.data.get('bag_filename'):
         return Response({'error': 'bag_filename is required'}, status=400)
+    serializer = InputInspectionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    bag_filename = serializer.validated_data['bag_filename']
     session = RosbagProcessingSession()
     try:
         result = session.process(ProcessingRequest(
             bag_path=os.path.join(ROSBAG_DATA_DIR, bag_filename),
+            processed_root=getattr(settings, 'PROCESSED_DATA_DIR', '/app/processed_data'),
             booklist_filename=request.data.get('booklist_filename'),
             annotation_filename=request.data.get('annotation_filename'),
+            view_options=serializer.validated_data['view_options'],
+            view_ids=serializer.validated_data.get('view_ids'),
         ))
     except ProcessingError as exc:
         return Response({'error': str(exc)}, status=exc.status_code)
     except Exception as exc:
         return Response({'error': str(exc)}, status=500)
     result['ai_records'] = load_ai_records(request.data['annotation_filename']) if request.data.get('annotation_filename') else []
-    video_frames, video_fps = session.video_frames, session.video_fps
+    selected_views = serializer.validated_data.get('view_ids')
+    if result.get('video_path') and (selected_views is None or 'video' in selected_views):
+        context_id = str(uuid4())
+        cache.set('chat:' + context_id, {'frames': session.video_frames[::max(1, len(session.video_frames) // 50)][:50], 'history': ''}, timeout=86400)
+        result['chat_context_id'] = context_id
     return Response(result)
+
+
+@api_view(['GET'])
+def view_catalog(request):
+    from .view_registry import PROCESSORS
+    return Response({'views': [{'view_id': p.view_id,
+                               'supported_message_types': p.supported_message_types}
+                              for p in PROCESSORS]})
 
 
 @api_view(['POST'])
 def gpt_chat(request):
-    global gpt_history
     try:
         data = json.loads(request.body)
+        context_id = str(data.get('chat_context_id') or '')
+        context = cache.get('chat:' + context_id, {'frames': [], 'history': ''})
+        video_frames, gpt_history = context['frames'], context['history']
         message = data.get("message")
         audio_transcript = data.get("audio_transcript")
         Axiinfo = data.get("Axeinfo")
@@ -299,7 +321,8 @@ def gpt_chat(request):
                     status=503,
                 )
 
-        gpt_history = gpt_history + message + response_text
+        if context_id:
+            cache.set('chat:' + context_id, {**context, 'history': gpt_history + message + (response_text or '')}, timeout=86400)
         ai_record = build_ai_record(
             assistant=assistant,
             requested_mode=requested_mode,

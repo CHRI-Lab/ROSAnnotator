@@ -49,9 +49,15 @@ buttons without loading media.
 POST /api/chunks/{manifest_id}/{chunk_index}/process/
 ```
 
-The first request extracts only that ROSBag time range and creates its video,
-audio, waveform, transcript, and speaker data. Later requests return the cached
-`result.json`. Concurrent processing of the same chunk returns HTTP 409.
+The first request processes available views for the selected time range. Optional
+`view_ids` selects individual views; the frontend discovers IDs from
+`GET /api/views/` and loads them concurrently. Failures are isolated in `views`
+with reasons. Repeated requests use the per-view source/topic/options cache;
+concurrent identical work is serialized with an OS lock. Chunk `result.json`
+files summarize status rather than serving as the processing cache.
+
+See [the data-view contract](../../../docs/data-view-processing-contracts.md)
+for timestamp origins, availability, cache migration, and options.
 
 Before switching chunks, the frontend must await the separate auto-save API and
 only call this endpoint after saving succeeds:

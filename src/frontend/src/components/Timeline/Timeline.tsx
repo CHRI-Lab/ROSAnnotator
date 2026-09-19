@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useContext, useRef } from "react";
-import { Droppable, Draggable, DragDropContext, DropResult } from 'react-beautiful-dnd';
+import { DragDropContext, DropResult } from 'react-beautiful-dnd';
 import {
-  Box,
   Button,
   Slider,
   Paper,
@@ -10,8 +9,6 @@ import {
   DialogActions,
   DialogContent,
   DialogContentText,
-  Typography,
-  Tabs,
   TextField,
 } from "@mui/material";
 import { styled } from "@mui/system";
@@ -125,11 +122,9 @@ const Timeline: React.FC<TimelineProps> = ({
   autosaveScope,
   onAutosaveReady,
   switchingChunk = false,
-  aiRecords,
-  onSave,
 }) => {
   const [seekTime, setSeekTime] = useState(played);
-  const [markInterval, setMarkInterval] = useState(1);
+  const [markInterval] = useState(1);
   const [selectedRange, setSelectedRange] = useState<number[]>([
     0,
     0.1 * duration,
@@ -183,9 +178,9 @@ const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => {
     if (instruction && lastExecutedInstruction.current !== instruction) {
       lastExecutedInstruction.current = instruction;
-      setAxes((currentAxes) => applyAIInstruction(currentAxes, instruction));
+      setAxes((currentAxes) => applyAIInstruction(currentAxes, instruction, duration));
     }
-  }, [instruction, setAxes]);
+  }, [instruction, setAxes, duration]);
 
   useEffect(() => {
     if (onAxesUpdate) {
@@ -193,53 +188,10 @@ const Timeline: React.FC<TimelineProps> = ({
     }
   }, [axes, onAxesUpdate]);
 
-  const handleExecuteInstruction = (instruction) => {
-    instruction.steps.forEach((step) => {
-      const { action, parameters } = step;
-
-      switch (action) {
-        case "addAxi":
-          const { axisId, axisName, axistype } = parameters;
-          handleAddAxis_gpt(axisId, axisName, axistype);
-          break;
-
-        case "addBlock":
-          const { axisId: blockAxisId, start, end, text } = parameters;
-          handleCreateBlockFromInstruction(blockAxisId, start, end, text);
-          break;
-
-        case "deleteBlock":
-          const {axisId: deleteAxisId, blockIndex } = parameters;
-          handleDeleteBlock(deleteAxisId, blockIndex);
-          break
-
-        case "deleteAxi":
-          const {axisId: deleteAxiId } = parameters;
-          handleDeleteAxis(deleteAxiId);
-          break
-
-        default:
-          console.error(`Unknown action: ${action}`);
-      }
-    });
-  };
   useEffect(() => {
     console.log("booklist passed to Timeline:", booklist);
   }, [booklist]);
 
-  const handleCreateBlockFromInstruction = (axisId, start, end, text) => {
-    const newBlock = { start, end, text };
-
-    setAxes((prevAxes) =>
-      prevAxes.map((axis) => {
-        if (axis.id === axisId) {
-          const updatedBlocks = [...axis.blocks, newBlock];
-          return { ...axis, blocks: updatedBlocks };
-        }
-        return axis;
-      })
-    );
-  };
 
   useEffect(() => { // marks when unsaved changes are detected
     // Skip flagging unsaved edits on the first render / data load
@@ -424,20 +376,6 @@ const Timeline: React.FC<TimelineProps> = ({
   const handleRangeChange = (_event: Event, newValue: number | number[]) => {
     setSelectedRange(newValue as number[]);
   };
-  const handleAddAxis_gpt = (axisId: number, axisName: string, type: string) => {
-    const newAxis = {
-      id: axisId,  // 从指令中获取的 axis ID
-      type: "Type-in",  // 默认类型可以是 "type-in"，也可以根据传入的 type 决定
-      axisName: axisName || `Axis ${axisId}`,  // 如果没有名称，则生成默认名称
-      blocks: [],  // 新建 axis 时默认没有 block
-      typeName: "",  // 初始化时可以是空字符串，稍后可以赋值
-      shortcutKey: "",  // 如果有需要可以设置快捷键
-    };
-
-    // 将 GPT 指令创建的 axis 添加到 axes 状态中
-    setAxes((prev) => [...prev, newAxis]);
-    globalAxisId = globalAxisId++
-  };
 
   const handleAddAxis = () => {
     setAxes((prev) => [
@@ -611,26 +549,6 @@ const Timeline: React.FC<TimelineProps> = ({
       })
     );
   };
-  const handleMarkIntervalChange = (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    let newValue = parseFloat(event.target.value);
-
-    if (isNaN(newValue)) {
-      newValue = 1;
-    } else {
-      newValue = Math.round(newValue * 10) / 10;
-
-      if (newValue < 0.1) {
-        newValue = 0.1;
-      }
-    }
-
-    setMarkInterval(newValue);
-  };
-
-  const Label = styled(Typography)({});
-
   const totalWidth = (duration / markInterval) * 50;
 
   return (
@@ -785,7 +703,6 @@ const Timeline: React.FC<TimelineProps> = ({
                 blocks={axis.blocks}
                 axisType={axis.type}
                 axisName={axis.axisName || "No Axis Name"}
-                typeName={axis.typeName}
                 booklist={axis.typeName ? booklist[axis.typeName] || [] : []}
                 onSave={(blockIndex, text,start,end) =>
                   handleSave(axis.id, blockIndex, text,start,end)

@@ -67,22 +67,15 @@ class SessionContractTests(unittest.TestCase):
 
 
 class ChunkSessionTests(unittest.TestCase):
-    def test_fresh_and_cached_adapters_preserve_chunk_contract(self):
+    def test_chunk_adapter_preserves_bounds_and_options(self):
         chunk = {'index': 2, 'start_seconds': 60, 'end_seconds': 90,
                  'duration_seconds': 30, 'previous_index': 1, 'next_index': 3}
         expected = artifacts(**chunk, status='ready')
         with tempfile.TemporaryDirectory() as root:
             with patch('rosbag_processing.chunk_processing._process_chunk', return_value=expected) as worker:
-                fresh = process_chunk(Path('example.bag'), 'manifest', chunk, root)
-                worker.assert_called_once_with('example.bag', 'manifest', chunk, root)
-            cache = Path(root) / 'manifest' / '0002' / 'result.json'
-            cache.parent.mkdir(parents=True)
-            cache.write_text(json.dumps(expected), encoding='utf-8')
-            with patch('rosbag_processing.chunk_processing._process_chunk') as worker:
-                cached = process_chunk('example.bag', 'manifest', chunk, root)
-                worker.assert_not_called()
-            self.assertEqual(fresh, cached)
-            self.assertEqual(cached, expected)
+                actual = process_chunk(Path('example.bag'), 'manifest', chunk, root)
+                worker.assert_called_once_with('example.bag', 'manifest', chunk, root, None, None)
+                self.assertEqual(actual, expected)
 
     def test_lock_and_operational_errors_reach_http_adapter(self):
         chunk = {'index': 0, 'start_seconds': 0, 'end_seconds': 10}
@@ -112,40 +105,23 @@ class WholeBagSessionTests(unittest.TestCase):
         self.package_runtime.start()
         self.addCleanup(self.package_runtime.stop)
 
-    def test_fresh_then_cached_retains_speakers_and_frontend_fields(self):
+    def test_whole_bag_uses_shared_workflow_and_preserves_metadata(self):
         speakers = [{'start_time': 1, 'end_time': 2, 'speaker_label': 'SPEAKER_00', 'text': 'Hello'}]
-        transcript = '[00:01] Speaker SPEAKER_00: Hello [00:02]\n'
+        expected = artifacts(speaker_data=speakers)
+        with patch('rosbag_processing.view_workflow.process_views', return_value=expected) as workflow:
+            result = RosbagProcessingSession().process(self.request)
+        workflow.assert_called_once_with(self.request)
+        self.assertEqual(result['speaker_data'], speakers)
+        self.assertEqual(result['booklist_data'], {})
+        self.assertIsNone(result['annotation_data'])
 
-        def transcribe(*args):
-            (self.folder / 'transcript_with_speakers.srt').write_text(transcript)
-            return 'unused.srt', transcript, speakers
-
-        def combine(*args):
-            for name in ('output.mp4', 'audio.mp3', 'output_waveform.png'):
-                (self.folder / name).touch()
-
-        self.media.transcribe_audio_to_srt.side_effect = transcribe
-        self.media.combine_video_audio.side_effect = combine
-        session = RosbagProcessingSession()
-        fresh = session.process(self.request)
-        cached = session.process(self.request)
-        self.media.transcribe_audio_to_srt.assert_called_once()
-        self.assertEqual(fresh['message'], 'Processing complete')
-        self.assertEqual(cached['message'], 'File already processed')
-        self.assertEqual({**fresh, 'message': cached['message']}, cached)
-        self.assertEqual(cached['speaker_data'], speakers)
-        self.assertEqual(cached['booklist_data'], {})
-        self.assertIsNone(cached['annotation_data'])
-        self.assertEqual(session.video_fps, 25)
-        self.assertEqual(self.video.release.call_count, 2)
-
-    def test_old_cache_without_speaker_sidecar_remains_readable(self):
+    def test_legacy_cache_without_source_identity_does_not_bypass_workflow(self):
         self.folder.mkdir(parents=True)
         for name in ('output.mp4', 'audio.mp3', 'output_waveform.png', 'transcript_with_speakers.srt'):
             (self.folder / name).touch()
-        result = RosbagProcessingSession().process(self.request)
-        self.assertEqual(result['speaker_data'], [])
-        self.media.transcribe_audio_to_srt.assert_not_called()
+        with patch('rosbag_processing.view_workflow.process_views', return_value=artifacts()) as workflow:
+            RosbagProcessingSession().process(self.request)
+        workflow.assert_called_once()
 
     def test_missing_bag_retains_legacy_error(self):
         with self.assertRaises(ProcessingError) as error:
@@ -153,13 +129,13 @@ class WholeBagSessionTests(unittest.TestCase):
         self.assertEqual(str(error.exception), 'Invalid bag filename')
         self.assertEqual(error.exception.status_code, 400)
 
-    def test_video_is_released_when_frame_processing_fails(self):
+    def test_chat_preview_failure_preserves_video_and_releases_decoder(self):
         self.video.isOpened.return_value = True
         self.video.read.side_effect = RuntimeError('decoder failed')
         session = RosbagProcessingSession()
-        with patch.object(session, '_load_cached', return_value=artifacts()):
-            with self.assertRaisesRegex(RuntimeError, 'decoder failed'):
-                session.process(self.request)
+        with patch.object(session, '_load_cached', return_value=artifacts()), patch.dict('sys.modules', {'cv2': self.media.cv2}):
+            result = session.process(self.request)
+        self.assertEqual(result['video_path'], artifacts()['video_path'])
         self.video.release.assert_called_once()
 
 
