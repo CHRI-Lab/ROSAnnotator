@@ -4,8 +4,8 @@ import math
 import os
 from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
-from uuid import uuid4
-
+import uuid
+MANIFEST_NAMESPACE= uuid.UUID('0fc81e59-f98b-4ea8-b4fd-cb5af6d5ec71')
 
 MAX_CHUNKS = 10000
 
@@ -37,9 +37,26 @@ def save_manifest(
     chunking_enabled=True, source_size=None, source_mtime_ns=None,
     booklist_filename=None, annotation_filename=None,
 ):
-    chunks = build_chunks(duration_seconds, chunk_seconds)
+    chunks = build_chunks(duration_seconds, chunk_seconds)   # keep validation first
+
+    identifier = manifest_id(bag_filename, chunk_seconds, chunking_enabled,
+                             source_size, source_mtime_ns)
+
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / f'{identifier}.json'
+
+    # A deterministic id means an identical request already has a manifest.
+    # Return it rather than rewriting the same content.
+    if destination.is_file():
+        try:
+            with destination.open(encoding='utf-8') as stream:
+                return json.load(stream)
+        except (OSError, ValueError):
+            pass          # unreadable, fall through and rewrite it
+
     manifest = {
-        'id': str(uuid4()),
+        'id': identifier,
         'bag_filename': bag_filename,
         'chunking_enabled': chunking_enabled,
         'time_reference': 'bag_start',
@@ -50,16 +67,10 @@ def save_manifest(
         'booklist_filename': booklist_filename,
         'annotation_filename': annotation_filename,
     }
-    if source_size is not None:
-        manifest['source_size'] = source_size
-    if source_mtime_ns is not None:
-        manifest['source_mtime_ns'] = source_mtime_ns
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-    destination = directory / f"{manifest['id']}.json"
+
     temporary = destination.with_suffix('.tmp')
     try:
-        with temporary.open('x', encoding='utf-8') as stream:
+        with temporary.open('w', encoding='utf-8') as stream:
             json.dump(manifest, stream, allow_nan=False, indent=2)
         os.replace(temporary, destination)
     finally:
@@ -73,3 +84,15 @@ def load_manifest(directory, manifest_id):
     identifier = UUID(str(manifest_id))
     with (Path(directory) / f'{identifier}.json').open(encoding='utf-8') as stream:
         return json.load(stream)
+
+def manifest_id(bag_filename, chunk_seconds, chunking_enabled,
+                source_size, source_mtime_ns):
+    """Same inputs always produce the same manifest id."""
+    name = '|'.join((
+        str(bag_filename),
+        f'{float(chunk_seconds):.6f}',
+        str(bool(chunking_enabled)),
+        str(source_size),
+        str(source_mtime_ns),
+    ))
+    return str(uuid.uuid5(MANIFEST_NAMESPACE, name))
