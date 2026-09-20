@@ -234,7 +234,207 @@ class WorkflowTests(unittest.TestCase):
             list(pool.map(publish, range(12)))
         self.assertIn(json.loads(destination.read_text())['n'], range(12))
         self.assertFalse(list(self.root.glob('*.tmp')))
+        
+class ProcessorContractTests(unittest.TestCase):
+    """Gap fix: "define the processor contract" had no test directly
+    exercising DataViewProcessor itself -- only concrete subclasses
+    (SampleProcessor, FailedProcessor, the real Audio/Video/... processors)
+    were ever tested, which proves the contract works for processors that
+    happen to be complete, but never proves the ABC actually enforces
+    completeness, or that its default (non-abstract) methods behave
+    correctly on their own.
+    """
 
+    def test_abstract_processor_cannot_be_instantiated(self):
+        """DataViewProcessor itself must not be instantiable -- it declares
+        extract/preprocess as abstract and has no concrete implementation
+        for either."""
+        with self.assertRaises(TypeError):
+            DataViewProcessor()
+
+    def test_subclass_missing_extract_cannot_be_instantiated(self):
+        """A subclass that implements preprocess but not extract must still
+        be rejected at instantiation time, not fail later when extract is
+        first called."""
+        class MissingExtract(DataViewProcessor):
+            view_id = 'incomplete_a'
+
+            def preprocess(self, context, extracted):
+                return extracted
+
+        with self.assertRaises(TypeError):
+            MissingExtract()
+
+    def test_subclass_missing_preprocess_cannot_be_instantiated(self):
+        """A subclass that implements extract but not preprocess must still
+        be rejected at instantiation time."""
+        class MissingPreprocess(DataViewProcessor):
+            view_id = 'incomplete_b'
+
+            def extract(self, context, topics):
+                return topics
+
+        with self.assertRaises(TypeError):
+            MissingPreprocess()
+
+    def test_subclass_implementing_both_hooks_can_be_instantiated(self):
+        """The mirror case: implementing both abstract hooks is sufficient
+        -- this is what SampleProcessor/FailedProcessor already rely on
+        implicitly, made explicit here as a contract test."""
+        class Complete(DataViewProcessor):
+            view_id = 'complete'
+
+            def extract(self, context, topics):
+                return topics
+
+            def preprocess(self, context, extracted):
+                return extracted
+
+        # Must not raise.
+        instance = Complete()
+        self.assertEqual(instance.view_id, 'complete')
+
+    def test_check_availability_default_filters_by_supported_message_types(self):
+        """The default check_availability() must select only topics whose
+        message type is in supported_message_types and have at least one
+        message, picking the first candidate when none is explicitly
+        requested."""
+        class SampleTypeProcessor(DataViewProcessor):
+            view_id = 'sample_type'
+            supported_message_types = ('test/Sample',)
+
+            def extract(self, context, topics):
+                return topics
+
+            def preprocess(self, context, extracted):
+                return extracted
+
+        bag = FakeBag(types={
+            '/matching': ('test/Sample', 3),
+            '/wrong_type': ('test/Other', 5),
+            '/empty': ('test/Sample', 0),
+        })
+        processor = SampleTypeProcessor()
+        with RosbagReader('unused', bag_factory=lambda *_: bag) as reader:
+            context = ViewContext(reader, None)
+            topics = processor.check_availability(context)
+
+        self.assertEqual(topics, ['/matching'])
+
+    def test_check_availability_raises_when_no_candidate_topic(self):
+        """If no topic matches the supported types (or all matching topics
+        have zero messages), check_availability must raise ViewUnavailable
+        rather than silently returning an empty selection."""
+        class SampleTypeProcessor(DataViewProcessor):
+            view_id = 'sample_type'
+            supported_message_types = ('test/Sample',)
+
+            def extract(self, context, topics):
+                return topics
+
+            def preprocess(self, context, extracted):
+                return extracted
+
+        bag = FakeBag(types={'/wrong_type': ('test/Other', 5)})
+        processor = SampleTypeProcessor()
+        with RosbagReader('unused', bag_factory=lambda *_: bag) as reader:
+            context = ViewContext(reader, None)
+            with self.assertRaises(ViewUnavailable):
+                processor.check_availability(context)
+
+    def test_check_availability_honours_explicit_topic_selection(self):
+        """When context.options requests a specific topic, that exact topic
+        must be returned rather than falling back to the first candidate,
+        provided it is valid."""
+        class SampleTypeProcessor(DataViewProcessor):
+            view_id = 'sample_type'
+            supported_message_types = ('test/Sample',)
+
+            def extract(self, context, topics):
+                return topics
+
+            def preprocess(self, context, extracted):
+                return extracted
+
+        bag = FakeBag(types={
+            '/first': ('test/Sample', 3),
+            '/second': ('test/Sample', 3),
+        })
+        processor = SampleTypeProcessor()
+        with RosbagReader('unused', bag_factory=lambda *_: bag) as reader:
+            context = ViewContext(reader, None, options={'topics': ['/second']})
+            topics = processor.check_availability(context)
+
+        self.assertEqual(topics, ['/second'])
+
+    def test_check_availability_rejects_invalid_explicit_topic(self):
+        """An explicitly requested topic that does not exist, or has the
+        wrong message type, must raise ViewUnavailable rather than silently
+        falling back to auto-selection."""
+        class SampleTypeProcessor(DataViewProcessor):
+            view_id = 'sample_type'
+            supported_message_types = ('test/Sample',)
+
+            def extract(self, context, topics):
+                return topics
+
+            def preprocess(self, context, extracted):
+                return extracted
+
+        bag = FakeBag(types={'/only_valid': ('test/Sample', 3)})
+        processor = SampleTypeProcessor()
+        with RosbagReader('unused', bag_factory=lambda *_: bag) as reader:
+            context = ViewContext(reader, None, options={'topics': ['/does_not_exist']})
+            with self.assertRaises(ViewUnavailable):
+                processor.check_availability(context)
+
+    def test_serialize_default_produces_common_response_structure(self):
+        """The default serialize() must return the shared response shape:
+        view_id, status, available, reason, selected_topics, duration,
+        time_origin, processed_data, warnings -- so every view (including
+        ones that never override serialize) is shaped identically."""
+        class SampleTypeProcessor(DataViewProcessor):
+            view_id = 'sample_type'
+            supported_message_types = ('test/Sample',)
+
+            def extract(self, context, topics):
+                return topics
+
+            def preprocess(self, context, extracted):
+                return {'value': 42}
+
+        bag = FakeBag(types={'/only': ('test/Sample', 1)})
+        processor = SampleTypeProcessor()
+        with RosbagReader('unused', bag_factory=lambda *_: bag) as reader:
+            context = ViewContext(reader, None)
+            result = processor.serialize(context, ['/only'], {'value': 42}, ['a warning'])
+
+        self.assertEqual(result['view_id'], 'sample_type')
+        self.assertEqual(result['status'], 'ready')
+        self.assertTrue(result['available'])
+        self.assertIsNone(result['reason'])
+        self.assertEqual(result['selected_topics'], ['/only'])
+        self.assertEqual(result['processed_data'], {'value': 42})
+        self.assertEqual(result['warnings'], ['a warning'])
+        self.assertIn('duration', result)
+        self.assertIn('time_origin', result)
+
+    def test_legacy_fields_default_returns_empty_dict(self):
+        """A processor that does not override legacy_fields() must default
+        to contributing nothing to the legacy flat response -- this is what
+        lets new views (e.g. a future WrenchProcessor) opt out of the
+        legacy shape entirely without extra boilerplate."""
+        class SampleTypeProcessor(DataViewProcessor):
+            view_id = 'sample_type'
+            supported_message_types = ('test/Sample',)
+
+            def extract(self, context, topics):
+                return topics
+
+            def preprocess(self, context, extracted):
+                return extracted
+
+        self.assertEqual(SampleTypeProcessor().legacy_fields({'anything': 1}), {})
 
 if __name__ == '__main__':
     unittest.main()
