@@ -118,6 +118,16 @@ const DataViewSelector = ({
         ))}
       </TextField>
     ))}
+    {views.filter(view => view.available === false && view.status !== 'loading').map(view => (
+      <Box key={view.id} role="status" sx={{ mt: 1.5, overflowWrap: 'anywhere' }}>
+        <Typography variant="caption" component="div" fontWeight="bold">
+          {view.label} unavailable
+        </Typography>
+        <Typography variant="caption" component="div" color="text.secondary">
+          {view.reason || 'No usable data is available for this view.'}
+        </Typography>
+      </Box>
+    ))}
   </Box>
 );
 

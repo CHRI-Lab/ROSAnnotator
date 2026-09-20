@@ -13,6 +13,7 @@ import {
   MenuItem,
   Paper,
   Select,
+  Slider,
   Typography,
 } from "@mui/material";
 
@@ -75,7 +76,7 @@ const Annotator = ({
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(data.duration_seconds || 0);
   const [played, setPlayed] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [bookList, setBookList] = useState(bookListData);
@@ -111,6 +112,22 @@ const Annotator = ({
   };
 
   const processingPending = Object.values((data.views || {}) as Record<string, BackendDataView>).some(view => view.status === 'loading');
+  useEffect(() => { setDuration(data.duration_seconds || 0); }, [data.duration_seconds]);
+  // Sensor-only bags (or panels without a mounted media player) still share a clock.
+  useEffect(() => {
+    if (player || !isPlaying || duration <= 0) return;
+    let last = performance.now();
+    const timer = window.setInterval(() => {
+      const now = performance.now();
+      const elapsed = (now-last)/1000;
+      last = now;
+      setPlayed(time => Math.min(duration, time+elapsed));
+    }, 50);
+    return () => window.clearInterval(timer);
+  }, [player, isPlaying, duration]);
+  useEffect(() => {
+    if (!player && played >= duration) setIsPlaying(false);
+  }, [played, duration, player]);
 
   const handleAxesUpdate = useCallback((updatedAxes) => {
     setAxesData(updatedAxes);
@@ -338,7 +355,7 @@ const Annotator = ({
   const handleSeek = useCallback((time: number) => {
     setPlayed(time);
     if (player) {
-      player.seekTo(time);
+      player.seekTo(time, 'seconds');
     }
   }, [player]);
 
@@ -410,6 +427,15 @@ const Annotator = ({
           height="100%"  
           overflow="auto"
         >
+          <Box display="flex" alignItems="center" gap={2} px={2} width="100%" boxSizing="border-box">
+            <Button disabled={duration <= 0} onClick={() => {
+              if (!isPlaying && played >= duration) handleSeek(0);
+              setIsPlaying(value => !value);
+            }}>{isPlaying ? 'Pause' : 'Play'}</Button>
+            <Slider aria-label="Shared playback time" min={0} max={Math.max(duration, 0.001)} step={0.01}
+              value={Math.min(played, duration)} onChange={(_, value) => handleSeek(value as number)} />
+            <Typography variant="caption" whiteSpace="nowrap">{played.toFixed(2)} / {duration.toFixed(2)}s</Typography>
+          </Box>
           <FrontEndWorkspace
             context={{
               videoPath: data.video_path,

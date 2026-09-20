@@ -3,6 +3,10 @@ import math
 from dataclasses import dataclass
 
 
+class BagReadError(RuntimeError):
+    """The input cannot be opened or its metadata cannot be read."""
+
+
 @dataclass(frozen=True)
 class Record:
     topic: str
@@ -21,24 +25,27 @@ class RosbagReader:
         if self.bag_factory is None:
             from rosbag.bag import Bag
             self.bag_factory = Bag
-        self.bag = self.bag_factory(str(self.path), 'r')
         try:
-            self.start = float(self.bag.get_start_time())
-            self.end = float(self.bag.get_end_time())
+            self.bag = self.bag_factory(str(self.path), 'r')
+            self.topics = {
+                name: {'name': name, 'message_type': info.msg_type, 'message_count': info.message_count}
+                for name, info in self.bag.get_type_and_topic_info().topics.items()
+            }
+            has_messages = any(t['message_count'] > 0 for t in self.topics.values())
+            # ROS raises "Bag contains no message" for the times of a valid empty bag.
+            self.start = float(self.bag.get_start_time()) if has_messages else 0.0
+            self.end = float(self.bag.get_end_time()) if has_messages else 0.0
             if not all(math.isfinite(t) for t in (self.start, self.end)) or self.end < self.start:
                 raise ValueError('Invalid bag time bounds')
             self.offset = float(self.chunk['start_seconds']) if self.chunk else 0.0
             stop = float(self.chunk['end_seconds']) if self.chunk else self.end - self.start
             self.duration = max(0.0, min(stop, self.end - self.start) - self.offset)
             self.origin = self.start + self.offset
-            self.topics = {
-                name: {'name': name, 'message_type': info.msg_type, 'message_count': info.message_count}
-                for name, info in self.bag.get_type_and_topic_info().topics.items()
-            }
             return self
-        except Exception:
-            self.bag.close()
-            raise
+        except Exception as exc:
+            if self.bag is not None:
+                self.bag.close()
+            raise BagReadError('Unable to read ROSBag: the file may be invalid or truncated.') from exc
 
     def __exit__(self, *_):
         self.bag.close()

@@ -22,6 +22,7 @@ function load(name) {
     require(dependency) {
       if (dependency.startsWith('./')) return load(dependency.slice(2));
       if (dependency === 'react/jsx-runtime') return require(dependency);
+      if (dependency === 'react') return { ...React, useRef: value => ({ current: value }) };
       return function Leaf(props) { return React.createElement('div', props); };
     },
   }, { filename });
@@ -32,6 +33,31 @@ const { availableViews } = load('viewRegistry');
 const { VideoDataView, TranscriptDataView } = load('dataViews');
 const { BaseDataView } = load('BaseDataView');
 
+test('unavailable view reasons remain visible outside the disabled menu', () => {
+  const Selector = load('DataViewSelector').default;
+  const tree = Selector({ panelCount: 1, threePanelLargeSide: 'left', selections: ['video'],
+    views: [
+      { id: 'video', label: 'Video', available: false, status: 'failed', reason: 'Image decoding failed' },
+      { id: 'transcript', label: 'Transcript', available: false, status: 'loading' },
+    ], onPanelCountChange() {}, onThreePanelLargeSideChange() {}, onSelectionChange() {} });
+  const statuses = [];
+  function visit(node) {
+    if (Array.isArray(node)) return node.forEach(visit);
+    if (!node?.props) return;
+    if (node.props.role === 'status') statuses.push(node);
+    visit(node.props.children);
+  }
+  function text(node) {
+    if (Array.isArray(node)) return node.map(text).join('');
+    if (node?.props) return text(node.props.children);
+    return typeof node === 'string' ? node : '';
+  }
+  visit(tree);
+  assert.equal(statuses.length, 1);
+  assert.match(text(statuses[0]), /Video unavailable/);
+  assert.match(text(statuses[0]), /Image decoding failed/);
+});
+
 function context() {
   return { videoPath: 'sample.bag/output.mp4', transcript: 'Hello', played: 12,
     isPlaying: false, onProgress() {}, onPlay() {}, onPause() {}, onSeek() {},
@@ -40,7 +66,7 @@ function context() {
 
 test('registry retains Cassie IDs, labels and renderable component contract', () => {
   assert.deepEqual(Array.from(availableViews, view => view.id), [
-    'video', 'transcript', 'annotations', 'statistics-annotations', 'statistics-tiers', 'audio', 'waveform',
+    'video', 'transcript', 'annotations', 'statistics-annotations', 'statistics-tiers', 'audio', 'waveform', 'motion', 'wrench',
   ]);
   for (const view of availableViews) {
     assert.equal(typeof view.label, 'string');
@@ -69,6 +95,26 @@ test('video forwards playback callbacks and uses Cassie public media URL', () =>
   assert.equal(player.ref, state.playerRef);
   player.props.onProgress({ playedSeconds: 13.5 });
   assert.equal(progress, 13.5);
+});
+
+test('repeated canplay events do not seek the video back or re-enter initialization', () => {
+  const state = context();
+  const content = new VideoDataView().render(state);
+  const player = content.type(content.props);
+  const seeks = [];
+  const instance = { seekTo(time, unit) {
+    seeks.push([time, unit]);
+    assert.ok(seeks.length <= 1, 'ready must not start another seek');
+    player.props.onReady(instance);
+  } };
+  player.props.onReady(instance);
+  player.props.onReady(instance);
+  assert.deepEqual(seeks, [[12, 'seconds']]);
+});
+
+test('a new video at zero starts without an unnecessary seek', () => {
+  const content = new VideoDataView().render({ ...context(), played: 0 });
+  content.type(content.props).props.onReady({ seekTo() { assert.fail('unexpected seek'); } });
 });
 
 test('transcript keeps media-local seconds and shared seek callback', () => {

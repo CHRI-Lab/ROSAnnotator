@@ -7,19 +7,26 @@ import StatisticsTier from "../StatisticsTier";
 import Transcript from "../Transcript";
 import { BaseDataView } from "./BaseDataView";
 import type { ViewPanelContext } from "./viewTypes";
+import { MotionView, WrenchView } from './SpatialViews';
 
 const CompanionAudio = ({ audioPath, played, isPlaying }: ViewPanelContext) => {
   const player = useRef<ReactPlayer | null>(null);
+  const initializedSource = useRef<string | null>(null);
   useEffect(() => {
     if (player.current && Math.abs(player.current.getCurrentTime() - played) > 0.25) {
       player.current.seekTo(played, 'seconds');
     }
   }, [played]);
   return <ReactPlayer ref={player} url={`/processed/${audioPath}`} playing={isPlaying}
-    width={0} height={0} onReady={instance => instance.seekTo(played, 'seconds')} />;
+    width={0} height={0} onReady={instance => {
+      if (initializedSource.current === audioPath) return;
+      initializedSource.current = audioPath || null;
+      if (played > 0) instance.seekTo(played, 'seconds');
+    }} />;
 };
 
 const VideoContent = (context: ViewPanelContext) => {
+  const initializedSource = useRef<string | null>(null);
   const {
   videoPath,
   onDurationChange,
@@ -39,9 +46,17 @@ const VideoContent = (context: ViewPanelContext) => {
     onProgress={({ playedSeconds }) => onProgress(playedSeconds)}
     onPlay={onPlay}
     onPause={onPause}
+    onEnded={onPause}
     controls
     playing={isPlaying}
-    onReady={instance => instance.seekTo(context.played, 'seconds')}
+    progressInterval={50}
+    onReady={instance => {
+      // FilePlayer emits ready on every canplay, including after a seek.
+      // Mark before seeking so subsequent events cannot restart the seek.
+      if (initializedSource.current === videoPath) return;
+      initializedSource.current = videoPath;
+      if (context.played > 0) instance.seekTo(context.played, 'seconds');
+    }}
   />
   );
   return context.audioPath && context.views?.video?.processed_data?.has_audio === false
@@ -79,6 +94,18 @@ export class WaveformDataView extends BaseDataView {
   render(context: ViewPanelContext): React.ReactElement {
     return <img style={{ width: '100%' }} src={`/processed/${context.waveformPath}`} alt="Audio waveform" />;
   }
+}
+
+export class MotionDataView extends BaseDataView {
+  readonly id = 'motion';
+  readonly label = 'Motion / Path';
+  render(context: ViewPanelContext): React.ReactElement { return <MotionView {...context} />; }
+}
+
+export class WrenchDataView extends BaseDataView {
+  readonly id = 'wrench';
+  readonly label = 'Force / Torque';
+  render(context: ViewPanelContext): React.ReactElement { return <WrenchView {...context} />; }
 }
 
 // Concrete views inherit the agreed render input/output from BaseDataView.
@@ -132,6 +159,7 @@ const tierStatistics = new TierStatisticsDataView().toDefinition();
 export const dataViewDefinitions = [
   video, transcript, annotations, annotationStatistics, tierStatistics,
   new AudioDataView().toDefinition(), new WaveformDataView().toDefinition(),
+  new MotionDataView().toDefinition(), new WrenchDataView().toDefinition(),
 ];
 
 // Preserve Cassie's existing named component exports.

@@ -76,8 +76,8 @@ const FrontEndWorkspace = ({ context }: FrontEndWorkspaceProps) => {
   const views = viewsWithAvailability(context.views);
   const effectiveSelections = selections.map(selection =>
     selection === 'video' && context.views?.video?.status !== 'loading' &&
-    context.views?.video?.available === false && context.views?.audio?.available
-      ? 'audio' : selection);
+    context.views?.video?.available === false
+      ? ['audio', 'motion', 'wrench'].find(id => context.views?.[id]?.available) || selection : selection);
 
   const handleSelectionChange = (panelIndex: number, viewId: string) => {
     setSelections((currentSelections) =>

@@ -123,6 +123,7 @@ def process_rosbag(request):
     """Legacy HTTP adapter for the shared whole-bag session contract."""
     from .processing_sessions import ProcessingError, ProcessingRequest
     from .rosbag_session import RosbagProcessingSession
+    from .rosbag_reader import BagReadError
 
     if not request.data.get('bag_filename'):
         return Response({'error': 'bag_filename is required'}, status=400)
@@ -141,6 +142,8 @@ def process_rosbag(request):
         ))
     except ProcessingError as exc:
         return Response({'error': str(exc)}, status=exc.status_code)
+    except BagReadError as exc:
+        return Response({'error': str(exc), 'code': 'invalid_rosbag'}, status=400)
     except Exception as exc:
         return Response({'error': str(exc)}, status=500)
     result['ai_records'] = load_ai_records(request.data['annotation_filename']) if request.data.get('annotation_filename') else []

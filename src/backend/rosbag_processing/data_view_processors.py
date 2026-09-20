@@ -160,7 +160,7 @@ class WaveformProcessor(AudioDerivedProcessor):
 class AnnotationProcessor(DataViewProcessor):
     """An editable timeline is usable when at least one time-bearing input is usable."""
     view_id = 'annotations'
-    dependencies = ('video', 'audio')
+    dependencies = ('video', 'audio', 'motion', 'wrench')
 
     def check_availability(self, context):
         ready = [r for r in context.results.values() if r.get('available')]

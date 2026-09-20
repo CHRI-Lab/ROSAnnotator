@@ -98,7 +98,9 @@ class WholeBagSessionTests(unittest.TestCase):
         self.video = self.media.cv2.VideoCapture.return_value
         self.video.isOpened.return_value = False
         self.video.get.return_value = 25
-        self.runtime = patch.dict('sys.modules', {'rosbag_processing.data_utils': self.media})
+        self.runtime = patch.dict('sys.modules', {
+            'rosbag_processing.data_utils': self.media, 'cv2': self.media.cv2,
+        })
         self.runtime.start()
         self.addCleanup(self.runtime.stop)
         self.package_runtime = patch.object(rosbag_processing, 'data_utils', self.media, create=True)
