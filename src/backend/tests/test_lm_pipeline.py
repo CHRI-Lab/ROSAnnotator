@@ -198,12 +198,12 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
         remote_api.assert_not_called()
         local_ai.assert_not_called()
 
-    def test_invalid_hybrid_routes_call_no_provider(self):
-        '''split a batch between local and remote, local only data never appears in remote request'''
+    def test_mixed_context_routes_call_no_provider(self):
+        '''A request cannot route some context to a different provider.'''
         from rosbag_processing import views
 
         request = self.make_request(
-            assistant_mode="hybrid",
+            assistant_mode="remote",
             context_routes={
                 "transcript": "local",
                 "frames": "remote",
@@ -218,7 +218,7 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(
-            json.loads(response.content), {"error": "Invalid hybrid context routes"}
+            json.loads(response.content), {"error": "Invalid context routes"}
         )
         remote_api.assert_not_called()
         local_ai.assert_not_called()

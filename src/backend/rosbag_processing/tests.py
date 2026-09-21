@@ -1555,12 +1555,12 @@ class ChunkApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 501)
         self.assertFalse(json.loads(response.content)["can_fallback_to_remote"])
 
-    def test_mixed_hybrid_mode_never_calls_remote_until_orchestrator_exists(self):
+    def test_hybrid_mode_is_rejected_without_calling_a_provider(self):
         from . import views
 
         views.gpt_history = ""
         views.video_frames = ["frame-1"]
-        request = self.factory.post(
+        request = RequestFactory().post(
             "/api/gpt_chat/",
             data=json.dumps(
                 {
@@ -1585,174 +1585,9 @@ class ChunkApiTests(SimpleTestCase):
         ) as remote_api:
             response = views.gpt_chat(request)
 
-        self.assertEqual(response.status_code, 501)
-        self.assertIn("Mixed Local/Remote", response.content.decode())
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json.loads(response.content), {"error": "Invalid assistant mode"})
         remote_api.assert_not_called()
-
-    def test_mixed_hybrid_routes_explain_empty_remote_api_key(self):
-        from . import views
-
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "message": "Use hybrid routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "local",
-                        "frames": "local",
-                        "codebook": "remote",
-                        "timeline": "remote",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "openai_api_key", None):
-            response = views.gpt_chat(request)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("API key is empty", response.content.decode())
-
-    def test_all_local_hybrid_routes_use_local_model(self):
-        from . import views
-
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "message": "Use local routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "Axeinfo": [],
-                    "Codebook": [],
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "local",
-                        "frames": "local",
-                        "codebook": "local",
-                        "timeline": "local",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "RemoteAPI") as remote_api, patch.object(
-            views, "create_local_ai"
-        ) as local_ai:
-            local_ai.return_value.respond.return_value = "local response"
-            response = views.gpt_chat(request)
-
-        response_data = json.loads(response.content)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response_data["response"], "local response")
-        self.assertEqual(response_data["assistant_mode"], "local")
-        self.assertEqual(
-            response_data["ai_record"]["model_selection"]["requested"], "hybrid"
-        )
-        self.assertEqual(
-            response_data["ai_record"]["model_selection"]["used"], "local"
-        )
-        remote_api.assert_not_called()
-        local_ai.return_value.respond.assert_called_once_with("Use local routing", "")
-
-    def test_all_local_hybrid_routes_explain_local_model_setup_failure(self):
-        from . import views
-
-        views.gpt_history = ""
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "message": "Use local routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "local",
-                        "frames": "local",
-                        "codebook": "local",
-                        "timeline": "local",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "openai_api_key", None), patch.object(
-            views, "create_local_ai"
-        ) as local_ai:
-            local_ai.return_value.respond.side_effect = LocalInferenceError()
-            response = views.gpt_chat(request)
-
-        self.assertEqual(response.status_code, 501)
-        self.assertIn("Choose a local model", response.content.decode())
-        self.assertIn("models/ directory", response.content.decode())
-
-    def test_all_remote_hybrid_routes_explain_empty_api_key(self):
-        from . import views
-
-        views.gpt_history = ""
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "message": "Use remote routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "remote",
-                        "frames": "remote",
-                        "codebook": "remote",
-                        "timeline": "remote",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "openai_api_key", None), patch.object(
-            views, "RemoteAPI"
-        ) as remote_api:
-            response = views.gpt_chat(request)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("API key is empty", response.content.decode())
-        remote_api.assert_not_called()
-
-    def test_all_remote_hybrid_routes_explain_invalid_api_key(self):
-        from . import views
-
-        views.gpt_history = ""
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "message": "Use remote routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "remote",
-                        "frames": "remote",
-                        "codebook": "remote",
-                        "timeline": "remote",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "openai_api_key", "invalid-key"), patch.object(
-            views, "RemoteAPI"
-        ) as remote_api:
-            remote_api.return_value.respond.side_effect = RemoteAuthenticationError()
-            response = views.gpt_chat(request)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("API key is invalid", response.content.decode())
 
 
 class AIRecordPersistenceTests(SimpleTestCase):
@@ -1799,5 +1634,3 @@ class AIRecordPersistenceTests(SimpleTestCase):
             views, "ANNOTATION_PATH", temp_directory
         ):
             self.assertEqual(views.load_ai_records("old-annotation.csv"), [])
-
-

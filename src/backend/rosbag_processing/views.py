@@ -273,7 +273,6 @@ def gpt_chat(request):
         context_routes = data.get("context_routes", {})
         fallback_consent = data.get("fallback_consent")
         requested_mode = assistant_mode
-        hybrid_selection = assistant_mode == "hybrid"
         accepted_local_to_remote = (
             isinstance(fallback_consent, dict)
             and fallback_consent.get("from") == "local"
@@ -296,46 +295,12 @@ def gpt_chat(request):
             return JsonResponse({"error": "No message provided"}, status=400)
         if not audio_transcript:
             return JsonResponse({"error": "No audio transcript provided"}, status=400)
-        if assistant_mode not in {"remote", "local", "hybrid"}:
+        if assistant_mode not in {"remote", "local"}:
             return JsonResponse({"error": "Invalid assistant mode"}, status=400)
-
-        if assistant_mode == "hybrid":
-            required_contexts = {"transcript", "frames", "codebook", "timeline"}
-            if set(context_routes) != required_contexts or any(
-                target not in {"remote", "local"}
-                for target in context_routes.values()
-            ):
-                return JsonResponse(
-                    {"error": "Invalid hybrid context routes"}, status=400
-                )
-
-            selected_targets = set(context_routes.values())
-            if "remote" in selected_targets and not openai_api_key:
-                return JsonResponse(
-                    {
-                        "error": (
-                            "Remote AI is unavailable because the OpenAI API key is "
-                            "empty. Would you like to switch to Local?"
-                        ),
-                        "assistant_mode": "hybrid",
-                        "can_fallback_to_local": True,
-                    },
-                    status=503,
-                )
-            if len(selected_targets) == 1:
-                # A homogeneous hybrid selection needs no cross-provider
-                # orchestration; run it through the selected provider.
-                assistant_mode = selected_targets.pop()
-            else:
-                # Do not silently send locally routed data to the remote
-                # provider until a mixed-context orchestrator is available.
-                return JsonResponse(
-                    {
-                        "error": "Mixed Local/Remote hybrid routing is not implemented yet.",
-                        "assistant_mode": "hybrid",
-                    },
-                    status=501,
-                )
+        if not isinstance(context_routes, dict) or any(
+            target != assistant_mode for target in context_routes.values()
+        ):
+            return JsonResponse({"error": "Invalid context routes"}, status=400)
 
         common_context = {
             "transcriptContext": audio_transcript,
@@ -352,13 +317,7 @@ def gpt_chat(request):
                 response_text = assistant.respond(message, gpt_history)
             except LocalInferenceError as error:
                 remote_configured = bool(openai_api_key)
-                if hybrid_selection:
-                    error_message = (
-                        "Local AI is unavailable. Choose a local model before starting "
-                        "Docker, and check that its .gguf file is in the models/ directory."
-                    )
-                else:
-                    error_message = str(error) or "The local language model is not connected."
+                error_message = str(error) or "The local language model is not connected."
                 return JsonResponse(
                     {
                         "error": (
