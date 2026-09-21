@@ -1,6 +1,6 @@
 from django.urls import path
 from .chunk_views import create_chunks, get_chunks, process_chunk_view
-from .views import inspect_input, process_rosbag, list_filenames, transcribe_audio, update_booklist, save_annotation, get_annotation,gpt_chat
+from .views import inspect_input, process_rosbag, list_filenames, transcribe_audio, update_booklist, save_annotation, get_annotation, gpt_chat, clear_gpt_history
 from .autosave import save_autosave, check_autosave, load_autosave, discard_autosave
 
 urlpatterns = [
@@ -16,6 +16,7 @@ urlpatterns = [
     path('save_annotation/', save_annotation, name='save_annotation'),
     path('get_annotation/', get_annotation, name='get_annotation'),
     path('gpt_chat/', gpt_chat, name='gpt_chat'),
+    path('gpt_chat/clear/', clear_gpt_history, name='clear_gpt_history'),
     path('autosave/save/', save_autosave, name='save_autosave'),
     path('autosave/check/', check_autosave, name='check_autosave'),
     path('autosave/load/', load_autosave, name='load_autosave'),

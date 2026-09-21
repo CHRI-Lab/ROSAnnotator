@@ -90,6 +90,17 @@ const Annotator = ({
     resolve: (accepted: boolean) => void;
   } | null>(null);
   const [aiRecords, setAIRecords] = useState<AIRecord[]>(data.ai_records ?? []);
+  const [conversationKey, setConversationKey] = useState(0);
+
+  const handleClearConversation = async () => {
+    const response = await fetch("http://localhost:8000/api/gpt_chat/clear/", {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error("Could not clear backend conversation history");
+    }
+    setConversationKey((key) => key + 1);
+  };
   useEffect(() => {
     if (bookListData) {
       setBookList(bookListData);
@@ -516,6 +527,7 @@ const Annotator = ({
   
 
         <RightAssistantPanel
+          onClearConversation={handleClearConversation}
           codebook={
             editMode ? (
               <EditBooklistForm
@@ -531,7 +543,7 @@ const Annotator = ({
               </Box>
             )
           }
-          assistant={<Chatbox onSendMessage={handleSendMessageToGPT} />}
+          assistant={<Chatbox key={conversationKey} onSendMessage={handleSendMessageToGPT} />}
         />
         </Box>
       </Box>

@@ -23,6 +23,7 @@ from .ai_assistant import (
 load_dotenv()
 
 gpt_history = ""
+gpt_history_generation = 0
 video_frames = []
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -261,9 +262,18 @@ def process_rosbag(request):
 
 
 @api_view(['POST'])
+def clear_gpt_history(request):
+    global gpt_history, gpt_history_generation
+    gpt_history = ""
+    gpt_history_generation += 1
+    return JsonResponse({"cleared": True})
+
+
+@api_view(['POST'])
 def gpt_chat(request):
     global gpt_history
     try:
+        history_generation = gpt_history_generation
         data = json.loads(request.body)
         message = data.get("message")
         audio_transcript = data.get("audio_transcript")
@@ -378,7 +388,8 @@ def gpt_chat(request):
                     status=503,
                 )
 
-        gpt_history = gpt_history + message + response_text
+        if history_generation == gpt_history_generation:
+            gpt_history = gpt_history + message + response_text
         ai_record = build_ai_record(
             assistant=assistant,
             requested_mode=requested_mode,

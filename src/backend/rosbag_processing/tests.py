@@ -986,6 +986,20 @@ class GPTChatEndpointTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
+    def test_clear_history_removes_backend_context(self):
+        from . import views
+
+        views.gpt_history = "private prior conversation"
+        previous_generation = views.gpt_history_generation
+        request = self.factory.post("/api/gpt_chat/clear/")
+
+        response = views.clear_gpt_history(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content), {"cleared": True})
+        self.assertEqual(views.gpt_history, "")
+        self.assertEqual(views.gpt_history_generation, previous_generation + 1)
+
     def test_endpoint_keeps_request_and_response_contract(self):
         from . import views
 
