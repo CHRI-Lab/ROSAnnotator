@@ -233,7 +233,7 @@ const MainPage = () => {
   return (
     <div>
       <Dialog open={switchingChunk}>
-        <DialogTitle>Saving and switching chunk…</DialogTitle>
+        <DialogTitle>Autosaving and switching chunk…</DialogTitle>
       </Dialog>
       <Dialog open={errorDisplay} onClose={() => data && setErrorDisplay(false)}>
         <DialogTitle>{data ? "Unable to switch chunk" : "Error loading your files"}</DialogTitle>
@@ -247,7 +247,7 @@ const MainPage = () => {
         <DialogTitle>Unsaved work found in this chunk</DialogTitle>
         <DialogContent>
           <Typography>
-            {`Chunk ${pendingRecovery?.scope.chunk_index ?? 0} has unsaved work from ${
+            {`Chunk ${(pendingRecovery?.scope.chunk_index ?? 0)+1} has unsaved work from ${
               formatAutosaveTimestamp(pendingRecovery?.meta.saved_at)
             }, with ${pendingRecovery?.meta.axis_count ?? 0} time ${
               pendingRecovery?.meta.axis_count === 1 ? "axis" : "axes"

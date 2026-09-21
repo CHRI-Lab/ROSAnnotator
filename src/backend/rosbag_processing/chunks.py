@@ -46,15 +46,6 @@ def save_manifest(
     directory.mkdir(parents=True, exist_ok=True)
     destination = directory / f'{identifier}.json'
 
-    # A deterministic id means an identical request already has a manifest.
-    # Return it rather than rewriting the same content.
-    if destination.is_file():
-        try:
-            with destination.open(encoding='utf-8') as stream:
-                return json.load(stream)
-        except (OSError, ValueError):
-            pass          # unreadable, fall through and rewrite it
-
     manifest = {
         'id': identifier,
         'bag_filename': bag_filename,
