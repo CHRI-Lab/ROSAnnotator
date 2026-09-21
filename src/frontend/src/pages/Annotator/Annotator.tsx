@@ -487,7 +487,7 @@ const Annotator = ({
             </Paper>
           )}
 
-          <Box width="100%" maxWidth={1200} overflow="auto" maxHeight="50vh">
+          <Box width="100%" maxWidth={1200} overflow="auto" maxHeight="30vh">
             <Timeline
               key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}
               rosBagFileName={rosBagFileName}
