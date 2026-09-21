@@ -986,6 +986,37 @@ class GPTChatEndpointTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
+    def test_selected_video_frames_are_used_instead_of_global_frames(self):
+        from . import views
+
+        views.video_frames = ["unrelated-frame"]
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps({
+                "message": "Describe this chunk",
+                "audio_transcript": "Speaker 1: Hello",
+                "Axeinfo": [],
+                "Codebook": [],
+                "video_path": "chunks/selected/0000/output.mp4",
+            }),
+            content_type="application/json",
+        )
+        with patch.object(views, "frames_for_video", return_value=["selected-frame"]) as sample, \
+             patch.object(views, "openai_api_key", "test-key"), \
+             patch.object(views, "RemoteAPI") as remote_api:
+            remote_api.return_value.respond.return_value = "description"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        sample.assert_called_once_with("chunks/selected/0000/output.mp4")
+        self.assertEqual(remote_api.call_args.kwargs["frameContext"], ["selected-frame"])
+
+    def test_video_path_cannot_escape_processed_directory(self):
+        from . import views
+
+        with self.assertRaisesRegex(ValueError, "Selected video was not found"):
+            views.frames_for_video("../secret.mp4")
+
     def test_clear_history_removes_backend_context(self):
         from . import views
 
@@ -1608,7 +1639,7 @@ class AIRecordPersistenceTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
-    def test_save_annotation_writes_named_ai_records_sidecar(self):
+    def test_completed_records_append_and_manual_save_does_not_overwrite_them(self):
         from . import views
 
         ai_record = {
@@ -1616,30 +1647,71 @@ class AIRecordPersistenceTests(SimpleTestCase):
             "run_id": "run-1",
             "ai_response": "Done",
         }
-        request = self.factory.post(
-            "/api/save_annotation/",
-            data=json.dumps(
-                {
-                    "annotation_name": "recording.bag+booklist.json",
-                    "annotation_data": [],
-                    "ai_records": [ai_record],
-                }
-            ),
-            content_type="application/json",
-        )
-
         with TemporaryDirectory() as temp_directory, patch.object(
             views, "ANNOTATION_PATH", temp_directory
         ):
-            response = views.save_annotation(request)
+            completion = self.factory.post(
+                "/api/ai_records/complete/",
+                data=json.dumps({
+                    "annotation_name": "recording.bag+booklist.json",
+                    "ai_record": ai_record,
+                    "outcome": "applied",
+                }),
+                content_type="application/json",
+            )
+            response = views.complete_ai_record(completion)
+            retry_response = views.complete_ai_record(self.factory.post(
+                "/api/ai_records/complete/",
+                data=json.dumps({
+                    "annotation_name": "recording.bag+booklist.json",
+                    "ai_record": ai_record,
+                    "outcome": "applied",
+                }),
+                content_type="application/json",
+            ))
+            manual_save = self.factory.post(
+                "/api/save_annotation/",
+                data=json.dumps({
+                    "annotation_name": "recording.bag+booklist.json",
+                    "annotation_data": [],
+                    "ai_records": [],
+                }),
+                content_type="application/json",
+            )
+            save_response = views.save_annotation(manual_save)
             sidecar_path = Path(temp_directory) / (
                 "ai_records_recording.bag+booklist.json.json"
             )
             saved_payload = json.loads(sidecar_path.read_text())
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(retry_response.status_code, 200)
+        self.assertEqual(save_response.status_code, 200)
         self.assertEqual(saved_payload["schema_version"], 1)
-        self.assertEqual(saved_payload["ai_runs"], [ai_record])
+        self.assertEqual(len(saved_payload["ai_runs"]), 1)
+        self.assertEqual(saved_payload["ai_runs"][0]["run_id"], "run-1")
+        self.assertEqual(saved_payload["ai_runs"][0]["action_outcome"], "applied")
+
+    def test_rejected_action_is_saved_with_rejected_outcome(self):
+        from . import views
+
+        with TemporaryDirectory() as temp_directory, patch.object(
+            views, "ANNOTATION_PATH", temp_directory
+        ):
+            request = self.factory.post(
+                "/api/ai_records/complete/",
+                data=json.dumps({
+                    "annotation_name": "recording.bag+noBookList",
+                    "ai_record": {"run_id": "rejected-run", "ai_response": "instruction"},
+                    "outcome": "rejected",
+                }),
+                content_type="application/json",
+            )
+            response = views.complete_ai_record(request)
+            records = views.load_ai_records("recording.bag+noBookList.csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(records[0]["action_outcome"], "rejected")
 
     def test_load_ai_records_is_backward_compatible_without_sidecar(self):
         from . import views

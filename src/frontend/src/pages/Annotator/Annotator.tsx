@@ -128,6 +128,27 @@ const Annotator = ({
     });
   };
 
+  const persistCompletedAIRecord = async (
+    record: AIRecord | undefined,
+    outcome: "replied" | "applied" | "rejected" | "not_applied",
+  ) => {
+    if (!record) throw new Error("AI response did not include a record to save.");
+    const annotationName = `${rosBagFileName}+${bookListFileName || "noBookList"}`;
+    const response = await fetch("http://localhost:8000/api/ai_records/complete/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        annotation_name: annotationName,
+        ai_record: record,
+        outcome,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("The AI reply completed, but its record could not be saved. Please retry.");
+    }
+    upsertAIRecord({ ...record, action_outcome: outcome });
+  };
+
   const handleTabChange = (_event, newValue) => {
     setSelectedTab(newValue);
   };
@@ -170,7 +191,6 @@ const Annotator = ({
             bookListFileName || "noBookList"
           }`,
           annotation_data: annotationData,
-          ai_records: aiRecords,
         }),
       });
 
@@ -198,6 +218,7 @@ const Annotator = ({
       body: JSON.stringify({
         message: message, 
         audio_transcript: data.audio_transcript, 
+        video_path: data.video_path,
         Axeinfo: axesData,
         Codebook: bookList,
         assistant_mode: assistantRouting.mode,
@@ -234,9 +255,6 @@ const Annotator = ({
         const assistantMode =
           (data.assistant_mode as AssistantMode) ?? assistantRouting.mode;
         const aiRecord = data.ai_record as AIRecord | undefined;
-        if (aiRecord) {
-          upsertAIRecord(aiRecord);
-        }
 
         const jsonStartIndex = responseString.indexOf("{");
         const jsonEndIndex = responseString.lastIndexOf("}");
@@ -246,17 +264,25 @@ const Annotator = ({
           const normalMessage = responseString.substring(0, jsonStartIndex).trim();
           const jsonString = responseString.substring(jsonStartIndex, jsonEndIndex + 1).trim();
   
+          let parsedObject: unknown;
           try {
+            parsedObject = JSON.parse(jsonString);
+          } catch (error) {
+            console.error("Failed to parse JSON:", error);
+          }
 
-            const parsedObject = JSON.parse(jsonString);
-  
-            if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
+          if (
+            parsedObject && typeof parsedObject === "object" &&
+            "type" in parsedObject && parsedObject.type === "instruction" &&
+            "steps" in parsedObject && Array.isArray(parsedObject.steps)
+          ) {
               console.log("This is an instruction:", parsedObject);
               const parsedInstruction = parsedObject as AIInstruction;
               if (
                 requiresAIChangeConfirmation(parsedInstruction, axesData) &&
                 !(await requestAIChangeConfirmation(parsedInstruction))
               ) {
+                await persistCompletedAIRecord(aiRecord, "rejected");
                 return {
                   text: "AI timeline changes were cancelled. No annotation changes were applied.",
                   assistantMode,
@@ -265,7 +291,32 @@ const Annotator = ({
                 };
               }
               const updatedAxes = applyAIInstruction(axesData, parsedInstruction);
+              const requestedAnnotation = /\bannotat(?:e|ion|ions|ing)\b/i.test(message);
+              const addedBlockApplied = parsedInstruction.steps.some((step) => {
+                if (step.action !== "addBlock") return false;
+                const axisId = Number(step.parameters?.axisId);
+                const start = Number(step.parameters?.start);
+                const end = Number(step.parameters?.end);
+                const text = String(step.parameters?.text ?? "");
+                const wasPresent = axesData.find((axis) => axis.id === axisId)?.blocks.some(
+                  (block) => block.start === start && block.end === end && block.text === text,
+                );
+                const isPresent = updatedAxes.find((axis) => axis.id === axisId)?.blocks.some(
+                  (block) => block.start === start && block.end === end && block.text === text,
+                );
+                return Boolean(isPresent && !wasPresent);
+              });
+              if (requestedAnnotation && !addedBlockApplied) {
+                await persistCompletedAIRecord(aiRecord, "not_applied");
+                return {
+                  text: "The model did not provide any usable annotation blocks. No empty axis was created. Please try again with a specific time range or annotation target.",
+                  assistantMode,
+                  aiRecord,
+                  isError: true,
+                };
+              }
               if (JSON.stringify(updatedAxes) === JSON.stringify(axesData)) {
+                await persistCompletedAIRecord(aiRecord, "not_applied");
                 return {
                   text: "The model returned a timeline instruction, but none of its steps could be applied.",
                   assistantMode,
@@ -273,6 +324,7 @@ const Annotator = ({
                   isError: true,
                 };
               }
+              await persistCompletedAIRecord(aiRecord, "applied");
               setAxesData(updatedAxes);
               setInstruction(parsedInstruction);
 
@@ -280,12 +332,9 @@ const Annotator = ({
               // Timeline executes it through the instruction state above,
               // while the chat shows the concise confirmation used by the demo.
               return { text: "Done", assistantMode, aiRecord };
-            }
-          } catch (error) {
-            console.error("Failed to parse JSON:", error);
-            return { text: normalMessage, assistantMode, aiRecord };
           }
 
+          await persistCompletedAIRecord(aiRecord, "replied");
           return {
             text: normalMessage || responseString,
             assistantMode,
@@ -293,6 +342,7 @@ const Annotator = ({
           };
         }
 
+        await persistCompletedAIRecord(aiRecord, "replied");
         return { text: responseString, assistantMode, aiRecord };
       })
       .catch((error) => {

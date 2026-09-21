@@ -1,6 +1,9 @@
 from .data_utils import *
 import json
 import os
+import base64
+from pathlib import Path
+import cv2
 from django.http import JsonResponse
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -9,6 +12,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from .serializers import BooklistSerializer, InputInspectionSerializer, TranscriptionRequestSerializer
 import csv
+import fcntl
+import tempfile
 from django.views.decorators.csrf import csrf_exempt
 from dotenv import load_dotenv
 from openai import APIConnectionError, APIStatusError
@@ -28,6 +33,42 @@ video_frames = []
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 ROSBAG_DATA_DIR = '/app/datas/rosbag-data/'
+PROCESSED_DATA_DIR = '/app/processed_data'
+
+
+def frames_for_video(video_path, max_frames=50):
+    """Sample the selected processed MP4, never a different request's global frames."""
+    if not isinstance(video_path, str) or not video_path or Path(video_path).is_absolute():
+        raise ValueError('Invalid video path.')
+    root = Path(PROCESSED_DATA_DIR).resolve()
+    path = (root / video_path).resolve()
+    if root not in path.parents or path.suffix.lower() != '.mp4' or not path.is_file():
+        raise ValueError('Selected video was not found.')
+
+    capture = cv2.VideoCapture(str(path))
+    try:
+        if not capture.isOpened():
+            raise ValueError('Selected video could not be opened.')
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count <= 0:
+            raise ValueError('Selected video has no readable frames.')
+        count = min(frame_count, max_frames)
+        positions = sorted({round(index * (frame_count - 1) / max(count - 1, 1))
+                            for index in range(count)})
+        frames = []
+        for position in positions:
+            capture.set(cv2.CAP_PROP_POS_FRAMES, position)
+            success, frame = capture.read()
+            if not success:
+                continue
+            encoded, buffer = cv2.imencode('.jpg', frame)
+            if encoded:
+                frames.append(base64.b64encode(buffer).decode('ascii'))
+        if not frames:
+            raise ValueError('Selected video has no readable frames.')
+        return frames
+    finally:
+        capture.release()
 
 
 @api_view(['POST'])
@@ -113,6 +154,72 @@ def load_ai_records(annotation_filename):
     if isinstance(payload, dict):
         return payload.get("ai_runs", [])
     return payload if isinstance(payload, list) else []
+
+
+@api_view(['POST'])
+def complete_ai_record(request):
+    """Persist one completed prompt/reply/action outcome independently of annotation saves."""
+    annotation_name = request.data.get('annotation_name')
+    record = request.data.get('ai_record')
+    outcome = request.data.get('outcome')
+    if (
+        not isinstance(annotation_name, str)
+        or not annotation_name.strip()
+        or annotation_name != os.path.basename(annotation_name)
+        or '/' in annotation_name
+        or '\\' in annotation_name
+        or not isinstance(record, dict)
+        or not isinstance(record.get('run_id'), str)
+        or not record['run_id']
+        or outcome not in {'replied', 'applied', 'rejected', 'not_applied'}
+    ):
+        return JsonResponse({'error': 'Invalid completed AI record'}, status=400)
+
+    completed_record = {
+        **record,
+        'action_outcome': outcome,
+        'completed_at': datetime.now(timezone.utc).isoformat(),
+    }
+    os.makedirs(ANNOTATION_PATH, exist_ok=True)
+    record_path = ai_records_file_path(annotation_name)
+    lock_path = f'{record_path}.lock'
+    temporary_path = None
+    try:
+        with open(lock_path, 'a+') as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            existing = load_ai_records(annotation_name)
+            if not isinstance(existing, list):
+                raise ValueError('Existing AI record file is invalid')
+            record_index = next(
+                (index for index, item in enumerate(existing)
+                 if isinstance(item, dict) and item.get('run_id') == record['run_id']),
+                None,
+            )
+            if record_index is None:
+                existing.append(completed_record)
+            else:
+                # Retries of the same completed request must not duplicate it.
+                existing[record_index] = completed_record
+            with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8', dir=ANNOTATION_PATH,
+                prefix='.ai-record-', suffix='.tmp', delete=False,
+            ) as temporary_file:
+                temporary_path = temporary_file.name
+                json.dump({
+                    'schema_version': 1,
+                    'annotation_name': annotation_name,
+                    'ai_runs': existing,
+                }, temporary_file, indent=2)
+                temporary_file.flush()
+                os.fsync(temporary_file.fileno())
+            os.replace(temporary_path, record_path)
+            temporary_path = None
+    except Exception as error:
+        return JsonResponse({'error': f'Unable to save AI record: {error}'}, status=500)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+    return JsonResponse({'saved': True, 'run_id': record['run_id']})
 
 
 @api_view(['POST'])
@@ -312,9 +419,18 @@ def gpt_chat(request):
         ):
             return JsonResponse({"error": "Invalid context routes"}, status=400)
 
+        selected_video_path = data.get('video_path')
+        try:
+            request_frames = (
+                frames_for_video(selected_video_path)
+                if selected_video_path is not None else video_frames
+            )
+        except ValueError as error:
+            return JsonResponse({'error': str(error)}, status=400)
+
         common_context = {
             "transcriptContext": audio_transcript,
-            "frameContext": video_frames,
+            "frameContext": request_frames,
             "codebookContext": Codebook,
             "timelineContext": Axiinfo,
         }
@@ -482,10 +598,6 @@ def save_annotation(request):
     if request.method == 'POST':
         annotation_name = request.data.get('annotation_name')
         annotation_data = request.data.get('annotation_data')
-        ai_records = request.data.get('ai_records', [])
-
-        if not isinstance(ai_records, list):
-            return JsonResponse({'error': 'Invalid AI records format'}, status=400)
 
         try:
             annotation_list_str = json.dumps(annotation_data)
@@ -515,19 +627,8 @@ def save_annotation(request):
                             'text': block['text']
                         })
 
-            with open(ai_records_file_path(annotation_name), 'w') as record_file:
-                json.dump(
-                    {
-                        'schema_version': 1,
-                        'annotation_name': annotation_name,
-                        'ai_runs': ai_records,
-                    },
-                    record_file,
-                    indent=2,
-                )
-
             return JsonResponse(
-                {'message': 'Annotation data and AI records saved successfully'},
+                {'message': 'Annotation data saved successfully'},
                 status=200,
             )
         except Exception as e:

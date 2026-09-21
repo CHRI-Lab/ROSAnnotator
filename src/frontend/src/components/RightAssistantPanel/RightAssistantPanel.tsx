@@ -78,7 +78,7 @@ const RightAssistantPanel = ({
         <DialogTitle>Clear conversation history?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            It will conversation history with AI assistant, your conversation won't be restored after this action.
+            This action will clear your conversation history with AI assistant in the chatbox and also backend history (not the saved AI records). 
           </DialogContentText>
           {clearError && <DialogContentText color="error">{clearError}</DialogContentText>}
         </DialogContent>
