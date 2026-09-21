@@ -61,7 +61,10 @@ def extract_video(bag_filename, output_folder):
 
     input_images_path = os.path.join(output_folder, 'images/frame%04d.jpg')
     output_video_path = os.path.join(output_folder, 'video.avi')
-    subprocess.run(['ffmpeg', '-r', str(fps), '-i', input_images_path, output_video_path])
+    subprocess.run(
+        ['ffmpeg', '-y', '-r', str(fps), '-i', input_images_path, output_video_path],
+        check=True,
+    )
 
 
 def extract_audio(bag_filename, output_folder):
@@ -110,13 +113,15 @@ def combine_video_audio(output_folder):
         '-i', audio_path,
         '-c:v', 'libx264',
         '-preset', 'fast',
+        '-pix_fmt', 'yuv420p',
         '-c:a', 'aac',
         '-map', '0:v',
         '-map', '1:a',
+        '-movflags', '+faststart',
         '-y', output_path
     ]
 
-    subprocess.run(command)
+    subprocess.run(command, check=True)
 
 
 def transcribe_audio_to_srt(audio_file_path, output_folder_path):
@@ -127,7 +132,14 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
     if audio_file_path.endswith(".mp3"):
         audio = AudioSegment.from_mp3(audio_file_path)
         wav_file_path = os.path.join(output_folder_path, "converted_audio.wav")
-        audio.export(wav_file_path, format="wav")
+        # AudioSegment.export returns an open file handle. Close it before the
+        # next consumer opens the WAV; otherwise Docker Desktop bind mounts can
+        # expose a race (most noticeably on Windows) where pyannote cannot see
+        # the newly-created file yet.
+        exported_audio = audio.export(wav_file_path, format="wav")
+        exported_audio.close()
+        if not os.path.isfile(wav_file_path):
+            raise RuntimeError(f"Audio conversion did not create {wav_file_path}.")
         audio_file_path = wav_file_path
 
 

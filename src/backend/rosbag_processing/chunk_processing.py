@@ -94,13 +94,16 @@ def process_chunk(bag_path, manifest_id, chunk, processed_root='/app/processed_d
             _, transcript, speaker_data = transcribe_audio_to_srt(str(audio_path), str(chunk_root))
             _run([
                 'ffmpeg', '-y', '-i', str(video_only_path), '-i', str(audio_path),
-                '-c:v', 'libx264', '-preset', 'fast', '-c:a', 'aac',
-                '-map', '0:v', '-map', '1:a', '-shortest', str(output_path),
+                '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac',
+                '-map', '0:v', '-map', '1:a', '-shortest',
+                '-movflags', '+faststart', str(output_path),
             ])
         else:
             _run([
                 'ffmpeg', '-y', '-i', str(video_only_path),
-                '-c:v', 'libx264', '-preset', 'fast', str(output_path),
+                '-c:v', 'libx264', '-preset', 'fast', '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart', str(output_path),
             ])
 
         result = {
