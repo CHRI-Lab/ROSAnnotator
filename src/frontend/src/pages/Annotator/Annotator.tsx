@@ -91,6 +91,9 @@ const Annotator = ({
   } | null>(null);
   const [aiRecords, setAIRecords] = useState<AIRecord[]>(data.ai_records ?? []);
   const [conversationKey, setConversationKey] = useState(0);
+  const [pendingChunkIndex, setPendingChunkIndex] = useState<number | null>(null);
+  const [confirmingChunkSwitch, setConfirmingChunkSwitch] = useState(false);
+  const [chunkSwitchError, setChunkSwitchError] = useState("");
 
   const handleClearConversation = async () => {
     const response = await fetch("http://localhost:8000/api/gpt_chat/clear/", {
@@ -366,17 +369,53 @@ const Annotator = ({
   const handleChunkSelection = (index: number | null | undefined) => {
     if (
       switchingChunk ||
+      confirmingChunkSwitch ||
       index == null ||
       index === currentChunkIndex ||
       !chunkManifest?.chunks.some((chunk) => chunk.index === index)
     ) return;
-    return onChunkChange(index);
+    setChunkSwitchError("");
+    setPendingChunkIndex(index);
+  };
+
+  const confirmChunkSelection = async () => {
+    if (pendingChunkIndex === null || confirmingChunkSwitch) return;
+    setConfirmingChunkSwitch(true);
+    setChunkSwitchError("");
+    try {
+      await handleClearConversation();
+      const targetIndex = pendingChunkIndex;
+      setPendingChunkIndex(null);
+      await onChunkChange(targetIndex);
+    } catch {
+      setChunkSwitchError("Could not clear the conversation. The chunk was not changed. Please try again.");
+    } finally {
+      setConfirmingChunkSwitch(false);
+    }
   };
 
   return (
 <AxesProvider
   key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}
 >
+  <Dialog
+    open={pendingChunkIndex !== null}
+    onClose={() => !confirmingChunkSwitch && setPendingChunkIndex(null)}
+  >
+    <DialogTitle>Switch to chunk {pendingChunkIndex === null ? "" : pendingChunkIndex + 1}?</DialogTitle>
+    <DialogContent>
+      <DialogContentText>
+        Your annotations will be saved and preserved, but the AI conversation history will be lost when you switch chunks.
+      </DialogContentText>
+      {chunkSwitchError && <DialogContentText color="error">{chunkSwitchError}</DialogContentText>}
+    </DialogContent>
+    <DialogActions>
+      <Button disabled={confirmingChunkSwitch} onClick={() => setPendingChunkIndex(null)}>Cancel</Button>
+      <Button disabled={confirmingChunkSwitch} onClick={confirmChunkSelection} variant="contained">
+        Switch chunk
+      </Button>
+    </DialogActions>
+  </Dialog>
   <Dialog
     open={pendingAIChange !== null}
     onClose={() => resolveAIChangeConfirmation(false)}
@@ -459,7 +498,7 @@ const Annotator = ({
               <Button
                 variant="outlined"
                 onClick={() => handleChunkSelection(currentChunk?.previous_index)}
-                disabled={switchingChunk || currentChunk?.previous_index == null}
+                disabled={switchingChunk || confirmingChunkSwitch || currentChunk?.previous_index == null}
                 sx={{ justifySelf: "start" }}
               >
                 ← Previous
@@ -471,7 +510,7 @@ const Annotator = ({
                   <Select
                     value={currentChunkIndex}
                     onChange={(event) => handleChunkSelection(Number(event.target.value))}
-                    disabled={switchingChunk}
+                    disabled={switchingChunk || confirmingChunkSwitch}
                     aria-label="Select video chunk"
                   >
                     {chunkManifest.chunks.map((chunk) => (
@@ -490,7 +529,7 @@ const Annotator = ({
               <Button
                 variant="outlined"
                 onClick={() => handleChunkSelection(currentChunk?.next_index)}
-                disabled={switchingChunk || currentChunk?.next_index == null}
+                disabled={switchingChunk || confirmingChunkSwitch || currentChunk?.next_index == null}
                 sx={{ justifySelf: "end" }}
               >
                 Next →
