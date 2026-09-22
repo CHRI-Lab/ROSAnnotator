@@ -17,7 +17,6 @@ const ViewPanel = ({ view, context, sx }: ViewPanelProps) => {
     <Box
       minWidth={0}
       minHeight={0}
-      height="100%"
       display="flex"
       flexDirection="column"
       overflow="hidden"
@@ -27,7 +26,7 @@ const ViewPanel = ({ view, context, sx }: ViewPanelProps) => {
       <Box sx={{ borderBottom: 1, borderColor: "divider", px: 1, py: 0.75 }}>
         <Typography color="primary">{view.label}</Typography>
       </Box>
-      <Box flex={1} minHeight={0} overflow="auto">
+      <Box key={view.id} flex={1} minHeight={0} overflow={view.id === 'video' ? 'hidden' : 'auto'}>
         <DataViewContent view={view} context={context} />
       </Box>
     </Box>

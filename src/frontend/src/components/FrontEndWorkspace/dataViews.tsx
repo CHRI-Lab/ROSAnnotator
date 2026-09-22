@@ -25,7 +25,7 @@ const CompanionAudio = ({ audioPath, played, isPlaying }: ViewPanelContext) => {
     }} />;
 };
 
-const VideoContent = (context: ViewPanelContext) => {
+const VideoContent = (context: ViewPanelContext & { audioOnly?: boolean }) => {
   const initializedSource = useRef<string | null>(null);
   const {
   videoPath,
@@ -40,7 +40,8 @@ const VideoContent = (context: ViewPanelContext) => {
   <ReactPlayer
     ref={playerRef}
     width="100%"
-    height="auto"
+    height={context.audioOnly ? 'auto' : '100%'}
+    config={{ file: { attributes: { style: { width: '100%', height: context.audioOnly ? 'auto' : '100%', objectFit: 'contain', display: 'block' } } } }}
     url={`/processed/${videoPath}`}
     onDuration={onDurationChange}
     onProgress={({ playedSeconds }) => onProgress(playedSeconds)}
@@ -84,7 +85,7 @@ export class AudioDataView extends BaseDataView {
     // Video includes audio when available; use one playback source at a time.
     return context.videoPath
       ? <span>Audio plays with the video.</span>
-      : <VideoContent {...context} videoPath={context.audioPath || ''} />;
+      : <VideoContent {...context} audioOnly videoPath={context.audioPath || ''} />;
   }
 }
 

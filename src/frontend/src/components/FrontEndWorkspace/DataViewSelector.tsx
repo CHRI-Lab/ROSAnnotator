@@ -3,6 +3,7 @@ import Button from "@mui/material/Button";
 import MenuItem from "@mui/material/MenuItem";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
+import Tooltip from "@mui/material/Tooltip";
 
 import { DataViewDefinition } from "./viewRegistry";
 
@@ -106,14 +107,20 @@ const DataViewSelector = ({
         size="small"
         label={`Panel ${panelIndex + 1}`}
         value={selection}
-        onChange={(event) =>
-          onSelectionChange(panelIndex, event.target.value)
-        }
+        onChange={(event) => {
+          const target = views.find(view => view.id === event.target.value);
+          if (target?.available === false && target.status !== 'loading') return;
+          onSelectionChange(panelIndex, event.target.value);
+        }}
         sx={{ marginBottom: 1.5 }}
       >
         {views.map((view) => (
-          <MenuItem key={view.id} value={view.id} disabled={view.available === false && view.status !== "loading"} title={view.reason || undefined}>
-            {view.label}
+          <MenuItem key={view.id} value={view.id} disabled={view.available === false && view.status !== "loading"}
+            sx={{ '&.Mui-disabled': { pointerEvents: 'auto' } }}>
+            <Tooltip describeChild title={view.available === false && view.status !== 'loading'
+              ? 'Data type not available' : ''}>
+              <span style={{ display: 'block', width: '100%' }}>{view.label}</span>
+            </Tooltip>
           </MenuItem>
         ))}
       </TextField>

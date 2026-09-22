@@ -64,6 +64,33 @@ function context() {
     onDurationChange() {}, playerRef() {} };
 }
 
+test('unavailable options expose a hover reason but cannot be selected', () => {
+  const changes = [];
+  const tree = load('DataViewSelector').default({ panelCount: 1, selections: ['video'],
+    views: [
+      { id: 'video', label: 'Video', available: true, status: 'ready' },
+      { id: 'motion', label: 'Motion', available: false, status: 'unavailable', reason: 'No Odometry messages' },
+      { id: 'wrench', label: 'Wrench', available: false, status: 'unavailable' },
+    ], onSelectionChange: (...args) => changes.push(args) });
+  const nodes = [];
+  function visit(node) {
+    if (Array.isArray(node)) return node.forEach(visit);
+    if (!node?.props) return;
+    nodes.push(node); visit(node.props.children);
+  }
+  visit(tree);
+  const option = nodes.find(node => node.props.value === 'motion');
+  assert.equal(option.props.disabled, true);
+  assert.equal(option.props.sx['&.Mui-disabled'].pointerEvents, 'auto');
+  assert.equal(option.props.children.props.title, 'Data type not available');
+  assert.equal(nodes.find(node => node.props.value === 'wrench').props.children.props.title, 'Data type not available');
+  const select = nodes.find(node => node.props.label === 'Panel 1');
+  select.props.onChange({ target: { value: 'motion' } });
+  assert.equal(changes.length, 0);
+  select.props.onChange({ target: { value: 'video' } });
+  assert.deepEqual(changes, [[0, 'video']]);
+});
+
 test('registry retains Cassie IDs, labels and renderable component contract', () => {
   assert.deepEqual(Array.from(availableViews, view => view.id), [
     'video', 'transcript', 'annotations', 'statistics-annotations', 'statistics-tiers', 'audio', 'waveform', 'motion', 'wrench',
@@ -89,6 +116,8 @@ test('video forwards playback callbacks and uses Cassie public media URL', () =>
   const player = content.type(content.props);
   assert.equal(player.props.url, '/processed/sample.bag/output.mp4');
   assert.equal(player.props.playing, false);
+  assert.equal(player.props.height, '100%');
+  assert.equal(player.props.config.file.attributes.style.objectFit, 'contain');
   assert.equal(player.props.onPause, state.onPause);
   assert.equal(player.props.onPlay, state.onPlay);
   assert.equal(player.props.onDuration, state.onDurationChange);
