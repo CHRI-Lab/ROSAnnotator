@@ -218,6 +218,13 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    ![](instruction_imgs/import_page.png)
 
    The transcription may take several minutes, depending on the audio length.
+
+   **Windows Docker workaround:** After each chunk finishes processing for the
+   first time, restart the frontend so Docker can see the generated video:
+
+   ```bash
+   docker compose restart frontend
+   ```
    
    ![](instruction_imgs/transcripting.png)
    
