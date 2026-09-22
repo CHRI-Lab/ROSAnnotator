@@ -232,11 +232,18 @@ def process_chunk_view(request, manifest_id, chunk_index):
             )
         except (OSError, ValueError):
             return Response({'error': 'Unable to read annotation.'}, status=400)
+    from .views import load_ai_records
+    annotation_name = f"{manifest['bag_filename']}+{booklist_filename or 'noBookList'}"
+    try:
+        ai_records = load_ai_records(annotation_name, manifest['id'], chunk_index)
+    except (OSError, ValueError):
+        return Response({'error': 'Unable to read AI records.'}, status=500)
     return Response({
         'manifest_id': manifest['id'],
         'bag_filename': manifest['bag_filename'],
         'time_reference': manifest['time_reference'],
         'booklist_data': booklist_data,
         'annotation_data': annotation_data,
+        'ai_records': ai_records,
         **result,
     })

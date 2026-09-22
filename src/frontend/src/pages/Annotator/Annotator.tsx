@@ -139,6 +139,10 @@ const Annotator = ({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         annotation_name: annotationName,
+        ...(chunkManifest ? {
+          manifest_id: chunkManifest.id,
+          chunk_index: currentChunkIndex,
+        } : {}),
         ai_record: record,
         outcome,
       }),

@@ -263,6 +263,14 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    The VLM's annotation is not always correct. Users can edit the annotation manually.
 
+   Completed AI runs are saved in `/datas/annotation` as
+   `ai_records_<rosbag-file-name>+<booklist-file-name>_<manifest-id>.json`
+   (using `noBookList` when no booklist is selected). Each run is added to the
+   existing file for that manifest, so processing the same input and chunk
+   again preserves earlier runs. Records for different chunks in the same
+   manifest are distinguished by `chunk_index`. Runs without a manifest keep
+   the older filename format without the manifest ID.
+
    ![](instruction_imgs/auto_annotation.png) 
 
 6. **Statistic Summary**

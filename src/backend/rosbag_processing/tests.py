@@ -1720,3 +1720,41 @@ class AIRecordPersistenceTests(SimpleTestCase):
             views, "ANNOTATION_PATH", temp_directory
         ):
             self.assertEqual(views.load_ai_records("old-annotation.csv"), [])
+
+    def test_manifest_records_accumulate_and_keep_chunks_separate(self):
+        from . import views
+
+        manifest_id = "550e8400-e29b-41d4-a716-446655440000"
+        other_manifest_id = "550e8400-e29b-41d4-a716-446655440001"
+        with TemporaryDirectory() as temp_directory, patch.object(
+            views, "ANNOTATION_PATH", temp_directory
+        ):
+            for run_id, chunk_index, identifier in (
+                ("first", 0, manifest_id),
+                ("second", 0, manifest_id),
+                ("other-chunk", 1, manifest_id),
+                ("other-manifest", 0, other_manifest_id),
+            ):
+                request = self.factory.post(
+                    "/api/ai_records/complete/",
+                    data=json.dumps({
+                        "annotation_name": "recording.bag+noBookList",
+                        "manifest_id": identifier,
+                        "chunk_index": chunk_index,
+                        "ai_record": {"run_id": run_id},
+                        "outcome": "replied",
+                    }),
+                    content_type="application/json",
+                )
+                self.assertEqual(views.complete_ai_record(request).status_code, 200)
+
+            path = Path(temp_directory) / f"ai_records_recording.bag+noBookList_{manifest_id}.json"
+            self.assertTrue(path.is_file())
+            self.assertEqual(
+                [record["run_id"] for record in views.load_ai_records(
+                    "recording.bag+noBookList", manifest_id, 0
+                )],
+                ["first", "second"],
+            )
+            self.assertEqual(len(views.load_ai_records("recording.bag+noBookList", manifest_id)), 3)
+            self.assertEqual(len(views.load_ai_records("recording.bag+noBookList", other_manifest_id)), 1)

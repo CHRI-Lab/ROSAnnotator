@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 from django.http import JsonResponse
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -135,25 +135,30 @@ def build_ai_record(
     }
 
 
-def ai_records_file_path(annotation_name):
-    return os.path.join(ANNOTATION_PATH, f"ai_records_{annotation_name}.json")
+def ai_records_file_path(annotation_name, manifest_id=None):
+    suffix = f"_{manifest_id}" if manifest_id else ""
+    return os.path.join(ANNOTATION_PATH, f"ai_records_{annotation_name}{suffix}.json")
 
 
-def load_ai_records(annotation_filename):
+def load_ai_records(annotation_filename, manifest_id=None, chunk_index=None):
     annotation_name = (
         annotation_filename[:-4]
         if annotation_filename.endswith(".csv")
         else annotation_filename
     )
-    file_path = ai_records_file_path(annotation_name)
+    file_path = ai_records_file_path(annotation_name, manifest_id)
     if not os.path.exists(file_path):
         return []
 
     with open(file_path, "r") as record_file:
         payload = json.load(record_file)
-    if isinstance(payload, dict):
-        return payload.get("ai_runs", [])
-    return payload if isinstance(payload, list) else []
+    records = payload.get("ai_runs", []) if isinstance(payload, dict) else payload
+    if not isinstance(records, list):
+        return []
+    if chunk_index is not None:
+        return [record for record in records if isinstance(record, dict)
+                and record.get('chunk_index') == chunk_index]
+    return records
 
 
 @api_view(['POST'])
@@ -162,6 +167,12 @@ def complete_ai_record(request):
     annotation_name = request.data.get('annotation_name')
     record = request.data.get('ai_record')
     outcome = request.data.get('outcome')
+    manifest_id = request.data.get('manifest_id')
+    chunk_index = request.data.get('chunk_index')
+    try:
+        manifest_id = str(UUID(str(manifest_id))) if manifest_id is not None else None
+    except (ValueError, TypeError, AttributeError):
+        return JsonResponse({'error': 'Invalid manifest ID'}, status=400)
     if (
         not isinstance(annotation_name, str)
         or not annotation_name.strip()
@@ -172,6 +183,8 @@ def complete_ai_record(request):
         or not isinstance(record.get('run_id'), str)
         or not record['run_id']
         or outcome not in {'replied', 'applied', 'rejected', 'not_applied'}
+        or (manifest_id is None and chunk_index is not None)
+        or (chunk_index is not None and (type(chunk_index) is not int or chunk_index < 0))
     ):
         return JsonResponse({'error': 'Invalid completed AI record'}, status=400)
 
@@ -180,14 +193,16 @@ def complete_ai_record(request):
         'action_outcome': outcome,
         'completed_at': datetime.now(timezone.utc).isoformat(),
     }
+    if chunk_index is not None:
+        completed_record['chunk_index'] = chunk_index
     os.makedirs(ANNOTATION_PATH, exist_ok=True)
-    record_path = ai_records_file_path(annotation_name)
+    record_path = ai_records_file_path(annotation_name, manifest_id)
     lock_path = f'{record_path}.lock'
     temporary_path = None
     try:
         with open(lock_path, 'a+') as lock_file:
             fcntl.flock(lock_file, fcntl.LOCK_EX)
-            existing = load_ai_records(annotation_name)
+            existing = load_ai_records(annotation_name, manifest_id)
             if not isinstance(existing, list):
                 raise ValueError('Existing AI record file is invalid')
             record_index = next(
