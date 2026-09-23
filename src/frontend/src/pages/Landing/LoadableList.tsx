@@ -15,7 +15,6 @@ import {
   Radio,
   RadioGroup,
   TextField,
-  MenuItem,
   DialogContentText,
 } from "@mui/material";
 import Snackbar from "@mui/material/Snackbar";
@@ -48,9 +47,6 @@ function LoadableList() {
   const [inputDurationSeconds, setInputDurationSeconds] = useState(0);
   const [chunkError, setChunkError] = useState("");
   const [preparing, setPreparing] = useState(false);
-  const [sensorTopics, setSensorTopics] = useState<{ motion: string[]; wrench: string[] }>({ motion: [], wrench: [] });
-  const [selectedSensorTopics, setSelectedSensorTopics] = useState<{ motion: string[]; wrench: string[] }>({ motion: [], wrench: [] });
-  const [fixedFrame, setFixedFrame] = useState('');
 
   // AUTOSAVE RECOVERY
   const [autosaveMeta, setAutosaveMeta] = useState<AutosaveMeta | null>(null);
@@ -106,14 +102,6 @@ function LoadableList() {
     setInputDurationSeconds(0);
     try {
       const inspection = await inspectInput(rosBagFile);
-      const topics = inspection.topics || [];
-      const sensors = {
-        motion: topics.filter(t => t.message_count > 0 && ['nav_msgs/Odometry', 'people_msgs/People'].includes(t.message_type)).map(t => t.name),
-        wrench: topics.filter(t => t.message_count > 0 && t.message_type === 'geometry_msgs/WrenchStamped').map(t => t.name),
-      };
-      setSensorTopics(sensors);
-      setSelectedSensorTopics(sensors);
-      setFixedFrame('');
       if (inspection.duration_seconds === 0) {
         throw new Error('No supported data: this bag contains no messages or has zero duration. Please select another bag.');
       }
@@ -236,10 +224,6 @@ function LoadableList() {
         annotationFilename: annotationFile,
         chunkingEnabled,
         chunkSeconds: chunkingEnabled ? seconds : undefined,
-        viewOptions: {
-          ...(sensorTopics.motion.length ? { motion: { topics: selectedSensorTopics.motion, ...(fixedFrame.trim() ? { fixed_frame: fixedFrame.trim() } : {}) } } : {}),
-          ...(sensorTopics.wrench.length ? { wrench: { topics: selectedSensorTopics.wrench } } : {}),
-        },
       });
       navigate(`${destinationPath()}?manifestId=${encodeURIComponent(manifest.id)}`);
     } catch (error) {
@@ -429,15 +413,6 @@ function LoadableList() {
               sx={{ mt: 2 }}
             />
           )}
-          {(['motion', 'wrench'] as const).filter(id => sensorTopics[id].length > 0).map(id => (
-            <TextField key={id} select fullWidth sx={{ mt: 2 }} label={id === 'motion' ? 'Motion topics' : 'Force / Torque topics'}
-              value={selectedSensorTopics[id]} SelectProps={{ multiple: true }}
-              onChange={e => setSelectedSensorTopics(previous => ({ ...previous, [id]: typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value }))}>
-              {sensorTopics[id].map(topic => <MenuItem key={topic} value={topic}>{topic}</MenuItem>)}
-            </TextField>
-          ))}
-          {sensorTopics.motion.length > 0 && <TextField fullWidth sx={{ mt: 2 }} label="Motion fixed frame (optional)"
-            value={fixedFrame} onChange={e => setFixedFrame(e.target.value)} helperText="Leave blank to use the first valid frame. Other frames require recorded TF transforms." />}
           {chunkError && <Alert severity="error" sx={{ mt: 2 }}>{chunkError}</Alert>}
         </DialogContent>
         <DialogActions>

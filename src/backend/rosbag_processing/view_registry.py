@@ -3,8 +3,6 @@ from .data_view_processors import (
     AudioProcessor, VideoProcessor, TranscriptProcessor, WaveformProcessor,
     AnnotationProcessor, AnnotationStatisticsProcessor, TierStatisticsProcessor,
 )
-from .spatial_processors import MotionProcessor, WrenchProcessor
 
 PROCESSORS = (AudioProcessor(), VideoProcessor(), TranscriptProcessor(), WaveformProcessor(),
-              AnnotationProcessor(), AnnotationStatisticsProcessor(), TierStatisticsProcessor(),
-              MotionProcessor(), WrenchProcessor())
+              AnnotationProcessor(), AnnotationStatisticsProcessor(), TierStatisticsProcessor())

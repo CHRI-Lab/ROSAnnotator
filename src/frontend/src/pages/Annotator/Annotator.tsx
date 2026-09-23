@@ -113,21 +113,6 @@ const Annotator = ({
 
   const processingPending = Object.values((data.views || {}) as Record<string, BackendDataView>).some(view => view.status === 'loading');
   useEffect(() => { setDuration(data.duration_seconds || 0); }, [data.duration_seconds]);
-  // Sensor-only bags (or panels without a mounted media player) still share a clock.
-  useEffect(() => {
-    if (player || !isPlaying || duration <= 0) return;
-    let last = performance.now();
-    const timer = window.setInterval(() => {
-      const now = performance.now();
-      const elapsed = (now-last)/1000;
-      last = now;
-      setPlayed(time => Math.min(duration, time+elapsed));
-    }, 50);
-    return () => window.clearInterval(timer);
-  }, [player, isPlaying, duration]);
-  useEffect(() => {
-    if (!player && played >= duration) setIsPlaying(false);
-  }, [played, duration, player]);
 
   const handleAxesUpdate = useCallback((updatedAxes) => {
     setAxesData(updatedAxes);

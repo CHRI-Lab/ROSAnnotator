@@ -1,8 +1,6 @@
 # Data-view processing contracts
 
 See [the implementation design diagram](design-diagram.md).
-See [Motion / Path and Force / Torque](spatial-views.md) for the sensor processors,
-TF conversion, sample contract, demo bag and validation commands.
 
 ## Extension points
 
@@ -17,7 +15,7 @@ the workflow resolves their order. A processor may treat a dependency as optiona
 fields without adding view-specific branches to the workflow.
 
 Registered views are audio, video, transcript, waveform, annotations,
-statistics-annotations, statistics-tiers, motion, and wrench. Existing five frontend registry IDs,
+statistics-annotations, and statistics-tiers. Existing five frontend registry IDs,
 named component exports, and the shared playback/seek context remain supported.
 The annotation/statistics processors describe an editable timeline; its live data
 continues to come from `AxesProvider`. Imported annotations are attached after
@@ -30,8 +28,6 @@ inspects topic names, ROS types, and message counts. Unsupported ROS types are
 ignored. The default input is the first nonempty compatible topic in sorted name
 order; `view_options[view_id].topics` can explicitly select one compatible topic.
 No ROS topic name is hard-coded.
-Motion and wrench override the single-topic default and select all compatible
-nonempty topics unless an explicit subset is requested.
 
 A finite, positive `header.stamp` inside the bag time range takes precedence.
 Otherwise the bag-record timestamp is used and a warning is recorded. Invalid

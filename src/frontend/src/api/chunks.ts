@@ -6,7 +6,6 @@ export interface InputInspection {
   duration_seconds: number;
   duration_minutes: number;
   supports_chunking: boolean;
-  topics?: Array<{ name: string; message_type: string; message_count: number }>;
 }
 
 export interface VideoChunk {
@@ -67,7 +66,6 @@ export async function createChunkManifest(options: {
   annotationFilename?: string;
   chunkingEnabled: boolean;
   chunkSeconds?: number;
-  viewOptions?: Record<string, Record<string, unknown>>;
 }): Promise<ChunkManifest> {
   const response = await fetch(`${API_BASE}/chunks/`, {
     method: "POST",
@@ -77,7 +75,6 @@ export async function createChunkManifest(options: {
       booklist_filename: options.booklistFilename || "",
       annotation_filename: options.annotationFilename || "",
       chunking_enabled: options.chunkingEnabled,
-      view_options: options.viewOptions || {},
       ...(options.chunkingEnabled ? { chunk_seconds: options.chunkSeconds } : {}),
     }),
   });

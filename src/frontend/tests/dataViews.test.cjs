@@ -93,7 +93,7 @@ test('unavailable options expose a hover reason but cannot be selected', () => {
 
 test('registry retains Cassie IDs, labels and renderable component contract', () => {
   assert.deepEqual(Array.from(availableViews, view => view.id), [
-    'video', 'transcript', 'annotations', 'statistics-annotations', 'statistics-tiers', 'audio', 'waveform', 'motion', 'wrench',
+    'video', 'transcript', 'annotations', 'statistics-annotations', 'statistics-tiers', 'audio', 'waveform',
   ]);
   for (const view of availableViews) {
     assert.equal(typeof view.label, 'string');

@@ -7,7 +7,6 @@ import StatisticsTier from "../StatisticsTier";
 import Transcript from "../Transcript";
 import { BaseDataView } from "./BaseDataView";
 import type { ViewPanelContext } from "./viewTypes";
-import { MotionView, WrenchView } from './SpatialViews';
 
 const CompanionAudio = ({ audioPath, played, isPlaying }: ViewPanelContext) => {
   const player = useRef<ReactPlayer | null>(null);
@@ -97,18 +96,6 @@ export class WaveformDataView extends BaseDataView {
   }
 }
 
-export class MotionDataView extends BaseDataView {
-  readonly id = 'motion';
-  readonly label = 'Motion / Path';
-  render(context: ViewPanelContext): React.ReactElement { return <MotionView {...context} />; }
-}
-
-export class WrenchDataView extends BaseDataView {
-  readonly id = 'wrench';
-  readonly label = 'Force / Torque';
-  render(context: ViewPanelContext): React.ReactElement { return <WrenchView {...context} />; }
-}
-
 // Concrete views inherit the agreed render input/output from BaseDataView.
 export class VideoDataView extends BaseDataView {
   readonly id = "video";
@@ -160,7 +147,6 @@ const tierStatistics = new TierStatisticsDataView().toDefinition();
 export const dataViewDefinitions = [
   video, transcript, annotations, annotationStatistics, tierStatistics,
   new AudioDataView().toDefinition(), new WaveformDataView().toDefinition(),
-  new MotionDataView().toDefinition(), new WrenchDataView().toDefinition(),
 ];
 
 // Preserve Cassie's existing named component exports.
