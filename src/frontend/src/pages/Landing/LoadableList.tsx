@@ -15,6 +15,7 @@ import {
   Radio,
   RadioGroup,
   TextField,
+  MenuItem,
   DialogContentText,
 } from "@mui/material";
 import Snackbar from "@mui/material/Snackbar";
@@ -47,6 +48,8 @@ function LoadableList() {
   const [inputDurationSeconds, setInputDurationSeconds] = useState(0);
   const [chunkError, setChunkError] = useState("");
   const [preparing, setPreparing] = useState(false);
+  const [sensorTopics, setSensorTopics] = useState<{ wrench: string[] }>({ wrench: [] });
+  const [selectedSensorTopics, setSelectedSensorTopics] = useState<{ wrench: string[] }>({ wrench: [] });
 
   // AUTOSAVE RECOVERY
   const [autosaveMeta, setAutosaveMeta] = useState<AutosaveMeta | null>(null);
@@ -102,6 +105,12 @@ function LoadableList() {
     setInputDurationSeconds(0);
     try {
       const inspection = await inspectInput(rosBagFile);
+      const topics = inspection.topics || [];
+      const sensors = {
+        wrench: topics.filter(t => t.message_count > 0 && t.message_type === 'geometry_msgs/WrenchStamped').map(t => t.name),
+      };
+      setSensorTopics(sensors);
+      setSelectedSensorTopics(sensors);
       if (inspection.duration_seconds === 0) {
         throw new Error('No supported data: this bag contains no messages or has zero duration. Please select another bag.');
       }
@@ -224,6 +233,9 @@ function LoadableList() {
         annotationFilename: annotationFile,
         chunkingEnabled,
         chunkSeconds: chunkingEnabled ? seconds : undefined,
+        viewOptions: {
+          ...(sensorTopics.wrench.length ? { wrench: { topics: selectedSensorTopics.wrench } } : {}),
+        },
       });
       navigate(`${destinationPath()}?manifestId=${encodeURIComponent(manifest.id)}`);
     } catch (error) {
@@ -413,6 +425,13 @@ function LoadableList() {
               sx={{ mt: 2 }}
             />
           )}
+          {(['wrench'] as const).filter(id => sensorTopics[id].length > 0).map(id => (
+            <TextField key={id} select fullWidth sx={{ mt: 2 }} label="Force / Torque topics"
+              value={selectedSensorTopics[id]} SelectProps={{ multiple: true }}
+              onChange={e => setSelectedSensorTopics(previous => ({ ...previous, [id]: typeof e.target.value === 'string' ? e.target.value.split(',') : e.target.value }))}>
+              {sensorTopics[id].map(topic => <MenuItem key={topic} value={topic}>{topic}</MenuItem>)}
+            </TextField>
+          ))}
           {chunkError && <Alert severity="error" sx={{ mt: 2 }}>{chunkError}</Alert>}
         </DialogContent>
         <DialogActions>
