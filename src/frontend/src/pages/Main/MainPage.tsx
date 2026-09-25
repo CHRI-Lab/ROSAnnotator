@@ -13,6 +13,8 @@ import type { BackendDataView } from "../../components/FrontEndWorkspace/viewTyp
 
 import { loadDataViews, ViewPayload } from "../../api/dataViews";
 
+import { stripExtension } from "../../components/Timeline/saveUtils";
+
 interface ChunkPageData {
   views?: Record<string, BackendDataView>;
   duration_seconds?: number;
@@ -82,12 +84,15 @@ const MainPage = () => {
   const [error, setError] = useState<unknown>(null);
   const [errorDisplay, setErrorDisplay] = useState(false);
   const [pendingRecovery, setPendingRecovery] = useState<PendingRecovery | null>(null);
+    // Survives chunk switches, unlike anything held in Annotator or Timeline.
+  const [savedAnnotationName, setSavedAnnotationName] = useState("");
   const requestGeneration = useRef(0);
   const chunkChangeInProgress = useRef(false);
   const autosaveFlush = useRef<(() => Promise<void>) | null>(null);
   const registerAutosave = useCallback((flush: (() => Promise<void>) | null) => {
     autosaveFlush.current = flush;
   }, []);
+  
 
   useEffect(() => {
     const generation = ++requestGeneration.current;
@@ -103,6 +108,7 @@ const MainPage = () => {
     setCurrentChunkIndex(0);
     setRestoredAxes(null);
     setPendingRecovery(null);
+    setSavedAnnotationName(annotationFile ? stripExtension(annotationFile) : "");
 
     const fetchData = async () => {
       try {
@@ -289,6 +295,8 @@ const MainPage = () => {
         restoredAxes={restoredAxes}
         autosaveEnabled={pendingRecovery === null}
         onAutosaveReady={registerAutosave}
+        savedAnnotationName={savedAnnotationName}
+        onAnnotationSaved={setSavedAnnotationName}
       />}
     </div>
   );

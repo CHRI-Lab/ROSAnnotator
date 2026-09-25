@@ -59,6 +59,8 @@ interface AnnotatorProps {
   restoredAxes?: any[] | null;
   autosaveEnabled?: boolean;
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
+  savedAnnotationName?: string;
+  onAnnotationSaved?: (name: string) => void;
 }
 
 const Annotator = ({
@@ -73,6 +75,8 @@ const Annotator = ({
   restoredAxes = null,
   autosaveEnabled = true,
   onAutosaveReady,
+  savedAnnotationName = "",
+  onAnnotationSaved,
 }: AnnotatorProps) => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(data.duration_seconds || 0);
@@ -630,6 +634,8 @@ const Annotator = ({
                 chunk_index: currentChunkIndex,
               } : undefined}
               onAutosaveReady={onAutosaveReady}
+              savedAnnotationName={savedAnnotationName}
+              onAnnotationSaved={onAnnotationSaved}
               switchingChunk={switchingChunk}
               aiRecords={aiRecords}
               onSave={handleSaveAnnotations}

@@ -53,6 +53,8 @@ interface TimelineProps {
   instruction: AIInstruction | null;
   aiRecords: AIRecord[];
   onSave: () => void;
+  savedAnnotationName?: string;
+  onAnnotationSaved?: (name: string) => void;
 }
 
 type PendingDeletion =
@@ -124,6 +126,8 @@ const Timeline: React.FC<TimelineProps> = ({
   autosaveScope,
   onAutosaveReady,
   switchingChunk = false,
+  savedAnnotationName,
+  onAnnotationSaved
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval] = useState(1);
@@ -299,20 +303,26 @@ const Timeline: React.FC<TimelineProps> = ({
     setSeekTime(played);
   }, [played]);
 
-  // Prompts user for annotation file name, with prefilled defined filename set.
   const handleOpenSaveDialog = () => {
-    // Pre-fill with the existing auto-generated name as a sensible default
-    const defaultName = buildDefaultAnnotationName(rosBagFileName, bookListFileName);
+    // Prefer the file this session is working in, so a save goes back to the
+    // file it came from. The merge in a chunk save depends on this: a
+    // different name merges into a file that does not exist.
+    const defaultName =
+      savedAnnotationName ||
+      buildDefaultAnnotationName(rosBagFileName, bookListFileName);
     setAnnotationName(defaultName);
     setIsSaveDialogOpen(true);
   };
 
 
 
-  const finishSave = () => {
+  const finishSave = (name: string) => {
     alert("Data saved successfully.");
     setHasUnsavedEdits(false);
     autosave.markSynced(axes);
+    // Later saves in this session default to the file just written, including
+    // after a chunk switch.
+    onAnnotationSaved?.(name);
     if (autosaveEnabled && !autosaveScope) {
       deleteAutosave(rosBagFileName).catch((err) =>
         console.warn(" [autosave] Could not clear autosave after save.", err)
@@ -335,7 +345,7 @@ const Timeline: React.FC<TimelineProps> = ({
         return;
       }
       if (autosaveScope) await autosave.flush();
-      finishSave();
+      finishSave(name);
     } catch (error) {
       setError("Failed to save data. Please try again.\n" + error);
       setIsErrorDialogOpen(true);

@@ -1,7 +1,7 @@
 // saveUtils.ts
 
 //strips file ext from filename string (recording.bag -> recording)
-const stripExtension = (filename: string) => filename.replace(/\.[^/.]+$/, ""); 
+export const stripExtension = (filename: string) => filename.replace(/\.[^/.]+$/, "");
 
 // Builds the default annotation name shown when the save dialog opens
 export const buildDefaultAnnotationName = (
