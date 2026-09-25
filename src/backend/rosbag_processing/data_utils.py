@@ -12,7 +12,6 @@ def get_rosbag_duration(bag_filename):
     with RosbagReader(bag_filename) as reader:
         return reader.duration
 
-
 def plot_waveform(audio_path, output_filename, start_sec=None, end_sec=None):
     import numpy as np
     from matplotlib.figure import Figure
@@ -43,7 +42,14 @@ def transcribe_audio_to_srt(audio_file_path, output_folder_path):
     if audio_file_path.endswith(".mp3"):
         audio = AudioSegment.from_mp3(audio_file_path)
         wav_file_path = os.path.join(output_folder_path, "converted_audio.wav")
-        audio.export(wav_file_path, format="wav")
+        # AudioSegment.export returns an open file handle. Close it before the
+        # next consumer opens the WAV; otherwise Docker Desktop bind mounts can
+        # expose a race (most noticeably on Windows) where pyannote cannot see
+        # the newly-created file yet.
+        exported_audio = audio.export(wav_file_path, format="wav")
+        exported_audio.close()
+        if not os.path.isfile(wav_file_path):
+            raise RuntimeError(f"Audio conversion did not create {wav_file_path}.")
         audio_file_path = wav_file_path
 
 

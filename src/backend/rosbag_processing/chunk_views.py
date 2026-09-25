@@ -10,15 +10,13 @@ from rest_framework import serializers, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from .chunks import load_manifest, save_manifest
+from .ai_records import build_ai_record_annotation_name
 from .chunk_processing import process_chunk
+from .chunks import load_manifest, save_manifest
 from .serializers import InputInspectionSerializer
+from .view_metadata import attach_metadata
 
 logger = logging.getLogger(__name__)
-
-
-from .view_metadata import annotations_for_chunk, attach_metadata
-
 
 class ChunkRequestSerializer(InputInspectionSerializer):
     chunking_enabled = serializers.BooleanField(default=True)
@@ -203,9 +201,19 @@ def process_chunk_view(request, manifest_id, chunk_index):
 
     result = attach_metadata(result, manifest.get('booklist_filename'),
                              manifest.get('annotation_filename'), manifest['chunks'][chunk_index])
+    booklist_filename = manifest.get('booklist_filename')
+    from .views import load_ai_records
+    annotation_name = build_ai_record_annotation_name(
+        manifest['bag_filename'], booklist_filename,
+    )
+    try:
+        ai_records = load_ai_records(annotation_name, manifest['id'], chunk_index)
+    except (OSError, ValueError):
+        return Response({'error': 'Unable to read AI records.'}, status=500)
     return Response({
         'manifest_id': manifest['id'],
         'bag_filename': manifest['bag_filename'],
         'time_reference': manifest['time_reference'],
+        'ai_records': ai_records,
         **result,
     })

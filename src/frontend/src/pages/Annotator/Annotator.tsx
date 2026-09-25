@@ -42,6 +42,7 @@ import {
   AIInstruction,
   AIRecord,
   AssistantRequestOptions,
+  buildAIRecordAnnotationName,
 } from "../../types/aiRecords";
 
 import type { BackendDataView } from "../../components/FrontEndWorkspace/viewTypes";
@@ -87,6 +88,22 @@ const Annotator = ({
     resolve: (accepted: boolean) => void;
   } | null>(null);
   const [aiRecords, setAIRecords] = useState<AIRecord[]>(data.ai_records ?? []);
+  const [conversationKey, setConversationKey] = useState(0);
+  const [pendingChunkIndex, setPendingChunkIndex] = useState<number | null>(null);
+  const [confirmingChunkSwitch, setConfirmingChunkSwitch] = useState(false);
+  const [chunkSwitchError, setChunkSwitchError] = useState("");
+
+  const handleClearConversation = async () => {
+    const response = await fetch("http://localhost:8000/api/gpt_chat/clear/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_context_id: data.chat_context_id }),
+    });
+    if (!response.ok) {
+      throw new Error("Could not clear backend conversation history");
+    }
+    setConversationKey((key) => key + 1);
+  };
   useEffect(() => {
     if (bookListData) {
       setBookList(bookListData);
@@ -113,6 +130,34 @@ const Annotator = ({
 
   const processingPending = Object.values((data.views || {}) as Record<string, BackendDataView>).some(view => view.status === 'loading');
   useEffect(() => { setDuration(data.duration_seconds || 0); }, [data.duration_seconds]);
+
+  const persistCompletedAIRecord = async (
+    record: AIRecord | undefined,
+    outcome: "replied" | "applied" | "rejected" | "not_applied",
+  ) => {
+    if (!record) throw new Error("AI response did not include a record to save.");
+    const annotationName = buildAIRecordAnnotationName(
+      rosBagFileName,
+      bookListFileName,
+    );
+    const response = await fetch("http://localhost:8000/api/ai_records/complete/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        annotation_name: annotationName,
+        ...(chunkManifest ? {
+          manifest_id: chunkManifest.id,
+          chunk_index: currentChunkIndex,
+        } : {}),
+        ai_record: record,
+        outcome,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error("The AI reply completed, but its record could not be saved. Please retry.");
+    }
+    upsertAIRecord({ ...record, action_outcome: outcome });
+  };
 
   const handleAxesUpdate = useCallback((updatedAxes) => {
     setAxesData(updatedAxes);
@@ -149,11 +194,11 @@ const Annotator = ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          annotation_name: `${rosBagFileName}+${
-            bookListFileName || "noBookList"
-          }`,
+          annotation_name: buildAIRecordAnnotationName(
+            rosBagFileName,
+            bookListFileName,
+          ),
           annotation_data: annotationData,
-          ai_records: aiRecords,
         }),
       });
 
@@ -182,6 +227,7 @@ const Annotator = ({
       body: JSON.stringify({
         message: message, 
         audio_transcript: data.audio_transcript, 
+        video_path: data.video_path,
         Axeinfo: axesData,
         Codebook: bookList,
         chat_context_id: data.chat_context_id,
@@ -219,9 +265,6 @@ const Annotator = ({
         const assistantMode =
           (data.assistant_mode as AssistantMode) ?? assistantRouting.mode;
         const aiRecord = data.ai_record as AIRecord | undefined;
-        if (aiRecord) {
-          upsertAIRecord(aiRecord);
-        }
 
         const jsonStartIndex = responseString.indexOf("{");
         const jsonEndIndex = responseString.lastIndexOf("}");
@@ -231,17 +274,25 @@ const Annotator = ({
           const normalMessage = responseString.substring(0, jsonStartIndex).trim();
           const jsonString = responseString.substring(jsonStartIndex, jsonEndIndex + 1).trim();
   
+          let parsedObject: unknown;
           try {
+            parsedObject = JSON.parse(jsonString);
+          } catch (error) {
+            console.error("Failed to parse JSON:", error);
+          }
 
-            const parsedObject = JSON.parse(jsonString);
-  
-            if (parsedObject.type === "instruction" && Array.isArray(parsedObject.steps)) {
+          if (
+            parsedObject && typeof parsedObject === "object" &&
+            "type" in parsedObject && parsedObject.type === "instruction" &&
+            "steps" in parsedObject && Array.isArray(parsedObject.steps)
+          ) {
               console.log("This is an instruction:", parsedObject);
               const parsedInstruction = parsedObject as AIInstruction;
               if (
                 requiresAIChangeConfirmation(parsedInstruction, axesData) &&
                 !(await requestAIChangeConfirmation(parsedInstruction))
               ) {
+                await persistCompletedAIRecord(aiRecord, "rejected");
                 return {
                   text: "AI timeline changes were cancelled. No annotation changes were applied.",
                   assistantMode,
@@ -250,7 +301,32 @@ const Annotator = ({
                 };
               }
               const updatedAxes = applyAIInstruction(axesData, parsedInstruction, duration);
+              const requestedAnnotation = /\bannotat(?:e|ion|ions|ing)\b/i.test(message);
+              const addedBlockApplied = parsedInstruction.steps.some((step) => {
+                if (step.action !== "addBlock") return false;
+                const axisId = Number(step.parameters?.axisId);
+                const start = Number(step.parameters?.start);
+                const end = Number(step.parameters?.end);
+                const text = String(step.parameters?.text ?? "");
+                const wasPresent = axesData.find((axis) => axis.id === axisId)?.blocks.some(
+                  (block) => block.start === start && block.end === end && block.text === text,
+                );
+                const isPresent = updatedAxes.find((axis) => axis.id === axisId)?.blocks.some(
+                  (block) => block.start === start && block.end === end && block.text === text,
+                );
+                return Boolean(isPresent && !wasPresent);
+              });
+              if (requestedAnnotation && !addedBlockApplied) {
+                await persistCompletedAIRecord(aiRecord, "not_applied");
+                return {
+                  text: "The model did not provide any usable annotation blocks. No empty axis was created. Please try again with a specific time range or annotation target.",
+                  assistantMode,
+                  aiRecord,
+                  isError: true,
+                };
+              }
               if (JSON.stringify(updatedAxes) === JSON.stringify(axesData)) {
+                await persistCompletedAIRecord(aiRecord, "not_applied");
                 return {
                   text: "The model returned a timeline instruction, but none of its steps could be applied.",
                   assistantMode,
@@ -258,6 +334,7 @@ const Annotator = ({
                   isError: true,
                 };
               }
+              await persistCompletedAIRecord(aiRecord, "applied");
               setAxesData(updatedAxes);
               setInstruction(parsedInstruction);
 
@@ -265,12 +342,9 @@ const Annotator = ({
               // Timeline executes it through the instruction state above,
               // while the chat shows the concise confirmation used by the demo.
               return { text: "Done", assistantMode, aiRecord };
-            }
-          } catch (error) {
-            console.error("Failed to parse JSON:", error);
-            return { text: normalMessage, assistantMode, aiRecord };
           }
 
+          await persistCompletedAIRecord(aiRecord, "replied");
           return {
             text: normalMessage || responseString,
             assistantMode,
@@ -278,6 +352,7 @@ const Annotator = ({
           };
         }
 
+        await persistCompletedAIRecord(aiRecord, "replied");
         return { text: responseString, assistantMode, aiRecord };
       })
       .catch((error) => {
@@ -353,18 +428,55 @@ const Annotator = ({
   const currentChunk = chunkManifest?.chunks?.[currentChunkIndex];
   const handleChunkSelection = (index: number | null | undefined) => {
     if (
-      switchingChunk || processingPending ||
+      switchingChunk ||
+      processingPending ||
+      confirmingChunkSwitch ||
       index == null ||
       index === currentChunkIndex ||
       !chunkManifest?.chunks.some((chunk) => chunk.index === index)
     ) return;
-    return onChunkChange(index);
+    setChunkSwitchError("");
+    setPendingChunkIndex(index);
+  };
+
+  const confirmChunkSelection = async () => {
+    if (pendingChunkIndex === null || confirmingChunkSwitch) return;
+    setConfirmingChunkSwitch(true);
+    setChunkSwitchError("");
+    try {
+      await handleClearConversation();
+      const targetIndex = pendingChunkIndex;
+      setPendingChunkIndex(null);
+      await onChunkChange(targetIndex);
+    } catch {
+      setChunkSwitchError("Could not clear the conversation. The chunk was not changed. Please try again.");
+    } finally {
+      setConfirmingChunkSwitch(false);
+    }
   };
 
   return (
 <AxesProvider
   key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}
 >
+  <Dialog
+    open={pendingChunkIndex !== null}
+    onClose={() => !confirmingChunkSwitch && setPendingChunkIndex(null)}
+  >
+    <DialogTitle>Switch to chunk {pendingChunkIndex === null ? "" : pendingChunkIndex + 1}?</DialogTitle>
+    <DialogContent>
+      <DialogContentText>
+        Your annotations will be saved and preserved, but the AI conversation history will be lost when you switch chunks.
+      </DialogContentText>
+      {chunkSwitchError && <DialogContentText color="error">{chunkSwitchError}</DialogContentText>}
+    </DialogContent>
+    <DialogActions>
+      <Button disabled={confirmingChunkSwitch} onClick={() => setPendingChunkIndex(null)}>Cancel</Button>
+      <Button disabled={confirmingChunkSwitch} onClick={confirmChunkSelection} variant="contained">
+        Switch chunk
+      </Button>
+    </DialogActions>
+  </Dialog>
   <Dialog
     open={pendingAIChange !== null}
     onClose={() => resolveAIChangeConfirmation(false)}
@@ -459,7 +571,7 @@ const Annotator = ({
               <Button
                 variant="outlined"
                 onClick={() => handleChunkSelection(currentChunk?.previous_index)}
-                disabled={switchingChunk || processingPending || currentChunk?.previous_index == null}
+                disabled={switchingChunk || processingPending || confirmingChunkSwitch || currentChunk?.previous_index == null}
                 sx={{ justifySelf: "start" }}
               >
                 ← Previous
@@ -471,7 +583,7 @@ const Annotator = ({
                   <Select
                     value={currentChunkIndex}
                     onChange={(event) => handleChunkSelection(Number(event.target.value))}
-                    disabled={switchingChunk || processingPending}
+                    disabled={switchingChunk || processingPending || confirmingChunkSwitch}
                     aria-label="Select video chunk"
                   >
                     {chunkManifest.chunks.map((chunk) => (
@@ -490,7 +602,7 @@ const Annotator = ({
               <Button
                 variant="outlined"
                 onClick={() => handleChunkSelection(currentChunk?.next_index)}
-                disabled={switchingChunk || processingPending || currentChunk?.next_index == null}
+                disabled={switchingChunk || processingPending || confirmingChunkSwitch || currentChunk?.next_index == null}
                 sx={{ justifySelf: "end" }}
               >
                 Next →
@@ -498,7 +610,7 @@ const Annotator = ({
             </Paper>
           )}
 
-          <Box width="100%" maxWidth={1200} overflow="auto" maxHeight="50vh">
+          <Box width="100%" maxWidth={1200} overflow="auto" maxHeight="30vh">
             {processingPending ? <Typography>Preparing annotation data?</Typography> : <Timeline
               key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}
               rosBagFileName={rosBagFileName}
@@ -527,6 +639,7 @@ const Annotator = ({
   
 
         <RightAssistantPanel
+          onClearConversation={handleClearConversation}
           codebook={
             editMode ? (
               <EditBooklistForm
@@ -542,7 +655,7 @@ const Annotator = ({
               </Box>
             )
           }
-          assistant={<Chatbox onSendMessage={handleSendMessageToGPT} />}
+          assistant={<Chatbox key={conversationKey} onSendMessage={handleSendMessageToGPT} />}
         />
         </Box>
       </Box>

@@ -98,14 +98,16 @@ class VideoProcessor(DataViewProcessor):
         silent = context.directory / 'silent.mp4'
         run_media(['-f', 'concat', '-safe', '0', '-i', str(concat), '-vsync', 'vfr',
                    '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2', '-pix_fmt', 'yuv420p',
-                   '-c:v', 'libx264', '-preset', 'fast', '-t', str(context.reader.duration), str(silent)])
+                   '-c:v', 'libx264', '-preset', 'fast', '-t', str(context.reader.duration),
+                   '-movflags', '+faststart', str(silent)])
         destination = silent
         audio = context.results.get('audio', {})
         if audio.get('available'):
             combined = context.directory / 'output.mp4'
             try:
                 run_media(['-i', str(silent), '-i', audio['processed_data']['artifacts'][0],
-                           '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', str(combined)])
+                           '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac',
+                           '-movflags', '+faststart', str(combined)])
                 destination = combined
             except subprocess.CalledProcessError:
                 context.reader.warn('Audio mux failed; video is available without audio.')

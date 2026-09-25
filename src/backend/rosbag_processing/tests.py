@@ -988,6 +988,51 @@ class GPTChatEndpointTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
+    def test_selected_video_frames_are_used_instead_of_global_frames(self):
+        from . import views
+
+        views.video_frames = ["unrelated-frame"]
+        request = self.factory.post(
+            "/api/gpt_chat/",
+            data=json.dumps({
+                "message": "Describe this chunk",
+                "audio_transcript": "Speaker 1: Hello",
+                "Axeinfo": [],
+                "Codebook": [],
+                "video_path": "chunks/selected/0000/output.mp4",
+            }),
+            content_type="application/json",
+        )
+        with patch.object(views, "frames_for_video", return_value=["selected-frame"]) as sample, \
+             patch.object(views, "openai_api_key", "test-key"), \
+             patch.object(views, "RemoteAPI") as remote_api:
+            remote_api.return_value.respond.return_value = "description"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        sample.assert_called_once_with("chunks/selected/0000/output.mp4")
+        self.assertEqual(remote_api.call_args.kwargs["frameContext"], ["selected-frame"])
+
+    def test_video_path_cannot_escape_processed_directory(self):
+        from . import views
+
+        with self.assertRaisesRegex(ValueError, "Selected video was not found"):
+            views.frames_for_video("../secret.mp4")
+
+    def test_clear_history_removes_backend_context(self):
+        from . import views
+
+        views.gpt_history = "private prior conversation"
+        previous_generation = views.gpt_history_generation
+        request = self.factory.post("/api/gpt_chat/clear/")
+
+        response = views.clear_gpt_history(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content), {"cleared": True})
+        self.assertEqual(views.gpt_history, "")
+        self.assertEqual(views.gpt_history_generation, previous_generation + 1)
+
     def test_endpoint_keeps_request_and_response_contract(self):
         from . import views
 
@@ -1599,7 +1644,7 @@ class AssistantRoutingEndpointTests(SimpleTestCase):
         self.assertEqual(response.status_code, 501)
         self.assertFalse(json.loads(response.content)["can_fallback_to_remote"])
 
-    def test_mixed_hybrid_mode_never_calls_remote_until_orchestrator_exists(self):
+    def test_hybrid_mode_is_rejected_without_calling_a_provider(self):
         from . import views
 
         views.cache.set('chat:test-context', {'history': "", 'frames': []})
@@ -1630,186 +1675,16 @@ class AssistantRoutingEndpointTests(SimpleTestCase):
         ) as remote_api:
             response = views.gpt_chat(request)
 
-        self.assertEqual(response.status_code, 501)
-        self.assertIn("Mixed Local/Remote", response.content.decode())
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(json.loads(response.content), {"error": "Invalid assistant mode"})
         remote_api.assert_not_called()
-
-    def test_mixed_hybrid_routes_explain_empty_remote_api_key(self):
-        from . import views
-
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "chat_context_id": "test-context",
-                    "message": "Use hybrid routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "local",
-                        "frames": "local",
-                        "codebook": "remote",
-                        "timeline": "remote",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "openai_api_key", None):
-            response = views.gpt_chat(request)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("API key is empty", response.content.decode())
-
-    def test_all_local_hybrid_routes_use_local_model(self):
-        from . import views
-
-        views.cache.set('chat:test-context', {'history': "", 'frames': []})
-        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "chat_context_id": "test-context",
-                    "message": "Use local routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "Axeinfo": [],
-                    "Codebook": [],
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "local",
-                        "frames": "local",
-                        "codebook": "local",
-                        "timeline": "local",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "RemoteAPI") as remote_api, patch.object(
-            views, "create_local_ai"
-        ) as local_ai:
-            local_ai.return_value.respond.return_value = "local response"
-            response = views.gpt_chat(request)
-
-        response_data = json.loads(response.content)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response_data["response"], "local response")
-        self.assertEqual(response_data["assistant_mode"], "local")
-        self.assertEqual(
-            response_data["ai_record"]["model_selection"]["requested"], "hybrid"
-        )
-        self.assertEqual(
-            response_data["ai_record"]["model_selection"]["used"], "local"
-        )
-        remote_api.assert_not_called()
-        local_ai.return_value.respond.assert_called_once_with("Use local routing", "")
-
-    def test_all_local_hybrid_routes_explain_local_model_setup_failure(self):
-        from . import views
-
-        views.cache.set('chat:test-context', {'history': "", 'frames': []})
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "chat_context_id": "test-context",
-                    "message": "Use local routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "local",
-                        "frames": "local",
-                        "codebook": "local",
-                        "timeline": "local",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "openai_api_key", None), patch.object(
-            views, "create_local_ai"
-        ) as local_ai:
-            local_ai.return_value.respond.side_effect = LocalInferenceError()
-            response = views.gpt_chat(request)
-
-        self.assertEqual(response.status_code, 501)
-        self.assertIn("Choose a local model", response.content.decode())
-        self.assertIn("models/ directory", response.content.decode())
-
-    def test_all_remote_hybrid_routes_explain_empty_api_key(self):
-        from . import views
-
-        views.cache.set('chat:test-context', {'history': "", 'frames': []})
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "chat_context_id": "test-context",
-                    "message": "Use remote routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "remote",
-                        "frames": "remote",
-                        "codebook": "remote",
-                        "timeline": "remote",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "openai_api_key", None), patch.object(
-            views, "RemoteAPI"
-        ) as remote_api:
-            response = views.gpt_chat(request)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("API key is empty", response.content.decode())
-        remote_api.assert_not_called()
-
-    def test_all_remote_hybrid_routes_explain_invalid_api_key(self):
-        from . import views
-
-        views.cache.set('chat:test-context', {'history': "", 'frames': []})
-        request = self.factory.post(
-            "/api/gpt_chat/",
-            data=json.dumps(
-                {
-                    "chat_context_id": "test-context",
-                    "message": "Use remote routing",
-                    "audio_transcript": "Speaker 1: Hello",
-                    "assistant_mode": "hybrid",
-                    "context_routes": {
-                        "transcript": "remote",
-                        "frames": "remote",
-                        "codebook": "remote",
-                        "timeline": "remote",
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
-
-        with patch.object(views, "openai_api_key", "invalid-key"), patch.object(
-            views, "RemoteAPI"
-        ) as remote_api:
-            remote_api.return_value.respond.side_effect = RemoteAuthenticationError()
-            response = views.gpt_chat(request)
-
-        self.assertEqual(response.status_code, 503)
-        self.assertIn("API key is invalid", response.content.decode())
 
 
 class AIRecordPersistenceTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
-    def test_save_annotation_writes_named_ai_records_sidecar(self):
+    def test_completed_records_append_and_manual_save_does_not_overwrite_them(self):
         from . import views
 
         ai_record = {
@@ -1817,30 +1692,71 @@ class AIRecordPersistenceTests(SimpleTestCase):
             "run_id": "run-1",
             "ai_response": "Done",
         }
-        request = self.factory.post(
-            "/api/save_annotation/",
-            data=json.dumps(
-                {
-                    "annotation_name": "recording.bag+booklist.json",
-                    "annotation_data": [],
-                    "ai_records": [ai_record],
-                }
-            ),
-            content_type="application/json",
-        )
-
         with TemporaryDirectory() as temp_directory, patch.object(
             views, "ANNOTATION_PATH", temp_directory
         ):
-            response = views.save_annotation(request)
+            completion = self.factory.post(
+                "/api/ai_records/complete/",
+                data=json.dumps({
+                    "annotation_name": "recording.bag+booklist.json",
+                    "ai_record": ai_record,
+                    "outcome": "applied",
+                }),
+                content_type="application/json",
+            )
+            response = views.complete_ai_record(completion)
+            retry_response = views.complete_ai_record(self.factory.post(
+                "/api/ai_records/complete/",
+                data=json.dumps({
+                    "annotation_name": "recording.bag+booklist.json",
+                    "ai_record": ai_record,
+                    "outcome": "applied",
+                }),
+                content_type="application/json",
+            ))
+            manual_save = self.factory.post(
+                "/api/save_annotation/",
+                data=json.dumps({
+                    "annotation_name": "recording.bag+booklist.json",
+                    "annotation_data": [],
+                    "ai_records": [],
+                }),
+                content_type="application/json",
+            )
+            save_response = views.save_annotation(manual_save)
             sidecar_path = Path(temp_directory) / (
                 "ai_records_recording.bag+booklist.json.json"
             )
             saved_payload = json.loads(sidecar_path.read_text())
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(retry_response.status_code, 200)
+        self.assertEqual(save_response.status_code, 200)
         self.assertEqual(saved_payload["schema_version"], 1)
-        self.assertEqual(saved_payload["ai_runs"], [ai_record])
+        self.assertEqual(len(saved_payload["ai_runs"]), 1)
+        self.assertEqual(saved_payload["ai_runs"][0]["run_id"], "run-1")
+        self.assertEqual(saved_payload["ai_runs"][0]["action_outcome"], "applied")
+
+    def test_rejected_action_is_saved_with_rejected_outcome(self):
+        from . import views
+
+        with TemporaryDirectory() as temp_directory, patch.object(
+            views, "ANNOTATION_PATH", temp_directory
+        ):
+            request = self.factory.post(
+                "/api/ai_records/complete/",
+                data=json.dumps({
+                    "annotation_name": "recording.bag+noBookList",
+                    "ai_record": {"run_id": "rejected-run", "ai_response": "instruction"},
+                    "outcome": "rejected",
+                }),
+                content_type="application/json",
+            )
+            response = views.complete_ai_record(request)
+            records = views.load_ai_records("recording.bag+noBookList.csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(records[0]["action_outcome"], "rejected")
 
     def test_load_ai_records_is_backward_compatible_without_sidecar(self):
         from . import views
@@ -1850,4 +1766,40 @@ class AIRecordPersistenceTests(SimpleTestCase):
         ):
             self.assertEqual(views.load_ai_records("old-annotation.csv"), [])
 
+    def test_manifest_records_accumulate_and_keep_chunks_separate(self):
+        from . import views
 
+        manifest_id = "550e8400-e29b-41d4-a716-446655440000"
+        other_manifest_id = "550e8400-e29b-41d4-a716-446655440001"
+        with TemporaryDirectory() as temp_directory, patch.object(
+            views, "ANNOTATION_PATH", temp_directory
+        ):
+            for run_id, chunk_index, identifier in (
+                ("first", 0, manifest_id),
+                ("second", 0, manifest_id),
+                ("other-chunk", 1, manifest_id),
+                ("other-manifest", 0, other_manifest_id),
+            ):
+                request = self.factory.post(
+                    "/api/ai_records/complete/",
+                    data=json.dumps({
+                        "annotation_name": "recording.bag+noBookList",
+                        "manifest_id": identifier,
+                        "chunk_index": chunk_index,
+                        "ai_record": {"run_id": run_id},
+                        "outcome": "replied",
+                    }),
+                    content_type="application/json",
+                )
+                self.assertEqual(views.complete_ai_record(request).status_code, 200)
+
+            path = Path(temp_directory) / f"ai_records_recording.bag+noBookList_{manifest_id}.json"
+            self.assertTrue(path.is_file())
+            self.assertEqual(
+                [record["run_id"] for record in views.load_ai_records(
+                    "recording.bag+noBookList", manifest_id, 0
+                )],
+                ["first", "second"],
+            )
+            self.assertEqual(len(views.load_ai_records("recording.bag+noBookList", manifest_id)), 3)
+            self.assertEqual(len(views.load_ai_records("recording.bag+noBookList", other_manifest_id)), 1)
