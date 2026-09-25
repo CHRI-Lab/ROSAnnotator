@@ -21,6 +21,7 @@ import {
   collectAnnotationData,
   postAnnotation,
   AnnotationSaveConflict,
+  formatSeconds
 } from "./saveUtils";
 import useAutosave from "../Autosave/useAutosave";
 import {
@@ -590,6 +591,57 @@ const Timeline: React.FC<TimelineProps> = ({
   };
   const totalWidth = (duration / markInterval) * 50;
 
+  const conflict = pendingOverwrite?.conflict;
+  const chunkRange = conflict
+    ? `${formatSeconds(conflict.chunk_start_seconds)} to ${formatSeconds(conflict.chunk_end_seconds)}`
+    : "";
+  const chunkLabel = conflict?.chunk_index !== undefined
+    ? `chunk ${conflict.chunk_index + 1}`
+    : "this chunk";
+
+  const overwritePrompt = (() => {
+    if (!conflict) return null;
+    const file = `"${conflict.annotation_name}.csv"`;
+
+    if (conflict.reason === "file_unreadable") {
+      return {
+        title: "That file could not be read",
+        body: `${file} already exists but could not be read as an annotation file. Saving replaces it completely, and whatever it currently holds will be lost.`,
+        cancel: "Choose another name",
+        confirm: "Replace file",
+        destructive: true,
+      };
+    }
+
+    if (conflict.reason === "chunk_is_empty") {
+      return {
+        title: "Add to the existing file?",
+        body: `${file} already holds ${conflict.block_count ?? 0} annotations from other parts of the recording, but none in ${chunkLabel} (${chunkRange}). Your work for this chunk will be added to it.`,
+        cancel: "Choose another name",
+        confirm: "Add to file",
+        destructive: false,
+      };
+    }
+
+    if (conflict.reason === "chunk_has_annotations") {
+      return {
+        title: "Replace this chunk's annotations?",
+        body: `${file} already holds ${conflict.chunk_block_count ?? 0} annotations in ${chunkLabel} (${chunkRange}). Saving replaces them with your current work. Annotations elsewhere in the recording are kept.`,
+        cancel: "Choose another name",
+        confirm: "Replace this chunk",
+        destructive: true,
+      };
+    }
+
+    return {
+      title: "Replace the existing annotation file?",
+      body: `${file} was last saved at ${formatAutosaveTimestamp(conflict.modified_at)} and holds ${conflict.axis_count ?? 0} time ${conflict.axis_count === 1 ? "axis" : "axes"} and ${conflict.block_count ?? 0} annotations. Saving replaces all of it with your current work.`,
+      cancel: "Choose another name",
+      confirm: "Replace file",
+      destructive: true,
+    };
+  })();
+
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
     <MainContainer>
@@ -633,30 +685,18 @@ const Timeline: React.FC<TimelineProps> = ({
   </DialogActions>
 </Dialog>
 <Dialog open={pendingOverwrite !== null} disableEscapeKeyDown>
-  <DialogTitle>
-    {pendingOverwrite?.conflict.reason === "file_unreadable"
-      ? "That file could not be read"
-      : "Replace the existing annotation file?"}
-  </DialogTitle>
+  <DialogTitle>{overwritePrompt?.title}</DialogTitle>
   <DialogContent>
-    {pendingOverwrite?.conflict.reason === "file_unreadable" ? (
-      <DialogContentText>
-        {`"${pendingOverwrite?.conflict.annotation_name}.csv" already exists but could not be read as an annotation file. Saving replaces it completely, and whatever it currently holds will be lost.`}
-      </DialogContentText>
-    ) : (
-      <DialogContentText>
-        {`"${pendingOverwrite?.conflict.annotation_name}.csv" was last saved at ${
-          formatAutosaveTimestamp(pendingOverwrite?.conflict.modified_at)
-        } and holds ${pendingOverwrite?.conflict.axis_count ?? 0} time ${
-          pendingOverwrite?.conflict.axis_count === 1 ? "axis" : "axes"
-        } and ${pendingOverwrite?.conflict.block_count ?? 0} annotations. Saving replaces all of it with your current work.`}
-      </DialogContentText>
-    )}
+    <DialogContentText>{overwritePrompt?.body}</DialogContentText>
   </DialogContent>
   <DialogActions>
-    <Button onClick={handleCancelOverwrite}>Choose another name</Button>
-    <Button onClick={handleConfirmOverwrite} color="error" variant="contained">
-      Replace file
+    <Button onClick={handleCancelOverwrite}>{overwritePrompt?.cancel}</Button>
+    <Button
+      onClick={handleConfirmOverwrite}
+      color={overwritePrompt?.destructive ? "error" : "primary"}
+      variant="contained"
+    >
+      {overwritePrompt?.confirm}
     </Button>
   </DialogActions>
 </Dialog>

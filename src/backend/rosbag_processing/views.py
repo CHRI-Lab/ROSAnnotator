@@ -568,6 +568,51 @@ def describe_existing_annotation(file_path, annotation_name):
         ),
     }
 
+def describe_chunk_conflict(file_path, annotation_name, chunk):
+    """Describe what a chunk save would do to an existing file.
+
+    Counts blocks the chunk currently displays, using the same clip_to_chunk
+    rule the merge uses, so the prompt cannot describe a different set from
+    the one that gets replaced.
+    """
+    if not os.path.isfile(file_path):
+        return None
+
+    modified_at = datetime.fromtimestamp(
+        os.path.getmtime(file_path), tz=timezone.utc,
+    ).isoformat()
+
+    try:
+        existing = load_annotation(f'{annotation_name}.csv', ANNOTATION_PATH)
+    except Exception:
+        return {
+            'reason': 'file_unreadable',
+            'annotation_name': annotation_name,
+            'modified_at': modified_at,
+        }
+
+    from .view_metadata import clip_to_chunk
+
+    in_chunk = sum(
+        1
+        for axis in existing
+        for block in axis.get('annotationBlocks', [])
+        if clip_to_chunk(block, chunk) is not None
+    )
+    total = sum(len(axis.get('annotationBlocks', [])) for axis in existing)
+
+    return {
+        'reason': 'chunk_has_annotations' if in_chunk else 'chunk_is_empty',
+        'annotation_name': annotation_name,
+        'modified_at': modified_at,
+        'axis_count': len(existing),
+        'block_count': total,
+        'chunk_block_count': in_chunk,
+        'chunk_index': chunk['index'],
+        'chunk_start_seconds': chunk['start_seconds'],
+        'chunk_end_seconds': chunk['end_seconds'],
+    }
+
 def _same_block(incoming, clipped):
     return (
         math.isclose(incoming['start'], clipped[0], abs_tol=1e-6)
@@ -730,13 +775,17 @@ def save_annotation(request):
             if conflict is not None:
                 return JsonResponse(conflict, status=409)
     else:
+        if not confirm_overwrite:
+            conflict = describe_chunk_conflict(file_path, annotation_name, chunk)
+            if conflict is not None:
+                return JsonResponse(conflict, status=409)
         try:
             existing = load_annotation(f'{annotation_name}.csv', ANNOTATION_PATH)
         except FileNotFoundError:
             existing = []
         except Exception:
             return JsonResponse(
-                describe_existing_annotation(file_path, annotation_name),
+                describe_chunk_conflict(file_path, annotation_name, chunk),
                 status=409,
             )
         annotation_list = merge_chunk_annotations(existing, annotation_list, chunk)

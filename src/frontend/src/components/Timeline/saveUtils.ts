@@ -54,11 +54,29 @@ export const collectAnnotationData = (axes: any[]) => {
 };
 
 export type AnnotationSaveConflict = {
-    reason: "file_exists" | "file_unreadable";
+    reason:
+        | "file_exists"
+        | "file_unreadable"
+        | "chunk_is_empty"
+        | "chunk_has_annotations";
     annotation_name: string;
     modified_at?: string;
     axis_count?: number;
     block_count?: number;
+    chunk_block_count?: number;
+    chunk_index?: number;
+    chunk_start_seconds?: number;
+    chunk_end_seconds?: number;
+};
+
+// "5:00" for a chunk boundary, so the prompt matches the timeline the user
+// is looking at rather than raw seconds.
+export const formatSeconds = (value?: number): string => {
+    if (value === undefined || !Number.isFinite(value)) return "?";
+    const total = Math.round(value);
+    const minutes = Math.floor(total / 60);
+    const seconds = total % 60;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
 };
 
 export type AnnotationSaveScope = {
