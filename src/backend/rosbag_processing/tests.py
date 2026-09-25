@@ -1084,7 +1084,7 @@ from django.test import SimpleTestCase
 from rest_framework.test import APIClient
 
 from .chunks import build_chunks, load_manifest, save_manifest
-from .chunk_views import annotations_for_chunk
+from .view_metadata import annotations_for_chunk
 from .data_utils import get_rosbag_duration
 
 
