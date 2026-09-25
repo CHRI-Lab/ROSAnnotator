@@ -1,4 +1,5 @@
 const API_BASE = "http://localhost:8000/api";
+import type { BackendDataView } from '../components/FrontEndWorkspace/viewTypes';
 
 export interface InputInspection {
   bag_filename: string;
@@ -28,6 +29,7 @@ export interface ChunkManifest {
 }
 
 export interface ChunkResult extends VideoChunk {
+  views?: Record<string, BackendDataView>;
   manifest_id: string;
   bag_filename: string;
   time_reference: "bag_start";

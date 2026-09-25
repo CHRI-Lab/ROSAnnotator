@@ -7,10 +7,15 @@ import { Dialog, DialogTitle, DialogContent, Typography, Button } from "@mui/mat
 import {
   ChunkManifest,
   getChunkManifest,
-  processChunk,
 } from "../../api/chunks";
 
+import type { BackendDataView } from "../../components/FrontEndWorkspace/viewTypes";
+
+import { loadDataViews, ViewPayload } from "../../api/dataViews";
+
 interface ChunkPageData {
+  views?: Record<string, BackendDataView>;
+  duration_seconds?: number;
   video_path: string;
   audio_transcript: string;
   booklist_data: unknown;
@@ -34,6 +39,13 @@ const restoreChunk = async (bag: string, id: string, index: number) => {
     throw new Error("The autosave does not belong to this chunk.");
   }
   return hydrateAutosaveAxes(payload.axes);
+};
+
+const requireAvailableViews = (data: ChunkPageData) => {
+  if (data.views && !Object.values(data.views).some(view => view.available && view.status === 'ready' && view.processed_data != null)) {
+    throw new Error('No usable data views are available. ' + Object.values(data.views)
+      .map(view => `${view.view_id}: ${view.reason || 'Unavailable'}`).join(' '));
+  }
 };
 
 const MainPage = () => {
@@ -81,41 +93,32 @@ const MainPage = () => {
         if (manifestId) {
           manifest = await getChunkManifest(manifestId);
           if (!isCurrent()) return;
-          if (manifest.bag_filename !== rosBagFile) {
-            throw new Error("The chunk manifest belongs to a different ROSBag.");
-          }
-          if (shouldRestore && manifest.chunking_enabled) {
-            throw new Error("Whole-input recovery cannot be applied to a split chunk. Restore from the file selection page.");
-          }
-          loadedData = await processChunk(manifestId, 0);
-          if (manifest.chunking_enabled) {
-            recoveredAxes = await restoreChunk(rosBagFile, manifestId, 0);
-          }
-        } else {
-          const response = await fetch("http://localhost:8000/api/process_rosbag/", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              bag_filename: rosBagFile,
-              booklist_filename: bookListFile,
-              annotation_filename: annotationFile,
-            }),
-          });
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload.error || "Error loading the ROSBag.");
-          loadedData = payload;
+          if (manifest.bag_filename !== rosBagFile) throw new Error('The chunk manifest belongs to a different ROSBag.');
+          if (shouldRestore && manifest.chunking_enabled) throw new Error('Whole-input recovery cannot be applied to a split chunk.');
+          if (manifest.chunking_enabled) recoveredAxes = await restoreChunk(rosBagFile, manifestId, 0);
         }
-        if (!isCurrent()) return;
-
-        // Restore before mounting Timeline, including whole-input manifests.
-        // If recovery fails, keep the editor closed so edits cannot overwrite it.
         if (shouldRestore) {
           const payload = await fetchAutosave(rosBagFile);
           if (payload.bag_filename !== rosBagFile || !Array.isArray(payload.axes)) {
-            throw new Error("The autosave does not contain valid data for this ROSBag.");
+            throw new Error('The autosave does not contain valid data for this ROSBag.');
           }
           recoveredAxes = hydrateAutosaveAxes(payload.axes);
         }
+        const showProgress = (payload: ViewPayload) => {
+          if (!isCurrent() || !Object.values(payload.views).some(view => view.available)) return;
+          setChunkManifest(manifest);
+          setRestoredAxes(recoveredAxes);
+          setData(payload);
+          setBookListData(payload.booklist_data);
+          setLoading(false);
+        };
+        loadedData = await loadDataViews(
+          manifestId ? `http://localhost:8000/api/chunks/${manifestId}/0/process/`
+            : 'http://localhost:8000/api/process_rosbag/',
+          { bag_filename: rosBagFile, booklist_filename: bookListFile, annotation_filename: annotationFile },
+          showProgress,
+        );
+        requireAvailableViews(loadedData);
         if (!isCurrent()) return;
         setChunkManifest(manifest);
         setRestoredAxes(recoveredAxes);
@@ -152,7 +155,10 @@ const MainPage = () => {
       if (!autosaveFlush.current) throw new Error("The editor is not ready to save. Please retry.");
       await autosaveFlush.current();
       if (generation !== requestGeneration.current) return;
-      const nextChunk = await processChunk(manifestId, targetIndex);
+      const nextChunk = await loadDataViews(
+        `http://localhost:8000/api/chunks/${manifestId}/${targetIndex}/process/`, {},
+      );
+      requireAvailableViews(nextChunk);
       if (generation !== requestGeneration.current) return;
       const refreshedManifest = await getChunkManifest(manifestId);
       if (generation !== requestGeneration.current) return;

@@ -102,6 +102,9 @@ function LoadableList() {
     setInputDurationSeconds(0);
     try {
       const inspection = await inspectInput(rosBagFile);
+      if (inspection.duration_seconds === 0) {
+        throw new Error('No supported data: this bag contains no messages or has zero duration. Please select another bag.');
+      }
       if (!Number.isFinite(inspection.duration_seconds) || inspection.duration_seconds <= 0) {
         throw new Error("Unable to determine the input duration.");
       }

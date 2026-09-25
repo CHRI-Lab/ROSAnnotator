@@ -31,7 +31,9 @@ class AIAssistantTests(SimpleTestCase):
 
     @patch("rosbag_processing.ai_assistant.OpenAI")
     def test_remote_api_preserves_existing_gpt_request(self, openai_class):
-        response_message = '{"type":"instruction","steps":[]}'
+        response_message = json.dumps({"type": "instruction", "steps": [
+            {"action": "addBlock", "parameters": {"axisId": 1, "start": 0, "end": 1, "text": "Greeting"}}
+        ]})
         openai_class.return_value.chat.completions.create.return_value = (
             SimpleNamespace(
                 choices=[SimpleNamespace(message=SimpleNamespace(content=response_message))]
@@ -1034,9 +1036,10 @@ class GPTChatEndpointTests(SimpleTestCase):
     def test_endpoint_keeps_request_and_response_contract(self):
         from . import views
 
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
         body = {
+            "chat_context_id": "test-context",
             "message": "Add an annotation",
             "audio_transcript": "Speaker 1: Hello",
             "Axeinfo": [{"axisId": 1}],
@@ -1071,7 +1074,7 @@ class GPTChatEndpointTests(SimpleTestCase):
             "Add an annotation", ""
         )
         self.assertEqual(
-            views.gpt_history, "Add an annotationunchanged response"
+            views.cache.get('chat:test-context')['history'], "Add an annotationunchanged response"
         )
 import os
 import tempfile
@@ -1085,28 +1088,55 @@ from .chunk_views import annotations_for_chunk
 from .data_utils import get_rosbag_duration
 
 
+class ProcessingSessionApiTests(SimpleTestCase):
+    @patch('rosbag_processing.rosbag_session.RosbagProcessingSession')
+    def test_whole_bag_adapter_preserves_request_and_response(self, session_class):
+        session = session_class.return_value
+        session.video_frames = []
+        session.video_fps = 25
+        result = {
+            'video_path': 'sample.bag/output.mp4',
+            'audio_path': 'sample.bag/audio.mp3',
+            'waveform_image_path': 'sample.bag/output_waveform.png',
+            'audio_transcript': '', 'speaker_data': [],
+            'booklist_data': {}, 'annotation_data': None,
+            'message': 'File already processed',
+        }
+        session.process.return_value = result
+        response = APIClient().post('/api/process_rosbag/', {
+            'bag_filename': 'sample.bag', 'booklist_filename': 'codes.json',
+            'annotation_filename': 'annotations.csv',
+        }, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, result)
+        request = session.process.call_args.args[0]
+        self.assertEqual(request.bag_path, os.path.join('/app/datas/rosbag-data/', 'sample.bag'))
+        self.assertEqual(request.booklist_filename, 'codes.json')
+        self.assertEqual(request.annotation_filename, 'annotations.csv')
+
+    @patch('rosbag_processing.rosbag_session.RosbagProcessingSession')
+    def test_expected_processing_error_keeps_legacy_http_shape(self, session_class):
+        from .processing_sessions import ProcessingError
+        session_class.return_value.process.side_effect = ProcessingError('Invalid bag filename')
+        response = APIClient().post('/api/process_rosbag/', {'bag_filename': 'missing.bag'}, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'error': 'Invalid bag filename'})
+
+    @patch('rosbag_processing.rosbag_session.RosbagProcessingSession')
+    def test_missing_filename_does_not_start_a_session(self, session_class):
+        response = APIClient().post('/api/process_rosbag/', {}, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'error': 'bag_filename is required'})
+        session_class.assert_not_called()
+
+
 class GetRosbagDurationTests(SimpleTestCase):
-    @patch('rosbag_processing.data_utils.Bag')
-    def test_returns_duration_and_closes_bag(self, bag_class):
-        bag = MagicMock()
-        bag.get_start_time.return_value = 100.25
-        bag.get_end_time.return_value = 460.75
-        bag_class.return_value = bag
-
-        duration = get_rosbag_duration('/tmp/example.bag')
-
-        self.assertEqual(duration, 360.5)
-        bag.close.assert_called_once_with()
-
-    @patch('rosbag_processing.data_utils.Bag')
-    def test_never_returns_negative_duration(self, bag_class):
-        bag = MagicMock()
-        bag.get_start_time.return_value = 20
-        bag.get_end_time.return_value = 10
-        bag_class.return_value = bag
-
-        self.assertEqual(get_rosbag_duration('/tmp/example.bag'), 0.0)
-        bag.close.assert_called_once_with()
+    @patch('rosbag_processing.rosbag_reader.RosbagReader')
+    def test_returns_duration_through_shared_reader(self, reader_class):
+        reader_class.return_value.__enter__.return_value.duration = 360.5
+        self.assertEqual(get_rosbag_duration('/tmp/example.bag'), 360.5)
+        reader_class.assert_called_once_with('/tmp/example.bag')
+        reader_class.return_value.__exit__.assert_called_once()
 
 class InspectInputApiTests(SimpleTestCase):
     def setUp(self):
@@ -1128,8 +1158,10 @@ class InspectInputApiTests(SimpleTestCase):
             pass
         return path
 
-    @patch('rosbag_processing.views.get_rosbag_duration', return_value=3600.125)
+    @patch('rosbag_processing.rosbag_reader.RosbagReader')
     def test_returns_input_duration(self, get_duration):
+        get_duration.return_value.__enter__.return_value.duration = 3600.125
+        get_duration.return_value.__enter__.return_value.topics = {}
         bag_path = self.create_bag_file()
 
         response = self.client.post(
@@ -1144,6 +1176,7 @@ class InspectInputApiTests(SimpleTestCase):
             'duration_seconds': 3600.125,
             'duration_minutes': 60.002,
             'supports_chunking': True,
+            'topics': [],
         })
         get_duration.assert_called_once_with(bag_path)
 
@@ -1168,7 +1201,7 @@ class InspectInputApiTests(SimpleTestCase):
         self.assertEqual(response.data['error'], 'ROSBag file not found.')
 
     @patch(
-        'rosbag_processing.views.get_rosbag_duration',
+        'rosbag_processing.rosbag_reader.RosbagReader',
         side_effect=RuntimeError('invalid bag'),
     )
     def test_returns_bad_request_for_unreadable_bag(self, _get_duration):
@@ -1343,15 +1376,20 @@ class ChunkApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.data, {'error': 'Unable to process chunk.'})
 
+class AssistantRoutingEndpointTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
     def test_missing_remote_key_offers_local_without_starting_it(self):
         from . import views
 
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
         request = self.factory.post(
             "/api/gpt_chat/",
             data=json.dumps(
                 {
+                    "chat_context_id": "test-context",
                     "message": "Add an annotation",
                     "audio_transcript": "Speaker 1: Hello",
                     "Axeinfo": [],
@@ -1376,12 +1414,13 @@ class ChunkApiTests(SimpleTestCase):
     def test_invalid_remote_key_offers_local_without_starting_it(self):
         from . import views
 
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
         request = self.factory.post(
             "/api/gpt_chat/",
             data=json.dumps(
                 {
+                    "chat_context_id": "test-context",
                     "message": "Add an annotation",
                     "audio_transcript": "Speaker 1: Hello",
                     "Axeinfo": [],
@@ -1405,11 +1444,12 @@ class ChunkApiTests(SimpleTestCase):
     def test_invalid_remote_timeline_response_is_rejected_without_changes(self):
         from . import views
 
-        views.gpt_history = "existing history"
+        views.cache.set('chat:test-context', {'history': "existing history", 'frames': []})
         request = self.factory.post(
             "/api/gpt_chat/",
             data=json.dumps(
                 {
+                    "chat_context_id": "test-context",
                     "message": "Create an annotation axis",
                     "audio_transcript": "Speaker 1: Hello",
                     "Axeinfo": [],
@@ -1439,18 +1479,19 @@ class ChunkApiTests(SimpleTestCase):
         self.assertEqual(response.status_code, 502)
         self.assertIn("No annotation changes were applied", response_data["error"])
         self.assertNotIn("can_fallback_to_local", response_data)
-        self.assertEqual(views.gpt_history, "existing history")
+        self.assertEqual(views.cache.get('chat:test-context')['history'], "existing history")
         local_ai.assert_not_called()
 
     def test_consented_remote_to_local_fallback_is_recorded(self):
         from . import views
 
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
         request = self.factory.post(
             "/api/gpt_chat/",
             data=json.dumps(
                 {
+                    "chat_context_id": "test-context",
                     "message": "Retry locally",
                     "audio_transcript": "Speaker 1: Hello",
                     "Axeinfo": [],
@@ -1493,12 +1534,13 @@ class ChunkApiTests(SimpleTestCase):
     def test_consented_local_to_remote_fallback_is_recorded(self):
         from . import views
 
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
         request = self.factory.post(
             "/api/gpt_chat/",
             data=json.dumps(
                 {
+                    "chat_context_id": "test-context",
                     "message": "Use remote with permission",
                     "audio_transcript": "Speaker 1: Hello",
                     "Axeinfo": [],
@@ -1533,12 +1575,13 @@ class ChunkApiTests(SimpleTestCase):
     def test_local_mode_never_calls_remote_api(self):
         from . import views
 
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
         request = self.factory.post(
             "/api/gpt_chat/",
             data=json.dumps(
                 {
+                    "chat_context_id": "test-context",
                     "message": "Keep this local",
                     "audio_transcript": "Sensitive transcript",
                     "Axeinfo": [],
@@ -1569,12 +1612,13 @@ class ChunkApiTests(SimpleTestCase):
     def test_local_mode_does_not_offer_remote_without_api_key(self):
         from . import views
 
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
         request = self.factory.post(
             "/api/gpt_chat/",
             data=json.dumps(
                 {
+                    "chat_context_id": "test-context",
                     "message": "Keep this local",
                     "audio_transcript": "Sensitive transcript",
                     "Axeinfo": [],
@@ -1603,12 +1647,13 @@ class ChunkApiTests(SimpleTestCase):
     def test_hybrid_mode_is_rejected_without_calling_a_provider(self):
         from . import views
 
-        views.gpt_history = ""
-        views.video_frames = ["frame-1"]
-        request = RequestFactory().post(
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        views.cache.set('chat:test-context', {**views.cache.get('chat:test-context'), 'frames': ["frame-1"]})
+        request = self.factory.post(
             "/api/gpt_chat/",
             data=json.dumps(
                 {
+                    "chat_context_id": "test-context",
                     "message": "Use hybrid routing",
                     "audio_transcript": "Sensitive transcript",
                     "Axeinfo": [],

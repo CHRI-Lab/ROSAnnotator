@@ -47,6 +47,7 @@ export const requiresAIChangeConfirmation = (
 export const applyAIInstruction = (
   currentAxes: TimelineAxis[],
   instruction: AIInstruction,
+  duration: number,
 ) => {
   const nextAxes = cloneAxes(currentAxes);
   instruction.steps.forEach((step) => {
@@ -79,9 +80,13 @@ export const applyAIInstruction = (
         text: String(parameters.text ?? ""),
       };
       if (
+        !Number.isFinite(duration) ||
+        duration < 0 ||
         !Number.isFinite(block.start) ||
         !Number.isFinite(block.end) ||
-        block.end < block.start
+        block.start < 0 ||
+        block.end < block.start ||
+        block.end > duration
       ) {
         return;
       }

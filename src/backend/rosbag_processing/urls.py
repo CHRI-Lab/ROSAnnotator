@@ -2,8 +2,10 @@ from django.urls import path
 from .chunk_views import create_chunks, get_chunks, process_chunk_view
 from .views import inspect_input, process_rosbag, list_filenames, transcribe_audio, update_booklist, save_annotation, get_annotation, gpt_chat, clear_gpt_history, complete_ai_record
 from .autosave import save_autosave, check_autosave, load_autosave, discard_autosave
+from .views import view_catalog
 
 urlpatterns = [
+    path('views/', view_catalog, name='view_catalog'),
     path('chunks/', create_chunks, name='create_chunks'),
     path('chunks/<uuid:manifest_id>/', get_chunks, name='get_chunks'),
     path('chunks/<uuid:manifest_id>/<int:chunk_index>/', get_chunks, name='get_chunk'),
