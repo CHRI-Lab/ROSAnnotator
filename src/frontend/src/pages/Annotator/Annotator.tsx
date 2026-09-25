@@ -47,6 +47,7 @@ import {
   AIInstruction,
   AIRecord,
   AssistantRequestOptions,
+  buildAIRecordAnnotationName,
 } from "../../types/aiRecords";
 
 interface AnnotatorProps {
@@ -133,7 +134,10 @@ const Annotator = ({
     outcome: "replied" | "applied" | "rejected" | "not_applied",
   ) => {
     if (!record) throw new Error("AI response did not include a record to save.");
-    const annotationName = `${rosBagFileName}+${bookListFileName || "noBookList"}`;
+    const annotationName = buildAIRecordAnnotationName(
+      rosBagFileName,
+      bookListFileName,
+    );
     const response = await fetch("http://localhost:8000/api/ai_records/complete/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -191,9 +195,10 @@ const Annotator = ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          annotation_name: `${rosBagFileName}+${
-            bookListFileName || "noBookList"
-          }`,
+          annotation_name: buildAIRecordAnnotationName(
+            rosBagFileName,
+            bookListFileName,
+          ),
           annotation_data: annotationData,
         }),
       });

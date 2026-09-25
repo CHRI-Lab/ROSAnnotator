@@ -11,8 +11,9 @@ from rest_framework import serializers, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from .chunks import load_manifest, save_manifest
+from .ai_records import build_ai_record_annotation_name
 from .chunk_processing import process_chunk
+from .chunks import load_manifest, save_manifest
 from .data_utils import load_annotation
 from .serializers import InputInspectionSerializer
 
@@ -233,7 +234,9 @@ def process_chunk_view(request, manifest_id, chunk_index):
         except (OSError, ValueError):
             return Response({'error': 'Unable to read annotation.'}, status=400)
     from .views import load_ai_records
-    annotation_name = f"{manifest['bag_filename']}+{booklist_filename or 'noBookList'}"
+    annotation_name = build_ai_record_annotation_name(
+        manifest['bag_filename'], booklist_filename,
+    )
     try:
         ai_records = load_ai_records(annotation_name, manifest['id'], chunk_index)
     except (OSError, ValueError):
