@@ -1,14 +1,19 @@
 from .data_utils import *
 import json
 import os
+import base64
+from pathlib import Path
+import cv2
 from django.http import JsonResponse
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 from .serializers import BooklistSerializer, InputInspectionSerializer, TranscriptionRequestSerializer
 import csv
+import fcntl
+import tempfile
 from django.views.decorators.csrf import csrf_exempt
 from dotenv import load_dotenv
 from openai import APIConnectionError, APIStatusError
@@ -23,10 +28,47 @@ from .ai_assistant import (
 load_dotenv()
 
 gpt_history = ""
+gpt_history_generation = 0
 video_frames = []
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 ROSBAG_DATA_DIR = '/app/datas/rosbag-data/'
+PROCESSED_DATA_DIR = '/app/processed_data'
+
+
+def frames_for_video(video_path, max_frames=50):
+    """Sample the selected processed MP4, never a different request's global frames."""
+    if not isinstance(video_path, str) or not video_path or Path(video_path).is_absolute():
+        raise ValueError('Invalid video path.')
+    root = Path(PROCESSED_DATA_DIR).resolve()
+    path = (root / video_path).resolve()
+    if root not in path.parents or path.suffix.lower() != '.mp4' or not path.is_file():
+        raise ValueError('Selected video was not found.')
+
+    capture = cv2.VideoCapture(str(path))
+    try:
+        if not capture.isOpened():
+            raise ValueError('Selected video could not be opened.')
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count <= 0:
+            raise ValueError('Selected video has no readable frames.')
+        count = min(frame_count, max_frames)
+        positions = sorted({round(index * (frame_count - 1) / max(count - 1, 1))
+                            for index in range(count)})
+        frames = []
+        for position in positions:
+            capture.set(cv2.CAP_PROP_POS_FRAMES, position)
+            success, frame = capture.read()
+            if not success:
+                continue
+            encoded, buffer = cv2.imencode('.jpg', frame)
+            if encoded:
+                frames.append(base64.b64encode(buffer).decode('ascii'))
+        if not frames:
+            raise ValueError('Selected video has no readable frames.')
+        return frames
+    finally:
+        capture.release()
 
 
 @api_view(['POST'])
@@ -93,25 +135,106 @@ def build_ai_record(
     }
 
 
-def ai_records_file_path(annotation_name):
-    return os.path.join(ANNOTATION_PATH, f"ai_records_{annotation_name}.json")
+def ai_records_file_path(annotation_name, manifest_id=None):
+    suffix = f"_{manifest_id}" if manifest_id else ""
+    return os.path.join(ANNOTATION_PATH, f"ai_records_{annotation_name}{suffix}.json")
 
 
-def load_ai_records(annotation_filename):
+def load_ai_records(annotation_filename, manifest_id=None, chunk_index=None):
     annotation_name = (
         annotation_filename[:-4]
         if annotation_filename.endswith(".csv")
         else annotation_filename
     )
-    file_path = ai_records_file_path(annotation_name)
+    file_path = ai_records_file_path(annotation_name, manifest_id)
     if not os.path.exists(file_path):
         return []
 
     with open(file_path, "r") as record_file:
         payload = json.load(record_file)
-    if isinstance(payload, dict):
-        return payload.get("ai_runs", [])
-    return payload if isinstance(payload, list) else []
+    records = payload.get("ai_runs", []) if isinstance(payload, dict) else payload
+    if not isinstance(records, list):
+        return []
+    if chunk_index is not None:
+        return [record for record in records if isinstance(record, dict)
+                and record.get('chunk_index') == chunk_index]
+    return records
+
+
+@api_view(['POST'])
+def complete_ai_record(request):
+    """Persist one completed prompt/reply/action outcome independently of annotation saves."""
+    annotation_name = request.data.get('annotation_name')
+    record = request.data.get('ai_record')
+    outcome = request.data.get('outcome')
+    manifest_id = request.data.get('manifest_id')
+    chunk_index = request.data.get('chunk_index')
+    try:
+        manifest_id = str(UUID(str(manifest_id))) if manifest_id is not None else None
+    except (ValueError, TypeError, AttributeError):
+        return JsonResponse({'error': 'Invalid manifest ID'}, status=400)
+    if (
+        not isinstance(annotation_name, str)
+        or not annotation_name.strip()
+        or annotation_name != os.path.basename(annotation_name)
+        or '/' in annotation_name
+        or '\\' in annotation_name
+        or not isinstance(record, dict)
+        or not isinstance(record.get('run_id'), str)
+        or not record['run_id']
+        or outcome not in {'replied', 'applied', 'rejected', 'not_applied'}
+        or (manifest_id is None and chunk_index is not None)
+        or (chunk_index is not None and (type(chunk_index) is not int or chunk_index < 0))
+    ):
+        return JsonResponse({'error': 'Invalid completed AI record'}, status=400)
+
+    completed_record = {
+        **record,
+        'action_outcome': outcome,
+        'completed_at': datetime.now(timezone.utc).isoformat(),
+    }
+    if chunk_index is not None:
+        completed_record['chunk_index'] = chunk_index
+    os.makedirs(ANNOTATION_PATH, exist_ok=True)
+    record_path = ai_records_file_path(annotation_name, manifest_id)
+    lock_path = f'{record_path}.lock'
+    temporary_path = None
+    try:
+        with open(lock_path, 'a+') as lock_file:
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+            existing = load_ai_records(annotation_name, manifest_id)
+            if not isinstance(existing, list):
+                raise ValueError('Existing AI record file is invalid')
+            record_index = next(
+                (index for index, item in enumerate(existing)
+                 if isinstance(item, dict) and item.get('run_id') == record['run_id']),
+                None,
+            )
+            if record_index is None:
+                existing.append(completed_record)
+            else:
+                # Retries of the same completed request must not duplicate it.
+                existing[record_index] = completed_record
+            with tempfile.NamedTemporaryFile(
+                mode='w', encoding='utf-8', dir=ANNOTATION_PATH,
+                prefix='.ai-record-', suffix='.tmp', delete=False,
+            ) as temporary_file:
+                temporary_path = temporary_file.name
+                json.dump({
+                    'schema_version': 1,
+                    'annotation_name': annotation_name,
+                    'ai_runs': existing,
+                }, temporary_file, indent=2)
+                temporary_file.flush()
+                os.fsync(temporary_file.fileno())
+            os.replace(temporary_path, record_path)
+            temporary_path = None
+    except Exception as error:
+        return JsonResponse({'error': f'Unable to save AI record: {error}'}, status=500)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+    return JsonResponse({'saved': True, 'run_id': record['run_id']})
 
 
 @api_view(['POST'])
@@ -261,9 +384,18 @@ def process_rosbag(request):
 
 
 @api_view(['POST'])
+def clear_gpt_history(request):
+    global gpt_history, gpt_history_generation
+    gpt_history = ""
+    gpt_history_generation += 1
+    return JsonResponse({"cleared": True})
+
+
+@api_view(['POST'])
 def gpt_chat(request):
     global gpt_history
     try:
+        history_generation = gpt_history_generation
         data = json.loads(request.body)
         message = data.get("message")
         audio_transcript = data.get("audio_transcript")
@@ -273,7 +405,6 @@ def gpt_chat(request):
         context_routes = data.get("context_routes", {})
         fallback_consent = data.get("fallback_consent")
         requested_mode = assistant_mode
-        hybrid_selection = assistant_mode == "hybrid"
         accepted_local_to_remote = (
             isinstance(fallback_consent, dict)
             and fallback_consent.get("from") == "local"
@@ -296,50 +427,25 @@ def gpt_chat(request):
             return JsonResponse({"error": "No message provided"}, status=400)
         if not audio_transcript:
             return JsonResponse({"error": "No audio transcript provided"}, status=400)
-        if assistant_mode not in {"remote", "local", "hybrid"}:
+        if assistant_mode not in {"remote", "local"}:
             return JsonResponse({"error": "Invalid assistant mode"}, status=400)
+        if not isinstance(context_routes, dict) or any(
+            target != assistant_mode for target in context_routes.values()
+        ):
+            return JsonResponse({"error": "Invalid context routes"}, status=400)
 
-        if assistant_mode == "hybrid":
-            required_contexts = {"transcript", "frames", "codebook", "timeline"}
-            if set(context_routes) != required_contexts or any(
-                target not in {"remote", "local"}
-                for target in context_routes.values()
-            ):
-                return JsonResponse(
-                    {"error": "Invalid hybrid context routes"}, status=400
-                )
-
-            selected_targets = set(context_routes.values())
-            if "remote" in selected_targets and not openai_api_key:
-                return JsonResponse(
-                    {
-                        "error": (
-                            "Remote AI is unavailable because the OpenAI API key is "
-                            "empty. Would you like to switch to Local?"
-                        ),
-                        "assistant_mode": "hybrid",
-                        "can_fallback_to_local": True,
-                    },
-                    status=503,
-                )
-            if len(selected_targets) == 1:
-                # A homogeneous hybrid selection needs no cross-provider
-                # orchestration; run it through the selected provider.
-                assistant_mode = selected_targets.pop()
-            else:
-                # Do not silently send locally routed data to the remote
-                # provider until a mixed-context orchestrator is available.
-                return JsonResponse(
-                    {
-                        "error": "Mixed Local/Remote hybrid routing is not implemented yet.",
-                        "assistant_mode": "hybrid",
-                    },
-                    status=501,
-                )
+        selected_video_path = data.get('video_path')
+        try:
+            request_frames = (
+                frames_for_video(selected_video_path)
+                if selected_video_path is not None else video_frames
+            )
+        except ValueError as error:
+            return JsonResponse({'error': str(error)}, status=400)
 
         common_context = {
             "transcriptContext": audio_transcript,
-            "frameContext": video_frames,
+            "frameContext": request_frames,
             "codebookContext": Codebook,
             "timelineContext": Axiinfo,
         }
@@ -352,13 +458,7 @@ def gpt_chat(request):
                 response_text = assistant.respond(message, gpt_history)
             except LocalInferenceError as error:
                 remote_configured = bool(openai_api_key)
-                if hybrid_selection:
-                    error_message = (
-                        "Local AI is unavailable. Choose a local model before starting "
-                        "Docker, and check that its .gguf file is in the models/ directory."
-                    )
-                else:
-                    error_message = str(error) or "The local language model is not connected."
+                error_message = str(error) or "The local language model is not connected."
                 return JsonResponse(
                     {
                         "error": (
@@ -419,7 +519,8 @@ def gpt_chat(request):
                     status=503,
                 )
 
-        gpt_history = gpt_history + message + response_text
+        if history_generation == gpt_history_generation:
+            gpt_history = gpt_history + message + response_text
         ai_record = build_ai_record(
             assistant=assistant,
             requested_mode=requested_mode,
@@ -512,10 +613,6 @@ def save_annotation(request):
     if request.method == 'POST':
         annotation_name = request.data.get('annotation_name')
         annotation_data = request.data.get('annotation_data')
-        ai_records = request.data.get('ai_records', [])
-
-        if not isinstance(ai_records, list):
-            return JsonResponse({'error': 'Invalid AI records format'}, status=400)
 
         try:
             annotation_list_str = json.dumps(annotation_data)
@@ -545,19 +642,8 @@ def save_annotation(request):
                             'text': block['text']
                         })
 
-            with open(ai_records_file_path(annotation_name), 'w') as record_file:
-                json.dump(
-                    {
-                        'schema_version': 1,
-                        'annotation_name': annotation_name,
-                        'ai_runs': ai_records,
-                    },
-                    record_file,
-                    indent=2,
-                )
-
             return JsonResponse(
-                {'message': 'Annotation data and AI records saved successfully'},
+                {'message': 'Annotation data saved successfully'},
                 status=200,
             )
         except Exception as e:

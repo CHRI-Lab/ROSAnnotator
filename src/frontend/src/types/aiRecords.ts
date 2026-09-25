@@ -34,3 +34,8 @@ export type AssistantRequestOptions = {
     userConsented: true;
   };
 };
+
+export const buildAIRecordAnnotationName = (
+  rosBagFileName: string,
+  bookListFileName?: string,
+) => `${rosBagFileName}+${bookListFileName || "noBookList"}`;

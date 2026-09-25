@@ -211,6 +211,12 @@ class RemoteAPI(AIAssistant):
                     Always create steps, even there only one step.
                     The newest axi id will be current largest id+1.
                     Overlap with other block in one axi will lead to error.
+                    For an annotation request, an axis alone is not a completed annotation.
+                    Include at least one evidence-backed addBlock step with start and end
+                    times in seconds relative to the current video chunk. Use the
+                    transcript timestamps for speech-based annotations and the
+                    supplied video frames for visible gestures. Do not invent a
+                    gesture when the frames do not show it.
                     If the response is a normal conversation, return the plain text as usual.
                     Here is the current Axi information, you can consider axiId based on this:
 

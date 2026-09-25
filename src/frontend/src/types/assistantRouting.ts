@@ -1,6 +1,6 @@
 import { AIRecord } from "./aiRecords";
 
-export type AssistantMode = "remote" | "local" | "hybrid";
+export type AssistantMode = "remote" | "local";
 export type AssistantTarget = "remote" | "local";
 
 export type AssistantContextRoutes = {
@@ -50,7 +50,7 @@ export const isAssistantRouting = (value: unknown): value is AssistantRouting =>
   }
 
   const candidate = value as Partial<AssistantRouting>;
-  if (!candidate.mode || !["remote", "local", "hybrid"].includes(candidate.mode)) {
+  if (!candidate.mode || !["remote", "local"].includes(candidate.mode)) {
     return false;
   }
 
@@ -59,7 +59,5 @@ export const isAssistantRouting = (value: unknown): value is AssistantRouting =>
     return false;
   }
 
-  return ASSISTANT_CONTEXTS.every(({ key }) =>
-    ["remote", "local"].includes(routes[key]),
-  );
+  return ASSISTANT_CONTEXTS.every(({ key }) => routes[key] === candidate.mode);
 };

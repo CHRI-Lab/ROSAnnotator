@@ -218,6 +218,13 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    ![](instruction_imgs/import_page.png)
 
    The transcription may take several minutes, depending on the audio length.
+
+   **Windows Docker workaround:** After each chunk finishes processing for the
+   first time, restart the frontend so Docker can see the generated video:
+
+   ```bash
+   docker compose restart frontend
+   ```
    
    ![](instruction_imgs/transcripting.png)
    
@@ -255,6 +262,14 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    > Can you annotate the participant's gestures in the video according to the codebook in a new time axis?
 
    The VLM's annotation is not always correct. Users can edit the annotation manually.
+
+   Completed AI runs are saved in `/datas/annotation` as
+   `ai_records_<rosbag-file-name>+<booklist-file-name>_<manifest-id>.json`
+   (using `noBookList` when no booklist is selected). Each run is added to the
+   existing file for that manifest, so processing the same input and chunk
+   again preserves earlier runs. Records for different chunks in the same
+   manifest are distinguished by `chunk_index`. Runs without a manifest keep
+   the older filename format without the manifest ID.
 
    ![](instruction_imgs/auto_annotation.png) 
 

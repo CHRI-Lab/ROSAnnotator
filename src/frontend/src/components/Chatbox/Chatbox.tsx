@@ -12,11 +12,9 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AssistantRequestOptions } from "../../types/aiRecords";
 import {
-  ASSISTANT_CONTEXTS,
   AssistantMode,
   AssistantReply,
   AssistantRouting,
-  AssistantTarget,
   DEFAULT_ASSISTANT_ROUTING,
   isAssistantRouting,
 } from "../../types/assistantRouting";
@@ -102,31 +100,15 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
 
   const handleModeChange = (mode: AssistantRouting["mode"]) => {
     setHasAssistantSelection(true);
-    setAssistantRouting((currentRouting) => ({
+    setAssistantRouting({
       mode,
-      contextRoutes:
-        mode === "hybrid"
-          ? currentRouting.contextRoutes
-          : {
-              transcript: mode,
-              frames: mode,
-              codebook: mode,
-              timeline: mode,
-            },
-    }));
-  };
-
-  const handleContextRouteChange = (
-    context: keyof AssistantRouting["contextRoutes"],
-    target: AssistantTarget,
-  ) => {
-    setAssistantRouting((currentRouting) => ({
-      ...currentRouting,
       contextRoutes: {
-        ...currentRouting.contextRoutes,
-        [context]: target,
+        transcript: mode,
+        frames: mode,
+        codebook: mode,
+        timeline: mode,
       },
-    }));
+    });
   };
 
   const handleSendMessage = () => {
@@ -369,38 +351,8 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
         >
           <MenuItem value="remote">Remote</MenuItem>
           <MenuItem value="local">Local</MenuItem>
-          <MenuItem value="hybrid">Hybrid</MenuItem>
         </TextField>
       </Box>
-
-      {assistantRouting.mode === "hybrid" && (
-        <Box
-          display="grid"
-          gridTemplateColumns="repeat(2, minmax(0, 1fr))"
-          gap={1}
-          mb={1}
-        >
-          {ASSISTANT_CONTEXTS.map(({ key, label }) => (
-            <TextField
-              key={key}
-              select
-              size="small"
-              label={label}
-              value={assistantRouting.contextRoutes[key]}
-              onChange={(event) =>
-                handleContextRouteChange(
-                  key,
-                  event.target.value as AssistantTarget,
-                )
-              }
-              SelectProps={{ MenuProps: upwardMenuProps }}
-            >
-              <MenuItem value="local">Local</MenuItem>
-              <MenuItem value="remote">Remote</MenuItem>
-            </TextField>
-          ))}
-        </Box>
-      )}
 
       <Box display="flex" gap={1}>
         <TextField
