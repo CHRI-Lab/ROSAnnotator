@@ -87,6 +87,7 @@ class SaveAnnotationSerializer(serializers.Serializer):
 
     annotation_name = serializers.CharField(max_length=255, trim_whitespace=True)
     annotation_data = AnnotationAxisSerializer(many=True)
+    confirm_overwrite = serializers.BooleanField(required=False, default=False)
 
     def validate_annotation_name(self, value):
         # Accept a name the user pasted with its extension rather than

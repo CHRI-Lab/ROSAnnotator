@@ -23,12 +23,14 @@ import {
   isValidAnnotationName,
   collectAnnotationData,
   postAnnotation,
+  AnnotationSaveConflict,
 } from "./saveUtils";
 import useAutosave from "../Autosave/useAutosave";
 import {
   highestAxisId,
   deleteAutosave,
   AutosaveScope,
+  formatAutosaveTimestamp,
 } from "../Autosave/autosaveUtils";
 import { AIInstruction, AIRecord } from "../../types/aiRecords";
 import { applyAIInstruction } from "./aiInstruction";
@@ -108,7 +110,6 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
   userSelect: "none",
 }));
 
-
 const Timeline: React.FC<TimelineProps> = ({
   duration,
   played,
@@ -146,7 +147,15 @@ const Timeline: React.FC<TimelineProps> = ({
   // SAVE FUNCTIONALITY
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false); // flag controlling whether the "name your annotation" popup is currently visible
   const [annotationName, setAnnotationName] = useState(""); //container for annotation name text
+  // Holds a save the backend refused because the file already exists, until
+  // the user either confirms the replacement or picks another name.
+  const [pendingOverwrite, setPendingOverwrite] = useState<{
+    name: string;
+    data: any;
+    conflict: AnnotationSaveConflict;
+  } | null>(null);
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
+  
 
   const autosave = useAutosave({
     enabled: autosaveEnabled && Boolean(rosBagFileName),
@@ -347,8 +356,36 @@ const Timeline: React.FC<TimelineProps> = ({
 
 
 
-  // ensures sensible name is provided by user (no whitespace, no invalid characters),
-  // before gathering current annotation state via collectAnnotationData() and sending it to backend.
+  const finishSave = () => {
+    alert("Data saved successfully.");
+    setHasUnsavedEdits(false);
+    autosave.markSynced(axes);
+    if (autosaveEnabled && !autosaveScope) {
+      deleteAutosave(rosBagFileName).catch((err) =>
+        console.warn(" [autosave] Could not clear autosave after save.", err)
+      );
+    }
+  };
+
+  const attemptSave = async (
+    name: string,
+    data: any,
+    confirmOverwrite: boolean,
+  ) => {
+    try {
+      const result = await postAnnotation(name, data, { confirmOverwrite });
+      if (result.status === "conflict") {
+        setPendingOverwrite({ name, data, conflict: result.conflict });
+        return;
+      }
+      if (autosaveScope) await autosave.flush();
+      finishSave();
+    } catch (error) {
+      setError("Failed to save data. Please try again.\n" + error);
+      setIsErrorDialogOpen(true);
+    }
+  };
+
   const handleConfirmSave = async () => {
     const validation = isValidAnnotationName(annotationName);
     if (!validation.valid) {
@@ -358,24 +395,23 @@ const Timeline: React.FC<TimelineProps> = ({
     }
 
     setIsSaveDialogOpen(false);
-    const data = collectAnnotationData(axes); //collects axis data
+    await attemptSave(annotationName, collectAnnotationData(axes), false);
+  };
 
-    try {
-      await postAnnotation(annotationName, data);
-      if (autosaveScope) await autosave.flush();
-      alert("Data saved successfully.");
-      setHasUnsavedEdits(false);
-      autosave.markSynced(axes);
-      if (autosaveEnabled && !autosaveScope) {
-        deleteAutosave(rosBagFileName).catch((err) =>
-          console.warn(" [autosave] Could not clear autosave after save.", err)
-        );
-      }
+  const handleConfirmOverwrite = async () => {
+    if (!pendingOverwrite) return;
+    const { name } = pendingOverwrite;
+    setPendingOverwrite(null);
+    // Re-collect rather than reusing the snapshot from the first attempt, so
+    // anything created while the prompt was open is included.
+    await attemptSave(name, collectAnnotationData(axes), true);
+  };
 
-    } catch (error) {
-      setError("Failed to save data. Please try again.\n" + error);
-      setIsErrorDialogOpen(true);
-    }
+  // Cancelling returns to the name dialog: the usual next step is choosing a
+  // different name rather than abandoning the save.
+  const handleCancelOverwrite = () => {
+    setPendingOverwrite(null);
+    setIsSaveDialogOpen(true);
   };
 
 
@@ -655,8 +691,8 @@ const Timeline: React.FC<TimelineProps> = ({
   <DialogTitle>Name Your Annotation</DialogTitle>
   <DialogContent>
     <DialogContentText>
-      Enter a name to save this annotation under. You can reuse this name later
-      to overwrite it, or choose a new one to save a separate version.
+      Enter a name to save this annotation under. Reusing an existing name replaces
+      that file, and you will be asked to confirm first.
     </DialogContentText>
     <TextField
       autoFocus
@@ -675,7 +711,34 @@ const Timeline: React.FC<TimelineProps> = ({
     </Button>
   </DialogActions>
 </Dialog>
-
+<Dialog open={pendingOverwrite !== null} disableEscapeKeyDown>
+  <DialogTitle>
+    {pendingOverwrite?.conflict.reason === "file_unreadable"
+      ? "That file could not be read"
+      : "Replace the existing annotation file?"}
+  </DialogTitle>
+  <DialogContent>
+    {pendingOverwrite?.conflict.reason === "file_unreadable" ? (
+      <DialogContentText>
+        {`"${pendingOverwrite?.conflict.annotation_name}.csv" already exists but could not be read as an annotation file. Saving replaces it completely, and whatever it currently holds will be lost.`}
+      </DialogContentText>
+    ) : (
+      <DialogContentText>
+        {`"${pendingOverwrite?.conflict.annotation_name}.csv" was last saved at ${
+          formatAutosaveTimestamp(pendingOverwrite?.conflict.modified_at)
+        } and holds ${pendingOverwrite?.conflict.axis_count ?? 0} time ${
+          pendingOverwrite?.conflict.axis_count === 1 ? "axis" : "axes"
+        } and ${pendingOverwrite?.conflict.block_count ?? 0} annotations. Saving replaces all of it with your current work.`}
+      </DialogContentText>
+    )}
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={handleCancelOverwrite}>Choose another name</Button>
+    <Button onClick={handleConfirmOverwrite} color="error" variant="contained">
+      Replace file
+    </Button>
+  </DialogActions>
+</Dialog>
 <Dialog
   open={pendingDeletion !== null}
   onClose={() => setPendingDeletion(null)}

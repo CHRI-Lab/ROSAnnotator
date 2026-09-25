@@ -53,31 +53,64 @@ export const collectAnnotationData = (axes: any[]) => {
     return data;
 };
 
+export type AnnotationSaveConflict = {
+    reason: "file_exists" | "file_unreadable";
+    annotation_name: string;
+    modified_at?: string;
+    axis_count?: number;
+    block_count?: number;
+};
+
+export type AnnotationSaveResult =
+    | { status: "saved" }
+    | { status: "conflict"; conflict: AnnotationSaveConflict };
+
+// DRF mirrors the shape of the data it validated, so nested serializers
+// produce nested errors. Flatten to the strings underneath.
+const collectMessages = (value: unknown): string[] => {
+    if (typeof value === "string") return [value];
+    if (Array.isArray(value)) return value.flatMap(collectMessages);
+    if (value && typeof value === "object") {
+        return Object.values(value).flatMap(collectMessages);
+    }
+    return [];
+};
+
 export const postAnnotation = async (
     annotationName: string,
-    annotationData: any
-    ): Promise<void> => {
+    annotationData: any,
+    options?: { confirmOverwrite?: boolean }
+    ): Promise<AnnotationSaveResult> => {
     const response = await fetch("http://localhost:8000/api/save_annotation/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
         annotation_name: annotationName,
         annotation_data: annotationData,
+        confirm_overwrite: options?.confirmOverwrite ?? false,
         }),
     });
 
     if (response.ok) {
-        return;
+        return { status: "saved" };
     }
 
-    // The serializer returns { field: ["reason", ...] }, which is far more
-    // useful to the user than a generic message.
+    if (response.status === 409) {
+        const conflict = await response.json().catch(() => ({
+            reason: "file_exists",
+            annotation_name: annotationName,
+        }));
+        return { status: "conflict", conflict };
+    }
+
     if (response.status === 400) {
         const errors = await response.json().catch(() => null);
-        const detail = errors
-            ? Object.values(errors).flat().join(" ")
-            : "The annotation could not be saved.";
-        throw new Error(detail);
+        const messages = errors ? collectMessages(errors) : [];
+        throw new Error(
+            messages.length
+                ? messages.join(" ")
+                : "The annotation could not be saved."
+        );
     }
 
     switch (response.status) {

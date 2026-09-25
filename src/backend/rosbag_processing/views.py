@@ -241,6 +241,7 @@ def complete_ai_record(request):
     return JsonResponse({'saved': True, 'run_id': record['run_id']})
 
 
+
 @api_view(['POST'])
 def process_rosbag(request):
     global video_frames
@@ -610,6 +611,39 @@ def update_booklist(request):
     else:
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
+def describe_existing_annotation(file_path, annotation_name):
+    """Summarise a file that a save is about to replace.
+
+    Returns None when nothing is there. A file that cannot be parsed is
+    reported rather than silently overwritten: it may not be an annotation
+    file at all.
+    """
+    if not os.path.isfile(file_path):
+        return None
+
+    modified_at = datetime.fromtimestamp(
+        os.path.getmtime(file_path), tz=timezone.utc,
+    ).isoformat()
+
+    try:
+        existing = load_annotation(f'{annotation_name}.csv')
+    except Exception:
+        return {
+            'reason': 'file_unreadable',
+            'annotation_name': annotation_name,
+            'modified_at': modified_at,
+        }
+
+    return {
+        'reason': 'file_exists',
+        'annotation_name': annotation_name,
+        'modified_at': modified_at,
+        'axis_count': len(existing),
+        'block_count': sum(
+            len(axis.get('annotationBlocks', [])) for axis in existing
+        ),
+    }
+
 
 @csrf_exempt
 @api_view(['POST'])
@@ -620,15 +654,20 @@ def save_annotation(request):
 
     annotation_name = serializer.validated_data['annotation_name']
     annotation_list = serializer.validated_data['annotation_data']
+    confirm_overwrite = serializer.validated_data['confirm_overwrite']
 
     os.makedirs(ANNOTATION_PATH, exist_ok=True)
     file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
 
+    if not confirm_overwrite:
+        conflict = describe_existing_annotation(file_path, annotation_name)
+        if conflict is not None:
+            return JsonResponse(conflict, status=409)
     try:
         with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
             fieldnames = ['id', 'axisType', 'axisName', 'axisBooklistName', 'start', 'end', 'text']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
+
             writer.writeheader()
             for annotation_entry in annotation_list:
                 for block in annotation_entry['annotationBlocks']:
