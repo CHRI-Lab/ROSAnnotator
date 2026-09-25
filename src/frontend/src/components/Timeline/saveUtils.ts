@@ -66,16 +66,26 @@ export const postAnnotation = async (
         }),
     });
 
-    if (!response.ok) {
-        switch (response.status) {
-        case 500:
-            throw new Error("Internal server error");
-        case 400:
-            throw new Error("Invalid JSON format");
-        case 405:
-            throw new Error("Method not allowed");
-        default:
-            throw new Error(`Unexpected error: ${response.status}`);
-        }
+    if (response.ok) {
+        return;
+    }
+
+    // The serializer returns { field: ["reason", ...] }, which is far more
+    // useful to the user than a generic message.
+    if (response.status === 400) {
+        const errors = await response.json().catch(() => null);
+        const detail = errors
+            ? Object.values(errors).flat().join(" ")
+            : "The annotation could not be saved.";
+        throw new Error(detail);
+    }
+
+    switch (response.status) {
+    case 500:
+        throw new Error("Internal server error");
+    case 405:
+        throw new Error("Method not allowed");
+    default:
+        throw new Error(`Unexpected error: ${response.status}`);
     }
 };

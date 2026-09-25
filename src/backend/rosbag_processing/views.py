@@ -10,7 +10,11 @@ from uuid import UUID, uuid4
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .serializers import BooklistSerializer, InputInspectionSerializer, TranscriptionRequestSerializer
+from .serializers import (
+    BooklistSerializer, 
+    InputInspectionSerializer, 
+    SaveAnnotationSerializer,
+    TranscriptionRequestSerializer)
 import csv
 import fcntl
 import tempfile
@@ -610,47 +614,40 @@ def update_booklist(request):
 @csrf_exempt
 @api_view(['POST'])
 def save_annotation(request):
-    if request.method == 'POST':
-        annotation_name = request.data.get('annotation_name')
-        annotation_data = request.data.get('annotation_data')
+    serializer = SaveAnnotationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return JsonResponse(serializer.errors, status=400)
 
-        try:
-            annotation_list_str = json.dumps(annotation_data)
-            annotation_list = json.loads(annotation_list_str)
-        except json.JSONDecodeError:
-            return JsonResponse({'error': 'Invalid JSON format'}, status=400)
+    annotation_name = serializer.validated_data['annotation_name']
+    annotation_list = serializer.validated_data['annotation_data']
 
-        # Save annotation data to a new CSV file
-        os.makedirs(ANNOTATION_PATH, exist_ok=True)
-        file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
+    os.makedirs(ANNOTATION_PATH, exist_ok=True)
+    file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
 
-        try:
-            with open(file_path, 'w', newline='') as csvfile:
-                fieldnames = ['id', 'axisType', 'axisName', 'axisBooklistName', 'start', 'end', 'text']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    try:
+        with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['id', 'axisType', 'axisName', 'axisBooklistName', 'start', 'end', 'text']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            writer.writeheader()
+            for annotation_entry in annotation_list:
+                for block in annotation_entry['annotationBlocks']:
+                    writer.writerow({
+                        'id': annotation_entry['id'],
+                        'axisType': annotation_entry['axisType'],
+                        'axisName': annotation_entry['axisName'],
+                        'axisBooklistName': annotation_entry.get('axisBooklistName', ''),
+                        'start': block['start'],
+                        'end': block['end'],
+                        'text': block['text']
+                    })
+        return JsonResponse(
+            {'message': 'Annotation data saved successfully'},
+            status=200,
+        )
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
 
-                writer.writeheader()
-                for annotation_entry in annotation_list:
-                    for block in annotation_entry['annotationBlocks']:
-                        writer.writerow({
-                            'id': annotation_entry['id'],
-                            'axisType': annotation_entry['axisType'],
-                            'axisName': annotation_entry['axisName'],
-                            'axisBooklistName': annotation_entry.get('axisBooklistName', ''),
-                            'start': block['start'],
-                            'end': block['end'],
-                            'text': block['text']
-                        })
-
-            return JsonResponse(
-                {'message': 'Annotation data saved successfully'},
-                status=200,
-            )
-        except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
-    else:
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-    
 # testing the load_annotation function 
 @api_view(['GET'])
 def get_annotation(request):
