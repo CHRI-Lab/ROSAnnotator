@@ -1,4 +1,7 @@
-from .data_utils import *
+from .data_utils import get_rosbag_duration, load_annotation, transcribe_audio_to_srt
+from django.core.cache import cache
+from django.conf import settings
+from uuid import UUID, uuid4
 import json
 import os
 import base64
@@ -6,7 +9,6 @@ from pathlib import Path
 import cv2
 from django.http import JsonResponse
 from datetime import datetime, timezone
-from uuid import UUID, uuid4
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -31,6 +33,7 @@ from .ai_assistant import (
 
 load_dotenv()
 
+# Backward-compatible fallback for clients that do not yet send a context ID.
 gpt_history = ""
 gpt_history_generation = 0
 video_frames = []
@@ -91,7 +94,10 @@ def inspect_input(request):
         )
 
     try:
-        duration_seconds = round(get_rosbag_duration(bag_filepath), 3)
+        from .rosbag_reader import RosbagReader
+        with RosbagReader(bag_filepath) as reader:
+            duration_seconds = round(reader.duration, 3)
+            topics = list(reader.topics.values())
     except Exception as exc:
         return Response(
             {'error': f'Unable to read ROSBag duration: {str(exc)}'},
@@ -103,6 +109,7 @@ def inspect_input(request):
         'duration_seconds': duration_seconds,
         'duration_minutes': round(duration_seconds / 60, 3),
         'supports_chunking': duration_seconds > 0,
+        'topics': topics,
     })
 ANNOTATION_PATH = "/app/datas/annotation/"
 
@@ -244,155 +251,58 @@ def complete_ai_record(request):
 
 @api_view(['POST'])
 def process_rosbag(request):
-    global video_frames
-    global video_fps
+    """Legacy HTTP adapter for the shared whole-bag session contract."""
+    from .processing_sessions import ProcessingError, ProcessingRequest
+    from .rosbag_session import RosbagProcessingSession
+    from .rosbag_reader import BagReadError
 
-    def detect_faces(frame, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)):
-        face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=scaleFactor, minNeighbors=minNeighbors, minSize=minSize)
-        return len(faces) > 0
-    if request.method != 'POST':
-        return Response({'error': 'Invalid request method'}, status=405)
-    
-    bag_filename = request.data.get('bag_filename')
-    if not bag_filename:
+    if not request.data.get('bag_filename'):
         return Response({'error': 'bag_filename is required'}, status=400)
-
-    bag_filepath = os.path.join('/app/datas/rosbag-data/', bag_filename)
-    if not os.path.exists(bag_filepath):
-        return Response({'error': 'Invalid bag filename'}, status=400)
-    
-    booklist_filename = request.data.get('booklist_filename')
-    annotation_filename = request.data.get('annotation_filename')
-    
-    output_folder = os.path.join('/app/processed_data/', os.path.basename(bag_filename))
-    images_folder = os.path.join(output_folder, 'images')
-    video_path = os.path.join(output_folder, 'output.mp4')
-    audio_path = os.path.join(output_folder, 'audio.mp3')
-    waveform_image_path = os.path.join(output_folder, 'output_waveform.png')
-    srt_file_path = os.path.join(output_folder, 'transcript_with_speakers.srt')
-
-    if booklist_filename:
-        booklist_path = os.path.join('/app/datas/booklist/', booklist_filename)
-        if not os.path.exists(booklist_path):
-            return Response({'error': 'Invalid booklist filename'}, status=400)
-        with open(booklist_path, 'r') as booklist_file:
-            booklist_data = json.load(booklist_file)
-    else:
-        booklist_data = {}
-
-    annotation_data = None
-    ai_records = []
-    if annotation_filename:
-        annotation_path = os.path.join('/app/datas/annotation/', annotation_filename)
-        if not os.path.exists(annotation_path):
-            return Response({'error': 'Invalid annotation filename'}, status=400)
-        
-        try:
-            annotation_data = load_annotation(annotation_filename)
-            ai_records = load_ai_records(annotation_filename)
-        except Exception as e:
-            return Response({'error': f'Error loading annotation data: {str(e)}'}, status=500)
-
-    # Check if the bag file has already been processed
-    if all(os.path.exists(path) for path in [video_path, audio_path, waveform_image_path, srt_file_path]):
-        video = cv2.VideoCapture(video_path)
-
-        base64Frames = []
-        while video.isOpened():
-            success, frame = video.read()
-            if not success:
-                break
-            
-            # Detect face
-            if detect_faces(frame):
-                print("Frame with face detected, skipping.")
-                continue
-            
-            _, buffer = cv2.imencode(".jpg", frame)
-            base64Frames.append(base64.b64encode(buffer).decode("utf-8"))
-
-        video.release()
-
-        video_frames = base64Frames
-
-        video_fps = int(video.get(cv2.CAP_PROP_FPS))
-        if video_fps == 0:
-            video_fps = 30
-        print(len(base64Frames), "frames read.")
-        with open(srt_file_path, 'r') as transcript_file:
-            transcript = transcript_file.read()
-        return Response({
-            'video_path': get_relative_path(video_path),
-            'audio_path': get_relative_path(audio_path),
-            'waveform_image_path': get_relative_path(waveform_image_path),
-            'audio_transcript': transcript,
-            'booklist_data': booklist_data,
-            'annotation_data': annotation_data,
-            'ai_records': ai_records,
-            'message': 'File already processed'
-        })
-    
-    os.makedirs(images_folder, exist_ok=True)
-
+    serializer = InputInspectionSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    bag_filename = serializer.validated_data['bag_filename']
+    session = RosbagProcessingSession()
     try:
-        # Extract images, video, and audio from the rosbag file
-        extract_images_from_rosbag(bag_filepath, output_folder)
-        extract_audio(bag_filepath, output_folder)
-        # Plot the audio waveform
-        plot_waveform(audio_path, waveform_image_path)
-        extract_video(bag_filepath, output_folder)
+        result = session.process(ProcessingRequest(
+            bag_path=os.path.join(ROSBAG_DATA_DIR, bag_filename),
+            processed_root=getattr(settings, 'PROCESSED_DATA_DIR', '/app/processed_data'),
+            booklist_filename=request.data.get('booklist_filename'),
+            annotation_filename=request.data.get('annotation_filename'),
+            view_options=serializer.validated_data['view_options'],
+            view_ids=serializer.validated_data.get('view_ids'),
+        ))
+    except ProcessingError as exc:
+        return Response({'error': str(exc)}, status=exc.status_code)
+    except BagReadError as exc:
+        return Response({'error': str(exc), 'code': 'invalid_rosbag'}, status=400)
+    except Exception as exc:
+        return Response({'error': str(exc)}, status=500)
+    result['ai_records'] = load_ai_records(request.data['annotation_filename']) if request.data.get('annotation_filename') else []
+    selected_views = serializer.validated_data.get('view_ids')
+    if result.get('video_path') and (selected_views is None or 'video' in selected_views):
+        context_id = str(uuid4())
+        cache.set('chat:' + context_id, {'frames': session.video_frames[::max(1, len(session.video_frames) // 50)][:50], 'history': ''}, timeout=86400)
+        result['chat_context_id'] = context_id
+    return Response(result)
 
-        # Transcribe the audio to an SRT file
-        srt_file_path, transcript, speaker_data = transcribe_audio_to_srt(audio_path, output_folder)
 
-        # Combine the video and audio files
-        combine_video_audio(output_folder)
-        video = cv2.VideoCapture(video_path)
-
-        base64Frames = []
-        while video.isOpened():
-            success, frame = video.read()
-            if not success:
-                break
-            
-            if detect_faces(frame):
-                print("Frame with face detected, skipping.")
-                continue
-
-            _, buffer = cv2.imencode(".jpg", frame)
-            base64Frames.append(base64.b64encode(buffer).decode("utf-8"))
-
-        video.release()
-
-        video_frames = base64Frames
-
-        video_fps = int(video.get(cv2.CAP_PROP_FPS))
-        if video_fps == 0:
-            video_fps = 30
-        print(len(base64Frames), "frames read.")
-        return Response({
-            'video_path': get_relative_path(video_path),
-            'audio_path': get_relative_path(audio_path),
-            'waveform_image_path': get_relative_path(waveform_image_path),
-            'audio_transcript': transcript,
-            'booklist_data': booklist_data,
-            'annotation_data': annotation_data,
-            'ai_records': ai_records,
-            'speaker_data': speaker_data,
-            'message': 'Processing complete'
-        })
-    
-    except Exception as e:
-        return Response({'error': str(e)}, status=500)
+@api_view(['GET'])
+def view_catalog(request):
+    from .view_registry import PROCESSORS
+    return Response({'views': [{'view_id': p.view_id,
+                               'supported_message_types': p.supported_message_types}
+                              for p in PROCESSORS]})
 
 
 @api_view(['POST'])
 def clear_gpt_history(request):
     global gpt_history, gpt_history_generation
-    gpt_history = ""
-    gpt_history_generation += 1
+    context_id = str(request.data.get('chat_context_id') or '')
+    if context_id:
+        cache.delete('chat:' + context_id)
+    else:
+        gpt_history = ""
+        gpt_history_generation += 1
     return JsonResponse({"cleared": True})
 
 
@@ -402,6 +312,13 @@ def gpt_chat(request):
     try:
         history_generation = gpt_history_generation
         data = json.loads(request.body)
+        context_id = str(data.get('chat_context_id') or '')
+        context = (
+            cache.get('chat:' + context_id, {'frames': [], 'history': ''})
+            if context_id else {'frames': video_frames, 'history': gpt_history}
+        )
+        context_frames = context['frames']
+        conversation_history = context['history']
         message = data.get("message")
         audio_transcript = data.get("audio_transcript")
         Axiinfo = data.get("Axeinfo")
@@ -443,7 +360,7 @@ def gpt_chat(request):
         try:
             request_frames = (
                 frames_for_video(selected_video_path)
-                if selected_video_path is not None else video_frames
+                if selected_video_path is not None else context_frames
             )
         except ValueError as error:
             return JsonResponse({'error': str(error)}, status=400)
@@ -460,7 +377,7 @@ def gpt_chat(request):
                 checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
             )
             try:
-                response_text = assistant.respond(message, gpt_history)
+                response_text = assistant.respond(message, conversation_history)
             except LocalInferenceError as error:
                 remote_configured = bool(openai_api_key)
                 error_message = str(error) or "The local language model is not connected."
@@ -493,7 +410,7 @@ def gpt_chat(request):
                     **common_context,
                     APIKey=openai_api_key,
                 )
-                response_text = assistant.respond(message, gpt_history)
+                response_text = assistant.respond(message, conversation_history)
             except RemoteAuthenticationError:
                 return JsonResponse(
                     {
@@ -524,8 +441,14 @@ def gpt_chat(request):
                     status=503,
                 )
 
-        if history_generation == gpt_history_generation:
-            gpt_history = gpt_history + message + response_text
+        if context_id:
+            cache.set(
+                'chat:' + context_id,
+                {**context, 'history': conversation_history + message + (response_text or '')},
+                timeout=86400,
+            )
+        elif history_generation == gpt_history_generation:
+            gpt_history = conversation_history + message + (response_text or '')
         ai_record = build_ai_record(
             assistant=assistant,
             requested_mode=requested_mode,

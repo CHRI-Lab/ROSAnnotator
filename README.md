@@ -2,6 +2,11 @@
 ## Project Overview
 ROSAnnotator is a web-based application that incorporates a Vision-Language Model (VLM) to support both manual and automated annotation of ROSBag data. The application is envisioned to be a versatile tool for researchers, enabling the loading of multiple ROSBags and the provision of a synchronized, interactive dashboard for intuitive data visualization. ROSAnnotator currently facilitates video, audio, and transcription annotations and provides an open interface for custom ROS messages and tools.
 
+## Architecture
+
+See the [design diagram](docs/design-diagram.md) and
+[data-view processing contracts](docs/data-view-processing-contracts.md).
+
 ## Repository Structure
 
 The ROSAnnotator project integrates ROS (Robot Operating System) with Django to process and annotate ROSBag files. The project also includes a React-based frontend for interacting with the annotations and managing data.

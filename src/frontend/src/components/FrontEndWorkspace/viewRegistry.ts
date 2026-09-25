@@ -1,26 +1,15 @@
-import {
-  AnnotationStatisticsView,
-  AnnotationView,
-  TierStatisticsView,
-  TranscriptView,
-  VideoView,
-} from "./dataViews";
-import { DataViewDefinition } from "./viewTypes";
+import { dataViewDefinitions } from "./dataViews";
+import type { BackendDataView, DataViewDefinition } from "./viewTypes";
 
-export const availableViews: DataViewDefinition[] = [
-  { id: "video", label: "Video", component: VideoView },
-  { id: "transcript", label: "Transcript", component: TranscriptView },
-  { id: "annotations", label: "Annotations", component: AnnotationView },
-  {
-    id: "statistics-annotations",
-    label: "Statistics (Annotations)",
-    component: AnnotationStatisticsView,
-  },
-  {
-    id: "statistics-tiers",
-    label: "Statistics (Tiers)",
-    component: TierStatisticsView,
-  },
-];
+export const availableViews: DataViewDefinition[] = dataViewDefinitions;
+
+export function viewsWithAvailability(views?: Record<string, BackendDataView>) {
+  return availableViews.map(view => ({
+    ...view,
+    available: views ? views[view.id]?.status === 'ready' && views[view.id]?.available === true && views[view.id]?.processed_data != null : true,
+    reason: views?.[view.id]?.reason ?? (views && !views[view.id] ? 'No data returned for this view.' : null),
+    status: views?.[view.id]?.status,
+  }));
+}
 
 export type { DataViewDefinition, ViewPanelContext } from "./viewTypes";

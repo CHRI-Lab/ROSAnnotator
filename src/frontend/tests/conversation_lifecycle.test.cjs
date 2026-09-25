@@ -103,7 +103,7 @@ test('chunk navigation saves current annotations and restores the target chunk',
   );
   const flushIndex = chunkChangeHandler.indexOf('await autosaveFlush.current()');
   const processIndex = chunkChangeHandler.indexOf(
-    'await processChunk(manifestId, targetIndex)',
+    'await loadDataViews(',
   );
   const restoreIndex = chunkChangeHandler.indexOf(
     'await restoreChunk(rosBagFile!, manifestId, targetIndex)',
@@ -123,7 +123,7 @@ test('completed AI replies directly invoke the dedicated record endpoint', () =>
   const persistenceHandler = between(
     annotatorSource,
     'const persistCompletedAIRecord = async (',
-    'const handleTabChange',
+    'const handleAxesUpdate',
   );
   const sendHandler = between(
     annotatorSource,

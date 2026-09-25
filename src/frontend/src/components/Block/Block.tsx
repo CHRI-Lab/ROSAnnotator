@@ -120,7 +120,7 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
               label="Start"
               type="number"
               value={start}
-              onChange={(e) => setStart(parseFloat(e.target.value, 10))}
+              onChange={(e) => setStart(parseFloat(e.target.value))}
               inputProps={{
                 size: start.toString().length || 1, // Dynamically adjust size based on length
                 min: 0,  // Ensure valid input
@@ -132,7 +132,7 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
               label="End"
               type="number"
               value={end}
-              onChange={(e) => setEnd(parseFloat(e.target.value, 10))}
+              onChange={(e) => setEnd(parseFloat(e.target.value))}
               inputProps={{
                 size: end.toString().length || 1, // Dynamically adjust size based on length
                 min: 0,  // Ensure valid input

@@ -1,92 +1,21 @@
 import base64
 import csv
-import json
 import os
-import subprocess
-import cv2
-from django.http import JsonResponse
-import yaml
-import numpy as np
-from rosbag.bag import Bag
-from cv_bridge import CvBridge
-from google.cloud import speech_v1p1beta1 as speech
 from datetime import datetime, timedelta
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from rest_framework import status
-import matplotlib.pyplot as plt
-from .serializers import BooklistSerializer, TranscriptionRequestSerializer
-from pydub import AudioSegment
-import whisper
-from pyannote.audio import Pipeline
-from pyannote.audio.core import pipeline as pyannote_pipeline_module
-from huggingface_hub import hf_hub_download
 from dotenv import load_dotenv
 
 load_dotenv()
 
-huggingface_auth_token = os.getenv("HUGGINGFACE_AUTH_TOKEN")
 
 def get_rosbag_duration(bag_filename):
-    """Return the ROSBag duration in seconds without processing its messages."""
-    bag = Bag(bag_filename, 'r')
-    try:
-        start_time = bag.get_start_time()
-        end_time = bag.get_end_time()
-    finally:
-        bag.close()
-
-    return max(0.0, end_time - start_time)
-
-def extract_images_from_rosbag(bag_filename, output_folder):
-    bag = Bag(bag_filename, 'r')
-    bridge = CvBridge()
-
-    for i, (_, message, t) in enumerate(bag.read_messages(topics='/xtion/rgb/image_raw_throttled')):
-        cv2_image = bridge.imgmsg_to_cv2(message, desired_encoding='passthrough')
-        cv2_image = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
-        cv2.imwrite(f'{output_folder}/images/frame{i:04d}.jpg', cv2_image)
-        
-def extract_video(bag_filename, output_folder):
-
-    def get_fps():
-        bag = Bag(bag_filename, 'r')
-        bag_info = yaml.load(bag._get_yaml_info(), Loader=yaml.Loader)
-        for topic in bag_info['topics']:
-            if topic['type'] == 'sensor_msgs/Image':
-                return topic['frequency']
-        return None
-    
-    fps = str(get_fps())
-
-    input_images_path = os.path.join(output_folder, 'images/frame%04d.jpg')
-    output_video_path = os.path.join(output_folder, 'video.avi')
-    subprocess.run(
-        ['ffmpeg', '-y', '-r', str(fps), '-i', input_images_path, output_video_path],
-        check=True,
-    )
-
-
-def extract_audio(bag_filename, output_folder):
-
-    bag = Bag(bag_filename, 'r')
-    
-
-    output_path = os.path.join(output_folder, 'audio.mp3')
-    
-
-    with open(output_path, 'wb') as f:
-
-        for i, (_, message, t) in enumerate(bag.read_messages(topics='/audio')):
-
-            f.write(message.data)
-    
-
-    bag.close()
-    
-    return output_path
+    from .rosbag_reader import RosbagReader
+    with RosbagReader(bag_filename) as reader:
+        return reader.duration
 
 def plot_waveform(audio_path, output_filename, start_sec=None, end_sec=None):
+    import numpy as np
+    from matplotlib.figure import Figure
+    from pydub import AudioSegment
     audio = AudioSegment.from_file(audio_path)
     if start_sec is not None and end_sec is not None:
         start_ms = start_sec * 1000 
@@ -95,37 +24,18 @@ def plot_waveform(audio_path, output_filename, start_sec=None, end_sec=None):
     if audio.channels > 1:
         audio = audio.set_channels(1)
     samples = np.array(audio.get_array_of_samples())
-    plt.figure(figsize=(14, 5))
-    plt.plot(samples, color='black', linewidth=0.5)
-    plt.axis('off')
-    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0)
-    plt.close()
-
-def combine_video_audio(output_folder):
-
-    video_path = os.path.join(output_folder, 'video.avi')
-    audio_path = os.path.join(output_folder, 'audio.mp3')
-    output_path = os.path.join(output_folder, 'output.mp4')
-
-    command = [
-        'ffmpeg',
-        '-i', video_path,
-        '-i', audio_path,
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac',
-        '-map', '0:v',
-        '-map', '1:a',
-        '-movflags', '+faststart',
-        '-y', output_path
-    ]
-
-    subprocess.run(command, check=True)
-
+    figure = Figure(figsize=(14, 5))
+    axes = figure.subplots()
+    axes.plot(samples, color='black', linewidth=0.5)
+    axes.axis('off')
+    figure.savefig(output_filename, bbox_inches='tight', pad_inches=0)
 
 def transcribe_audio_to_srt(audio_file_path, output_folder_path):
+    import whisper
+    from pydub import AudioSegment
+    from pyannote.audio import Pipeline
 
+    huggingface_auth_token = os.getenv("HUGGINGFACE_AUTH_TOKEN")
     if huggingface_auth_token is None:
         raise ValueError("Huggingface token not found in environment variables.")
 
