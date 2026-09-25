@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 import json
 import os
 import base64
+import math
 from pathlib import Path
 import cv2
 from django.http import JsonResponse
@@ -549,7 +550,7 @@ def describe_existing_annotation(file_path, annotation_name):
     ).isoformat()
 
     try:
-        existing = load_annotation(f'{annotation_name}.csv')
+        existing = load_annotation(f'{annotation_name}.csv', ANNOTATION_PATH)
     except Exception:
         return {
             'reason': 'file_unreadable',
@@ -567,6 +568,136 @@ def describe_existing_annotation(file_path, annotation_name):
         ),
     }
 
+def _same_block(incoming, clipped):
+    return (
+        math.isclose(incoming['start'], clipped[0], abs_tol=1e-6)
+        and math.isclose(incoming['end'], clipped[1], abs_tol=1e-6)
+    )
+
+
+def merge_chunk_annotations(existing, incoming, chunk):
+    """Replace one chunk's contribution to an absolute-time annotation set.
+
+    incoming holds chunk-local times as annotations_for_chunk produced them.
+    An incoming block still matching an existing block's clipped form is
+    unedited, so the original absolute block is restored rather than replaced
+    by its clipped copy. Blocks the chunk never displayed are untouched.
+
+    Axes match on name and type: Timeline reassigns numeric ids on load, so
+    they are not stable across sessions or chunks.
+    """
+    from .view_metadata import clip_to_chunk
+
+    start = chunk['start_seconds']
+
+    def key(axis):
+        return (axis.get('axisName', ''), axis.get('axisType', ''))
+
+    merged = {}
+    order = []
+
+    def slot(axis):
+        axis_key = key(axis)
+        if axis_key not in merged:
+            order.append(axis_key)
+            merged[axis_key] = {**axis, 'annotationBlocks': [], '_displayed': []}
+        return merged[axis_key]
+
+    # Carry through everything, remembering which blocks this chunk displayed.
+    for axis in existing or []:
+        target = slot(axis)
+        for block in axis.get('annotationBlocks', []):
+            clipped = clip_to_chunk(block, chunk)
+            if clipped is None:
+                target['annotationBlocks'].append(block)
+            else:
+                target['_displayed'].append((block, clipped))
+
+    # Re-add what the chunk holds now.
+    for axis in incoming or []:
+        target = slot(axis)
+        target.update({
+            name: value for name, value in axis.items()
+            if name not in ('annotationBlocks', 'id')
+        })
+        for block in axis.get('annotationBlocks', []):
+            match = next(
+                (original for original, clipped in target['_displayed']
+                 if _same_block(block, clipped)),
+                None,
+            )
+            if match is not None:
+                # Unedited: keep the original, including any part outside
+                # this chunk that the user never saw.
+                target['_displayed'] = [
+                    pair for pair in target['_displayed'] if pair[0] is not match
+                ]
+                target['annotationBlocks'].append(match)
+            else:
+                target['annotationBlocks'].append({
+                    **block,
+                    'start': block['start'] + start,
+                    'end': block['end'] + start,
+                })
+
+    # Anything still in _displayed was shown and is now gone: the user
+    # deleted it, so it does not come back.
+    result = []
+    for index, axis_key in enumerate(order, start=1):
+        axis = merged[axis_key]
+        del axis['_displayed']
+        axis['annotationBlocks'].sort(key=lambda block: block['start'])
+        # load_annotation groups rows by id, so ids must be unique per axis.
+        axis['id'] = index
+        result.append(axis)
+    return result
+
+def resolve_chunk(manifest_id, chunk_index):
+    """Return the chunk spec from a manifest, or raise."""
+    # chunk_views imports from this module, so import inside the function.
+    from .chunk_views import manifest_directory
+    from .chunks import load_manifest
+
+    manifest = load_manifest(manifest_directory(), manifest_id)
+    chunks = manifest.get('chunks') or []
+    if chunk_index >= len(chunks):
+        raise ValueError('Chunk not found in that manifest.')
+    return chunks[chunk_index]
+
+def write_annotation_csv(file_path, annotation_list):
+    """Write atomically: the merge reads the file first, so a crash mid-write
+    must not truncate a set that was complete a moment ago."""
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', newline='', encoding='utf-8',
+            dir=os.path.dirname(file_path),
+            prefix='.annotation-', suffix='.tmp', delete=False,
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+            writer = csv.DictWriter(temporary_file, fieldnames=[
+                'id', 'axisType', 'axisName', 'axisBooklistName',
+                'start', 'end', 'text',
+            ])
+            writer.writeheader()
+            for axis in annotation_list:
+                for block in axis['annotationBlocks']:
+                    writer.writerow({
+                        'id': axis['id'],
+                        'axisType': axis.get('axisType', ''),
+                        'axisName': axis.get('axisName', ''),
+                        'axisBooklistName': axis.get('axisBooklistName', ''),
+                        'start': block['start'],
+                        'end': block['end'],
+                        'text': block.get('text', ''),
+                    })
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, file_path)
+        temporary_path = None
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.unlink(temporary_path)
 
 @csrf_exempt
 @api_view(['POST'])
@@ -574,41 +705,50 @@ def save_annotation(request):
     serializer = SaveAnnotationSerializer(data=request.data)
     if not serializer.is_valid():
         return JsonResponse(serializer.errors, status=400)
-
+    
     annotation_name = serializer.validated_data['annotation_name']
     annotation_list = serializer.validated_data['annotation_data']
     confirm_overwrite = serializer.validated_data['confirm_overwrite']
+    manifest_id = serializer.validated_data['manifest_id']
+    chunk_index = serializer.validated_data['chunk_index']
 
     os.makedirs(ANNOTATION_PATH, exist_ok=True)
     file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
 
-    if not confirm_overwrite:
-        conflict = describe_existing_annotation(file_path, annotation_name)
-        if conflict is not None:
-            return JsonResponse(conflict, status=409)
-    try:
-        with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ['id', 'axisType', 'axisName', 'axisBooklistName', 'start', 'end', 'text']
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    chunk = None
+    if manifest_id is not None:
+        try:
+            chunk = resolve_chunk(str(manifest_id), chunk_index)
+        except FileNotFoundError:
+            return JsonResponse({'error': 'Chunk manifest not found.'}, status=404)
+        except (OSError, ValueError) as error:
+            return JsonResponse({'error': str(error)}, status=400)
 
-            writer.writeheader()
-            for annotation_entry in annotation_list:
-                for block in annotation_entry['annotationBlocks']:
-                    writer.writerow({
-                        'id': annotation_entry['id'],
-                        'axisType': annotation_entry['axisType'],
-                        'axisName': annotation_entry['axisName'],
-                        'axisBooklistName': annotation_entry.get('axisBooklistName', ''),
-                        'start': block['start'],
-                        'end': block['end'],
-                        'text': block['text']
-                    })
-        return JsonResponse(
-            {'message': 'Annotation data saved successfully'},
-            status=200,
-        )
-    except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+    if chunk is None:
+        if not confirm_overwrite:
+            conflict = describe_existing_annotation(file_path, annotation_name)
+            if conflict is not None:
+                return JsonResponse(conflict, status=409)
+    else:
+        try:
+            existing = load_annotation(f'{annotation_name}.csv', ANNOTATION_PATH)
+        except FileNotFoundError:
+            existing = []
+        except Exception:
+            return JsonResponse(
+                describe_existing_annotation(file_path, annotation_name),
+                status=409,
+            )
+        annotation_list = merge_chunk_annotations(existing, annotation_list, chunk)
+
+    try:
+        write_annotation_csv(file_path, annotation_list)
+    except Exception as error:
+        return JsonResponse({'error': str(error)}, status=500)
+
+    return JsonResponse(
+        {'message': 'Annotation data saved successfully'}, status=200,
+    )
 
 # testing the load_annotation function 
 @api_view(['GET'])

@@ -2,15 +2,27 @@
 import json
 from pathlib import Path
 
+def clip_to_chunk(block, chunk):
+    """The chunk-local form annotations_for_chunk would produce, or None.
+
+    The merge compares against this, so the two can never disagree about what
+    a chunk displays.
+    """
+    start, end = chunk['start_seconds'], chunk['end_seconds']
+    if not (block['end'] > start and block['start'] < end):
+        return None
+    return (max(block['start'], start) - start, min(block['end'], end) - start)
 
 def annotations_for_chunk(annotation_data, chunk):
-    start, end = chunk['start_seconds'], chunk['end_seconds']
-    return [{**axis, 'annotationBlocks': [
-        {**block, 'start': max(block['start'], start) - start,
-         'end': min(block['end'], end) - start}
-        for block in axis.get('annotationBlocks', [])
-        if block['end'] > start and block['start'] < end
-    ]} for axis in annotation_data or []]
+    result = []
+    for axis in annotation_data or []:
+        blocks = []
+        for block in axis.get('annotationBlocks', []):
+            clipped = clip_to_chunk(block, chunk)
+            if clipped is not None:
+                blocks.append({**block, 'start': clipped[0], 'end': clipped[1]})
+        result.append({**axis, 'annotationBlocks': blocks})
+    return result
 
 
 def attach_metadata(result, booklist_filename=None, annotation_filename=None, chunk=None):

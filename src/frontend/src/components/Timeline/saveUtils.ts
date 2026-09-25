@@ -61,6 +61,11 @@ export type AnnotationSaveConflict = {
     block_count?: number;
 };
 
+export type AnnotationSaveScope = {
+    manifest_id: string;
+    chunk_index: number;
+};
+
 export type AnnotationSaveResult =
     | { status: "saved" }
     | { status: "conflict"; conflict: AnnotationSaveConflict };
@@ -79,7 +84,7 @@ const collectMessages = (value: unknown): string[] => {
 export const postAnnotation = async (
     annotationName: string,
     annotationData: any,
-    options?: { confirmOverwrite?: boolean }
+    options?: { confirmOverwrite?: boolean; scope?: AnnotationSaveScope }
     ): Promise<AnnotationSaveResult> => {
     const response = await fetch("http://localhost:8000/api/save_annotation/", {
         method: "POST",
@@ -88,6 +93,7 @@ export const postAnnotation = async (
         annotation_name: annotationName,
         annotation_data: annotationData,
         confirm_overwrite: options?.confirmOverwrite ?? false,
+        ...(options?.scope ?? {}),
         }),
     });
 

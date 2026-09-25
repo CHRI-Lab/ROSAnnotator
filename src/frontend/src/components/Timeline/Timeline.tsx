@@ -325,7 +325,10 @@ const Timeline: React.FC<TimelineProps> = ({
     confirmOverwrite: boolean,
   ) => {
     try {
-      const result = await postAnnotation(name, data, { confirmOverwrite });
+      const result = await postAnnotation(name, data, {
+        confirmOverwrite,
+        scope: autosaveScope,
+      });
       if (result.status === "conflict") {
         setPendingOverwrite({ name, data, conflict: result.conflict });
         return;

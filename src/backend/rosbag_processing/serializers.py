@@ -96,7 +96,20 @@ class SaveAnnotationSerializer(serializers.Serializer):
     annotation_name = serializers.CharField(max_length=255, trim_whitespace=True)
     annotation_data = AnnotationAxisSerializer(many=True)
     confirm_overwrite = serializers.BooleanField(required=False, default=False)
+    # Chunk saves merge into the existing file. Both are needed to locate the
+    # chunk, so neither is meaningful alone.
+    manifest_id = serializers.UUIDField(allow_null=True, default=None)
+    chunk_index = serializers.IntegerField(allow_null=True, default=None, min_value=0)
 
+    def validate(self, values):
+        has_manifest = values.get('manifest_id') is not None
+        has_index = values.get('chunk_index') is not None
+        if has_manifest != has_index:
+            raise serializers.ValidationError(
+                'manifest_id and chunk_index must be supplied together.'
+            )
+        return values
+    
     def validate_annotation_name(self, value):
         # Accept a name the user pasted with its extension rather than
         # producing "session.csv.csv". Needed once the save dialog is
