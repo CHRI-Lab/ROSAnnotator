@@ -2,10 +2,12 @@ import logging
 import ssl
 from pathlib import Path
 from urllib.error import URLError
+from uuid import uuid4
 
 from requests.exceptions import SSLError as RequestsSSLError
 
 from django.conf import settings
+from django.core.cache import cache
 from rest_framework import serializers, status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -210,6 +212,10 @@ def process_chunk_view(request, manifest_id, chunk_index):
         ai_records = load_ai_records(annotation_name, manifest['id'], chunk_index)
     except (OSError, ValueError):
         return Response({'error': 'Unable to read AI records.'}, status=500)
+    if result.get('video_path') and (view_ids is None or 'video' in view_ids):
+        context_id = str(uuid4())
+        cache.set('chat:' + context_id, {'frames': [], 'history': ''}, timeout=86400)
+        result['chat_context_id'] = context_id
     return Response({
         'manifest_id': manifest['id'],
         'bag_filename': manifest['bag_filename'],

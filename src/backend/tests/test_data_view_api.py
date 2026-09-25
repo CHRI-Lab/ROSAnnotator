@@ -1,8 +1,10 @@
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import UUID
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.test import SimpleTestCase
 from rest_framework.test import APIClient
 
@@ -68,6 +70,26 @@ class DataViewApiTests(SimpleTestCase):
         self.assertEqual(response.data['time_origin']['reference'], 'chunk_start')
         summary = self.client.get(f"/api/chunks/{manifest['id']}/").data
         self.assertEqual(summary['chunks'][0]['status'], 'ready')
+
+    def test_chunk_video_responses_create_isolated_chat_contexts(self):
+        manifest = save_manifest(self.root / 'chunks', 'sample.bag', 10, 5)
+        processed_result = {
+            'video_path': 'chunk/video.mp4', 'audio_path': None,
+            'waveform_image_path': None, 'audio_transcript': '',
+            'speaker_data': [], 'views': {},
+        }
+        with patch('rosbag_processing.chunk_views.process_chunk', return_value=processed_result):
+            first = self.client.post(f"/api/chunks/{manifest['id']}/0/process/", {}, format='json')
+            second = self.client.post(f"/api/chunks/{manifest['id']}/1/process/", {}, format='json')
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        first_id, second_id = first.data['chat_context_id'], second.data['chat_context_id']
+        UUID(first_id)
+        UUID(second_id)
+        self.assertNotEqual(first_id, second_id)
+        self.assertEqual(cache.get('chat:' + first_id), {'frames': [], 'history': ''})
+        self.assertEqual(cache.get('chat:' + second_id), {'frames': [], 'history': ''})
 
     def test_unknown_view_rejected_before_processing(self):
         response = self.client.post('/api/process_rosbag/',
