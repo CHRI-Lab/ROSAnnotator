@@ -36,11 +36,13 @@ class AIAssistant(ABC):
         frameContext,
         codebookContext,
         timelineContext,
+        timelineScope=None,
     ):
         self.transcriptContext = transcriptContext
         self.frameContext = frameContext
         self.codebookContext = codebookContext
         self.timelineContext = timelineContext
+        self.timelineScope = timelineScope
         self.last_run_metadata = {}
 
     def respond(self, message, chatHistory=""):
@@ -112,6 +114,33 @@ class AIAssistant(ABC):
         }
         return selected_categories or self.codebookContext
 
+    def _timeline_edits_enabled(self):
+        if self.timelineScope is None:
+            return True
+        return bool(
+            self.timelineScope.get("axis_ids")
+            or self.timelineScope.get("allow_new")
+        )
+
+    def _new_axis_allowed(self):
+        return self.timelineScope is None or self.timelineScope.get("allow_new") is True
+
+    def _timeline_scope_prompt(self):
+        if self.timelineScope is None:
+            return "Timeline scope: unrestricted."
+        axis_ids = self.timelineScope.get("axis_ids", [])
+        allow_new = self.timelineScope.get("allow_new") is True
+        if not axis_ids and not allow_new:
+            return (
+                "Timeline scope: none. Do not return timeline instructions or change "
+                "annotations. Reply conversationally in plain text."
+            )
+        return (
+            f"Timeline scope: existing axis IDs {axis_ids}; permission to create a "
+            f"new axis: {allow_new}. Only target those existing axes. Only use "
+            "addAxi when permission to create a new axis is true."
+        )
+
     @abstractmethod
     def _respond(self, message, chatHistory=""):
         """Execute provider-specific inference and return raw response text."""
@@ -128,12 +157,14 @@ class RemoteAPI(AIAssistant):
         codebookContext,
         timelineContext,
         APIKey,
+        timelineScope=None,
     ):
         super().__init__(
             transcriptContext=transcriptContext,
             frameContext=frameContext,
             codebookContext=codebookContext,
             timelineContext=timelineContext,
+            timelineScope=timelineScope,
         )
         self.APIKey = APIKey
 
@@ -142,7 +173,7 @@ class RemoteAPI(AIAssistant):
             response_text = self._request_completion(message, chatHistory)
         except AuthenticationError as error:
             raise RemoteAuthenticationError from error
-        if self._requests_timeline_change(message):
+        if self._requests_timeline_change(message) and self._timeline_edits_enabled():
             self._validate_timeline_instruction(response_text, message)
         return response_text
 
@@ -179,8 +210,12 @@ class RemoteAPI(AIAssistant):
             "deleteAxi": {"axisId": int},
         }
         selected_labels = self._codebook_labels(self._codebook_for_message(message))
-        requires_codebook_label = bool(selected_labels) and any(
-            phrase in str(message or "").casefold()
+        normalized_message = str(message or "").casefold()
+        is_deletion_request = any(
+            word in normalized_message for word in ("delete", "remove")
+        )
+        requires_codebook_label = not is_deletion_request and bool(selected_labels) and any(
+            phrase in normalized_message
             for phrase in ("according to", "attitude", "codebook")
         )
         add_block_count = 0
@@ -214,6 +249,7 @@ class RemoteAPI(AIAssistant):
         timeline_context = json.dumps(self.timelineContext, indent=2)
         selected_codebook = self._codebook_for_message(message)
         allowed_labels = self._codebook_labels(selected_codebook)
+        scope_prompt = self._timeline_scope_prompt()
         selected_frames = self.frameContext[
             0::max(1, len(self.frameContext) // 50)
         ][:50]
@@ -236,6 +272,9 @@ class RemoteAPI(AIAssistant):
                     2. Add a new `block`: Method: `addBlock`, Parameters: `axisId` (integer), `start` (float), `end` (float), `text` (string).
                     3. Delete a old 'block':Mthod:'deleteBlock', Parameters: `axisId` (integer), 'blockIndex' (integer).
                     4. Delete a old 'axi':Mthod:'deleteAxi', Parameters: `axisId` (integer).
+                    "Delete annotations" or "delete all annotations" means delete
+                    blocks with deleteBlock while preserving their axes. Use deleteAxi
+                    only when the user explicitly asks to delete an axis or timeline.
                     When you need to perform multiple actions to complete the task, return the response in the following format:
                     {{
                       "type": "instruction",
@@ -295,6 +334,8 @@ class RemoteAPI(AIAssistant):
 
                     {timeline_context}
 
+                    {scope_prompt}
+
                     Here is the Codebook predefined by user. When the request asks
                     for codebook annotation, every addBlock text must be exactly one
                     of these labels; do not use summaries or explanations:
@@ -310,7 +351,7 @@ class RemoteAPI(AIAssistant):
 
                     """
         request_parameters = {"model": "gpt-4o"}
-        if self._requests_timeline_change(message):
+        if self._requests_timeline_change(message) and self._timeline_edits_enabled():
             # Timeline edits must be machine-readable for the frontend to apply.
             request_parameters["response_format"] = {"type": "json_object"}
         messages = [
@@ -377,12 +418,14 @@ class LocalAI(AIAssistant):
         timelineContext,
         checkpointPath,
         model=None,
+        timelineScope=None,
     ):
         super().__init__(
             transcriptContext=transcriptContext,
             frameContext=frameContext,
             codebookContext=codebookContext,
             timelineContext=timelineContext,
+            timelineScope=timelineScope,
         )
         self.checkpointPath = checkpointPath
         self.baseURL = os.getenv("LOCAL_AI_BASE_URL", "http://local-llm:8080/v1")
@@ -404,13 +447,16 @@ class LocalAI(AIAssistant):
                 "a video before requesting gesture annotation."
             )
 
-        is_timeline_request = self._requests_timeline_change(message)
+        is_timeline_request = (
+            self._requests_timeline_change(message) and self._timeline_edits_enabled()
+        )
         is_auto_annotation = self._requests_auto_annotation(message)
-        if requests_visual_analysis and is_timeline_request:
+        if requests_visual_analysis and is_timeline_request and self._new_axis_allowed():
             return self._respond_visual_annotation(message, chatHistory)
         has_timestamped_segments = bool(self._transcript_segments())
         if (
             is_auto_annotation
+            and self._new_axis_allowed()
             and not requests_visual_analysis
             and has_timestamped_segments
             and (
@@ -461,7 +507,7 @@ class LocalAI(AIAssistant):
                 response_text = self._normalize_timeline_instruction(
                     response_text,
                     message,
-                    requires_new_axis=is_auto_annotation,
+                    requires_new_axis=is_auto_annotation and self._new_axis_allowed(),
                 )
             except LocalInferenceError:
                 logger.error(
@@ -1010,6 +1056,8 @@ TIMESTAMPED SEGMENTS:
     @staticmethod
     def _requests_auto_annotation(message):
         normalized_message = message.lower()
+        if any(word in normalized_message for word in ("delete", "remove")):
+            return False
         annotation_words = ("annotate", "label", "classify", "categorize", "tag")
         return any(word in normalized_message for word in annotation_words) and any(
             phrase in normalized_message
@@ -1527,17 +1575,17 @@ PREVIOUS CHAT HISTORY:
 {history}
 """
 
-        if self._requests_timeline_change(message):
+        if self._requests_timeline_change(message) and self._timeline_edits_enabled():
             timeline_context = json.dumps(
                 self.timelineContext, ensure_ascii=False, indent=2
             )
             next_axis_id = max(self._current_axis_ids(), default=0) + 1
             return f"""You control the qualitative annotation timeline.
-Complete the entire requested auto-annotation task. Create exactly one new
-axis unless the user explicitly names an existing axis. For a request that only asks
-for an axis, return one addAxi step and do not add blocks. Otherwise return the
-addAxi step first, followed by one addBlock step for every applicable utterance
-or span in the full transcript. Do not stop after the first match.
+Complete the entire requested auto-annotation task within the timeline scope below.
+When new-axis permission is false, do not return addAxi and put changes only on the
+listed existing axis IDs. When new-axis permission is true and no existing axis is
+selected, return addAxi first and then addBlock steps for the new axis. Include one
+addBlock step for every applicable utterance or span. Do not stop after the first match.
 
 Use the SRT timestamps as evidence and convert HH:MM:SS,mmm timestamps to
 seconds for block start and end. A request utterance asks another participant
@@ -1552,6 +1600,8 @@ CODEBOOK:
 CURRENT TIMELINE:
 {timeline_context}
 
+{self._timeline_scope_prompt()}
+
 Return only one valid JSON object.
 The object must have type "instruction" and a steps array. Allowed steps are:
 - addAxi with integer axisId, string axisName, and axistype "Type-in".
@@ -1559,6 +1609,10 @@ The object must have type "instruction" and a steps array. Allowed steps are:
   exact codebook label.
 - deleteBlock with integer axisId and integer blockIndex.
 - deleteAxi with integer axisId.
+
+"Delete annotations" or "delete all annotations" means return deleteBlock steps
+for the matching blocks and preserve the axes. Return deleteAxi only when the user
+explicitly asks to delete an axis or timeline.
 
 The next unused axisId is {next_axis_id}. Use it for the new axis and every block.
 For addBlock, use an exact codebook label as text when the user asks for

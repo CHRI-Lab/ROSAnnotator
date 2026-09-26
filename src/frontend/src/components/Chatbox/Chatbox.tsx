@@ -8,6 +8,8 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
 import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import ListItemText from "@mui/material/ListItemText";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AssistantRequestOptions } from "../../types/aiRecords";
@@ -33,6 +35,7 @@ type ChatMessage = {
 
 type ChatboxProps = {
   duration: number;
+  axes: Array<{ id: number; axisName?: string }>;
   onSendMessage: (
     message: string,
     assistantRouting: AssistantRouting,
@@ -46,6 +49,7 @@ type PendingFallback = {
   from: "local" | "remote";
   to: "local" | "remote";
   timeRange: AssistantTimeRange;
+  timelineScope: { axisIds: number[]; allowNew: boolean };
 };
 
 const ASSISTANT_ROUTING_STORAGE_KEY = "rosannotator-assistant-routing";
@@ -77,7 +81,9 @@ const formatAssistantMode = (mode: AssistantMode | undefined) => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
-const Chatbox = ({ onSendMessage, duration }: ChatboxProps) => {
+const NEW_TIMELINE_VALUE = "new";
+
+const Chatbox = ({ onSendMessage, duration, axes }: ChatboxProps) => {
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [initialAssistantRouting] = useState(loadAssistantRouting);
@@ -91,6 +97,7 @@ const Chatbox = ({ onSendMessage, duration }: ChatboxProps) => {
     useState<PendingFallback | null>(null);
   const [rangeStart, setRangeStart] = useState("00:00");
   const [rangeEnd, setRangeEnd] = useState(() => formatChunkTime(duration));
+  const [timelineSelection, setTimelineSelection] = useState<string[]>([]);
 
   useEffect(() => {
     setRangeStart("00:00");
@@ -131,11 +138,19 @@ const Chatbox = ({ onSendMessage, duration }: ChatboxProps) => {
     if (message.trim() !== "" && timeSelection.range) {
       const submittedMessage = message;
       const submittedRange = timeSelection.range;
+      const submittedTimelineScope = {
+        axisIds: timelineSelection
+          .filter((value) => value !== NEW_TIMELINE_VALUE)
+          .map(Number)
+          .filter(Number.isFinite),
+        allowNew: timelineSelection.includes(NEW_TIMELINE_VALUE),
+      };
       const newMessage: ChatMessage = { sender: "user", text: message };
       setChatHistory([...chatHistory, newMessage]);
 
       onSendMessage(submittedMessage, assistantRouting, {
         timeRange: submittedRange,
+        timelineScope: submittedTimelineScope,
       }).then((assistantResponse) => {
         if (assistantResponse.canFallbackToRemote) {
           setPendingFallback({
@@ -144,6 +159,7 @@ const Chatbox = ({ onSendMessage, duration }: ChatboxProps) => {
             from: "local",
             to: "remote",
             timeRange: submittedRange,
+            timelineScope: submittedTimelineScope,
           });
           return;
         }
@@ -154,6 +170,7 @@ const Chatbox = ({ onSendMessage, duration }: ChatboxProps) => {
             from: "remote",
             to: "local",
             timeRange: submittedRange,
+            timelineScope: submittedTimelineScope,
           });
           return;
         }
@@ -199,6 +216,7 @@ const Chatbox = ({ onSendMessage, duration }: ChatboxProps) => {
         userConsented: true,
       },
       timeRange: pendingFallback.timeRange,
+      timelineScope: pendingFallback.timelineScope,
     }).then((assistantResponse) => {
       setChatHistory((history) => [
         ...history,
@@ -399,6 +417,47 @@ const Chatbox = ({ onSendMessage, duration }: ChatboxProps) => {
       <Box color={timeSelection.error ? "error.main" : "text.secondary"} fontSize="0.75rem" mb={1}>
         {timeSelection.error || `Chunk-relative range · 00:00–${formatChunkTime(duration)}`}
       </Box>
+
+      <TextField
+        select
+        fullWidth
+        size="small"
+        label="AI timeline access"
+        value={timelineSelection}
+        onChange={(event) => {
+          const value = event.target.value;
+          setTimelineSelection(typeof value === "string" ? value.split(",") : value);
+        }}
+        SelectProps={{
+          multiple: true,
+          MenuProps: upwardMenuProps,
+          renderValue: (selected) => {
+            const values = selected as string[];
+            if (values.length === 0) return "No timeline";
+            return values.map((value) => {
+              if (value === NEW_TIMELINE_VALUE) return "New timeline";
+              const axis = axes.find((item) => item.id === Number(value));
+              return axis?.axisName || `Timeline ${value}`;
+            }).join(", ");
+          },
+        }}
+        inputProps={{ "aria-label": "AI timeline access" }}
+        sx={{ mb: 1 }}
+      >
+        {axes.map((axis) => {
+          const value = String(axis.id);
+          return (
+            <MenuItem key={value} value={value}>
+              <Checkbox checked={timelineSelection.includes(value)} />
+              <ListItemText primary={axis.axisName || `Timeline ${axis.id}`} />
+            </MenuItem>
+          );
+        })}
+        <MenuItem value={NEW_TIMELINE_VALUE}>
+          <Checkbox checked={timelineSelection.includes(NEW_TIMELINE_VALUE)} />
+          <ListItemText primary="New timeline" />
+        </MenuItem>
+      </TextField>
 
       <Box display="flex" gap={1}>
         <TextField

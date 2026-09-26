@@ -397,3 +397,100 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
         system_prompt = request["messages"][0]["content"]
         self.assertIn("ATTITUDE_COOPERATIVE", system_prompt)
         self.assertNotIn("GESTURE_WAVING", system_prompt)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_no_timeline_scope_allows_conversational_reply(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="I can explain the labels."))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: Hello",
+            frameContext=[],
+            codebookContext={"Attitude": ["ATTITUDE_NEUTRAL"]},
+            timelineContext=[{"id": 4, "axisName": "Attitude", "blocks": []}],
+            timelineScope={"axis_ids": [], "allow_new": False},
+        )
+
+        result = assistant.respond("Annotate attitude on the timeline")
+
+        self.assertEqual(result, "I can explain the labels.")
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertNotIn("response_format", request)
+        self.assertIn("Timeline scope: none", request["messages"][0]["content"])
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_selected_timeline_scope_is_in_remote_prompt(self, openai_class):
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 4,
+                            "start": 1,
+                            "end": 2,
+                            "text": "ATTITUDE_NEUTRAL",
+                        },
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: Hello",
+            frameContext=[],
+            codebookContext={"Attitude": ["ATTITUDE_NEUTRAL"]},
+            timelineContext=[{"id": 4, "axisName": "Attitude", "blocks": []}],
+            timelineScope={"axis_ids": [4], "allow_new": False},
+        )
+
+        assistant.respond("Annotate attitude on the timeline")
+
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        system_prompt = request["messages"][0]["content"]
+        self.assertIn("existing axis IDs [4]", system_prompt)
+        self.assertIn("permission to create a new axis: False", system_prompt)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_remote_codebook_deletion_does_not_require_add_block(self, openai_class):
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "deleteBlock",
+                        "parameters": {"axisId": 4, "blockIndex": 0},
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: Hello",
+            frameContext=[],
+            codebookContext={"Attitude": ["ATTITUDE_NEUTRAL"]},
+            timelineContext=[{"id": 4, "axisName": "Attitude", "blocks": []}],
+            timelineScope={"axis_ids": [4], "allow_new": False},
+        )
+
+        result = assistant.respond(
+            "Delete the first attitude annotation block from the timeline"
+        )
+
+        self.assertEqual(result, response_text)
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertIn(
+            "delete all annotations\" means delete",
+            request["messages"][0]["content"],
+        )

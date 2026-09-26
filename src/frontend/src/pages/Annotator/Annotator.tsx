@@ -31,7 +31,10 @@ import RightAssistantPanel from "../../components/RightAssistantPanel";
 import Timeline from "../../components/Timeline";
 import {
   applyAIInstruction,
+  filterInstructionToTimelineScope,
+  instructionExceedsTimelineScope,
   requiresAIChangeConfirmation,
+  type TimelineScope,
 } from "../../components/Timeline/aiInstruction";
 import {
   AssistantMode,
@@ -86,6 +89,9 @@ const Annotator = ({
   const [pendingAIChange, setPendingAIChange] = useState<{
     instruction: AIInstruction;
     resolve: (accepted: boolean) => void;
+  } | null>(null);
+  const [pendingScopeAnomaly, setPendingScopeAnomaly] = useState<{
+    resolve: (decision: "all" | "selected" | "reject") => void;
   } | null>(null);
   const [aiRecords, setAIRecords] = useState<AIRecord[]>(data.ai_records ?? []);
   const [conversationKey, setConversationKey] = useState(0);
@@ -174,6 +180,16 @@ const Annotator = ({
     setPendingAIChange(null);
   };
 
+  const requestScopeAnomalyDecision = () =>
+    new Promise<"all" | "selected" | "reject">((resolve) => {
+      setPendingScopeAnomaly({ resolve });
+    });
+
+  const resolveScopeAnomaly = (decision: "all" | "selected" | "reject") => {
+    pendingScopeAnomaly?.resolve(decision);
+    setPendingScopeAnomaly(null);
+  };
+
   const handleSaveAnnotations = async () => {
     if (processingPending) return;
     const annotationData = axesData.map((axis) => ({
@@ -235,6 +251,12 @@ const Annotator = ({
         context_routes: assistantRouting.contextRoutes,
         context_duration: duration,
         time_range: options?.timeRange,
+        timeline_scope: options?.timelineScope
+          ? {
+              axis_ids: options.timelineScope.axisIds,
+              allow_new: options.timelineScope.allowNew,
+            }
+          : undefined,
         fallback_consent: options?.fallbackConsent
           ? {
               from: options.fallbackConsent.from,
@@ -289,8 +311,59 @@ const Annotator = ({
             "steps" in parsedObject && Array.isArray(parsedObject.steps)
           ) {
               console.log("This is an instruction:", parsedObject);
-              const parsedInstruction = parsedObject as AIInstruction;
+              let parsedInstruction = parsedObject as AIInstruction;
+              const timelineScope: TimelineScope = options?.timelineScope ?? {
+                axisIds: axesData.map((axis) => axis.id),
+                allowNew: true,
+              };
+              const hasTimelineAccess =
+                timelineScope.axisIds.length > 0 || timelineScope.allowNew;
+              if (!hasTimelineAccess) {
+                await persistCompletedAIRecord(aiRecord, "not_applied");
+                return {
+                  text: "No timeline was selected, so no annotation changes were applied.",
+                  assistantMode,
+                  aiRecord,
+                };
+              }
+              const requestsDeleteAllAnnotations =
+                /\b(?:delete|remove)\s+(?:all\s+)?(?:the\s+)?(?:annotations?|blocks?)\b/i.test(message);
+              if (requestsDeleteAllAnnotations) {
+                const targetAxisIds = new Set(timelineScope.axisIds);
+                parsedInstruction = {
+                  type: "instruction",
+                  steps: axesData
+                    .filter((axis) => targetAxisIds.has(axis.id))
+                    .flatMap((axis) =>
+                      axis.blocks.map((_, blockIndex) => ({
+                        action: "deleteBlock",
+                        parameters: { axisId: axis.id, blockIndex },
+                      })).reverse(),
+                    ),
+                };
+              }
+              let scopeDecisionMade = false;
+              if (instructionExceedsTimelineScope(parsedInstruction, timelineScope)) {
+                const decision = await requestScopeAnomalyDecision();
+                scopeDecisionMade = true;
+                if (decision === "reject") {
+                  await persistCompletedAIRecord(aiRecord, "rejected");
+                  return {
+                    text: "AI timeline changes were rejected. No annotation changes were applied.",
+                    assistantMode,
+                    aiRecord,
+                  };
+                }
+                if (decision === "selected") {
+                  parsedInstruction = filterInstructionToTimelineScope(
+                    parsedInstruction,
+                    timelineScope,
+                  );
+                }
+              }
               if (
+                !scopeDecisionMade &&
+                options?.timelineScope === undefined &&
                 requiresAIChangeConfirmation(parsedInstruction, axesData) &&
                 !(await requestAIChangeConfirmation(parsedInstruction))
               ) {
@@ -303,7 +376,10 @@ const Annotator = ({
                 };
               }
               const updatedAxes = applyAIInstruction(axesData, parsedInstruction, duration);
-              const requestedAnnotation = /\b(?:annotat(?:e|ion|ions|ing)|label(?:s|ed|ing)?|classif(?:y|ies|ied|ication)|categoriz(?:e|es|ed|ing|ation)|tag(?:s|ged|ging)?)\b/i.test(message);
+              const requestsDeletion = /\b(?:delete|remove)\b/i.test(message);
+              const requestedAnnotationBlocks =
+                !requestsDeletion &&
+                /\b(?:annotat(?:e|ion|ions|ing)|label(?:s|ed|ing)?|classif(?:y|ies|ied|ication)|categoriz(?:e|es|ed|ing|ation)|tag(?:s|ged|ging)?)\b/i.test(message);
               const addedBlockApplied = parsedInstruction.steps.some((step) => {
                 if (step.action !== "addBlock") return false;
                 const axisId = Number(step.parameters?.axisId);
@@ -318,7 +394,7 @@ const Annotator = ({
                 );
                 return Boolean(isPresent && !wasPresent);
               });
-              if (requestedAnnotation && !addedBlockApplied) {
+              if (requestedAnnotationBlocks && !addedBlockApplied) {
                 await persistCompletedAIRecord(aiRecord, "not_applied");
                 return {
                   text: "The model did not provide any usable annotation blocks. No empty axis was created. Please try again with a specific time range or annotation target.",
@@ -503,6 +579,26 @@ const Annotator = ({
       </Button>
     </DialogActions>
   </Dialog>
+  <Dialog
+    open={pendingScopeAnomaly !== null}
+    onClose={() => resolveScopeAnomaly("reject")}
+  >
+    <DialogTitle>AI targeted other timelines</DialogTitle>
+    <DialogContent>
+      <DialogContentText>
+        The AI response includes changes outside the timelines you selected.
+      </DialogContentText>
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={() => resolveScopeAnomaly("reject")}>Reject all</Button>
+      <Button onClick={() => resolveScopeAnomaly("selected")}>
+        Apply selected timelines only
+      </Button>
+      <Button onClick={() => resolveScopeAnomaly("all")} variant="contained" color="warning">
+        Apply all changes
+      </Button>
+    </DialogActions>
+  </Dialog>
 
   <Box
     display="flex"
@@ -657,7 +753,7 @@ const Annotator = ({
               </Box>
             )
           }
-          assistant={<Chatbox key={conversationKey} duration={duration} onSendMessage={handleSendMessageToGPT} />}
+          assistant={<Chatbox key={conversationKey} duration={duration} axes={axesData} onSendMessage={handleSendMessageToGPT} />}
         />
         </Box>
       </Box>

@@ -37,6 +37,10 @@ export type AssistantRequestOptions = {
     to: "local" | "remote";
     userConsented: true;
   };
+  timelineScope?: {
+    axisIds: number[];
+    allowNew: boolean;
+  };
 };
 
 export const buildAIRecordAnnotationName = (

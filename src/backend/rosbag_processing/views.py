@@ -379,6 +379,22 @@ def gpt_chat(request):
         audio_transcript = data.get("audio_transcript")
         Axiinfo = data.get("Axeinfo")
         Codebook = data.get("Codebook")
+        timeline_scope = data.get("timeline_scope")
+        if timeline_scope is not None:
+            if not isinstance(timeline_scope, dict):
+                return JsonResponse({"error": "Invalid timeline scope"}, status=400)
+            raw_axis_ids = timeline_scope.get("axis_ids", [])
+            allow_new = timeline_scope.get("allow_new", False)
+            if (
+                not isinstance(raw_axis_ids, list)
+                or any(isinstance(value, bool) or not isinstance(value, int) for value in raw_axis_ids)
+                or not isinstance(allow_new, bool)
+            ):
+                return JsonResponse({"error": "Invalid timeline scope"}, status=400)
+            timeline_scope = {
+                "axis_ids": list(dict.fromkeys(raw_axis_ids)),
+                "allow_new": allow_new,
+            }
         assistant_mode = data.get("assistant_mode", "remote")
         context_routes = data.get("context_routes", {})
         fallback_consent = data.get("fallback_consent")
@@ -446,6 +462,8 @@ def gpt_chat(request):
             "codebookContext": Codebook,
             "timelineContext": Axiinfo,
         }
+        if timeline_scope is not None:
+            common_context["timelineScope"] = timeline_scope
         if assistant_mode == "local":
             assistant = create_local_ai(
                 **common_context,

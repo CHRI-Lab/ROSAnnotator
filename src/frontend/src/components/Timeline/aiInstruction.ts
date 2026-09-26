@@ -15,6 +15,57 @@ type TimelineAxis = {
   blocks: TimelineBlock[];
 };
 
+export type TimelineScope = {
+  axisIds: number[];
+  allowNew: boolean;
+};
+
+const stepAxisId = (step: AIInstruction["steps"][number]) =>
+  Number(step.parameters?.axisId);
+
+export const instructionExceedsTimelineScope = (
+  instruction: AIInstruction,
+  scope: TimelineScope,
+) => {
+  const selectedIds = new Set(scope.axisIds);
+  const proposedNewIds = new Set(
+    instruction.steps
+      .filter((step) => step.action === "addAxi")
+      .map(stepAxisId)
+      .filter(Number.isFinite),
+  );
+  return instruction.steps.some((step) => {
+    const axisId = stepAxisId(step);
+    if (!Number.isFinite(axisId)) return true;
+    if (step.action === "addAxi") return !scope.allowNew;
+    return !selectedIds.has(axisId) && !(scope.allowNew && proposedNewIds.has(axisId));
+  });
+};
+
+export const filterInstructionToTimelineScope = (
+  instruction: AIInstruction,
+  scope: TimelineScope,
+): AIInstruction => {
+  const selectedIds = new Set(scope.axisIds);
+  const permittedNewIds = new Set(
+    scope.allowNew
+      ? instruction.steps
+          .filter((step) => step.action === "addAxi")
+          .map(stepAxisId)
+          .filter(Number.isFinite)
+      : [],
+  );
+  return {
+    ...instruction,
+    steps: instruction.steps.filter((step) => {
+      const axisId = stepAxisId(step);
+      if (!Number.isFinite(axisId)) return false;
+      if (step.action === "addAxi") return permittedNewIds.has(axisId);
+      return selectedIds.has(axisId) || permittedNewIds.has(axisId);
+    }),
+  };
+};
+
 const cloneAxes = (axes: TimelineAxis[]) =>
   JSON.parse(JSON.stringify(axes)) as TimelineAxis[];
 
