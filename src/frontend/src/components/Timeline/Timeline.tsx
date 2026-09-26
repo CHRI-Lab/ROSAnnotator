@@ -52,7 +52,7 @@ interface TimelineProps {
   onAxesUpdate: (axes: any) => void;
   instruction: AIInstruction | null;
   aiRecords: AIRecord[];
-  onSave: () => void;
+  onSaveReady?: (openSaveDialog: (() => void) | null) => void;
   savedAnnotationName?: string;
   onAnnotationSaved?: (name: string) => void;
 }
@@ -125,6 +125,7 @@ const Timeline: React.FC<TimelineProps> = ({
   autosaveEnabled = true,
   autosaveScope,
   onAutosaveReady,
+  onSaveReady,
   switchingChunk = false,
   savedAnnotationName,
   onAnnotationSaved
@@ -314,6 +315,10 @@ const Timeline: React.FC<TimelineProps> = ({
     setIsSaveDialogOpen(true);
   };
 
+  useEffect(() => {
+    onSaveReady?.(handleOpenSaveDialog);
+    return () => onSaveReady?.(null);
+  });
 
 
   const finishSave = (name: string) => {

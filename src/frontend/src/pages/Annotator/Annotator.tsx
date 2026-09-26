@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactPlayer from "react-player";
 import {
   Box,
@@ -83,7 +83,6 @@ const Annotator = ({
   const [played, setPlayed] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [bookList, setBookList] = useState(bookListData);
   const [axesData, setAxesData] = useState<AxisData[]>([]);
   const [instruction, setInstruction] = useState<AIInstruction | null>(null);
@@ -96,6 +95,16 @@ const Annotator = ({
   const [pendingChunkIndex, setPendingChunkIndex] = useState<number | null>(null);
   const [confirmingChunkSwitch, setConfirmingChunkSwitch] = useState(false);
   const [chunkSwitchError, setChunkSwitchError] = useState("");
+
+  // Timeline owns the save dialog; the header button opens it.
+  const openSaveDialog = useRef<(() => void) | null>(null);
+  const registerSaveDialog = useCallback(
+    (open: (() => void) | null) => {
+      openSaveDialog.current = open;
+    },
+    [],
+  );
+
 
   const handleClearConversation = async () => {
     const response = await fetch("http://localhost:8000/api/gpt_chat/clear/", {
@@ -176,45 +185,6 @@ const Annotator = ({
   const resolveAIChangeConfirmation = (accepted: boolean) => {
     pendingAIChange?.resolve(accepted);
     setPendingAIChange(null);
-  };
-
-  const handleSaveAnnotations = async () => {
-    if (processingPending) return;
-    const annotationData = axesData.map((axis) => ({
-      id: axis.id,
-      axisType: axis.type,
-      axisName: axis.axisName || "",
-      axisBooklistName: axis.typeName || "",
-      annotationBlocks: (axis.blocks || []).map((block) => ({
-        start: block.start,
-        end: block.end,
-        text: block.text,
-      })),
-    }));
-
-    setIsSaving(true);
-    try {
-      const response = await fetch("http://localhost:8000/api/save_annotation/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          annotation_name: buildAIRecordAnnotationName(
-            rosBagFileName,
-            bookListFileName,
-          ),
-          annotation_data: annotationData,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Save failed (${response.status})`);
-      }
-      alert("Data saved successfully.");
-    } catch (error) {
-      alert(`Failed to save data. Please try again.\n${error}`);
-    } finally {
-      setIsSaving(false);
-    }
   };
 
   const handleSendMessageToGPT = (
@@ -514,8 +484,8 @@ const Annotator = ({
   >
     <AppHeader
       rosBagFileName={rosBagFileName}
-      isSaving={isSaving}
-      onSave={handleSaveAnnotations}
+      disabled={processingPending}
+      onSave={() => openSaveDialog.current?.()}
     />
 
     <Box display="flex" flex={1} minHeight={0} overflow="hidden">
@@ -638,7 +608,7 @@ const Annotator = ({
               onAnnotationSaved={onAnnotationSaved}
               switchingChunk={switchingChunk}
               aiRecords={aiRecords}
-              onSave={handleSaveAnnotations}
+              onSaveReady={registerSaveDialog}
             />}
           </Box>
         </Box>
