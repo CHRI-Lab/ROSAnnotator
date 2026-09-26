@@ -415,7 +415,7 @@ const Chatbox = ({ onSendMessage, duration, axes }: ChatboxProps) => {
         />
       </Box>
       <Box color={timeSelection.error ? "error.main" : "text.secondary"} fontSize="0.75rem" mb={1}>
-        {timeSelection.error || `Chunk-relative range · 00:00–${formatChunkTime(duration)}`}
+        {timeSelection.error || `range · 00:00–${formatChunkTime(duration)}`}
       </Box>
 
       <TextField

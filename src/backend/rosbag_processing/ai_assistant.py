@@ -122,6 +122,30 @@ class AIAssistant(ABC):
             or self.timelineScope.get("allow_new")
         )
 
+    def _is_timeline_request(self, message):
+        if not self._timeline_edits_enabled():
+            return False
+        if self._requests_timeline_change(message):
+            return True
+        if self.timelineScope is None:
+            return False
+        normalized_message = str(message or "").casefold()
+        return any(
+            word in normalized_message
+            for word in (
+                "annotate",
+                "annotation",
+                "label",
+                "classify",
+                "classification",
+                "categorize",
+                "tag",
+                "delete",
+                "remove",
+                "clear",
+            )
+        )
+
     def _new_axis_allowed(self):
         return self.timelineScope is None or self.timelineScope.get("allow_new") is True
 
@@ -134,6 +158,12 @@ class AIAssistant(ABC):
             return (
                 "Timeline scope: none. Do not return timeline instructions or change "
                 "annotations. Reply conversationally in plain text."
+            )
+        if allow_new and not axis_ids:
+            return (
+                "Timeline scope: create one new axis. Return addAxi first, then target "
+                "that new axis ID in every addBlock step. Do not target any existing "
+                "axis."
             )
         return (
             f"Timeline scope: existing axis IDs {axis_ids}; permission to create a "
@@ -173,9 +203,73 @@ class RemoteAPI(AIAssistant):
             response_text = self._request_completion(message, chatHistory)
         except AuthenticationError as error:
             raise RemoteAuthenticationError from error
-        if self._requests_timeline_change(message) and self._timeline_edits_enabled():
+        if self._is_timeline_request(message):
+            response_text = self._repair_new_only_annotation(response_text, message)
             self._validate_timeline_instruction(response_text, message)
         return response_text
+
+    def _repair_new_only_annotation(self, response_text, message):
+        """Route model-produced blocks to a new axis when that is the only scope."""
+        if not (
+            isinstance(self.timelineScope, dict)
+            and self.timelineScope.get("allow_new") is True
+            and not self.timelineScope.get("axis_ids")
+        ):
+            return response_text
+        try:
+            json_start = response_text.find("{")
+            json_end = response_text.rfind("}")
+            instruction = json.loads(response_text[json_start : json_end + 1])
+        except (AttributeError, json.JSONDecodeError):
+            return response_text
+        steps = instruction.get("steps") if isinstance(instruction, dict) else None
+        if not isinstance(steps, list):
+            return response_text
+        add_blocks = [
+            step for step in steps
+            if isinstance(step, dict) and step.get("action") == "addBlock"
+        ]
+        if not add_blocks:
+            return response_text
+
+        add_axis = next(
+            (
+                step for step in steps
+                if isinstance(step, dict) and step.get("action") == "addAxi"
+                and isinstance(step.get("parameters"), dict)
+            ),
+            None,
+        )
+        if add_axis is None:
+            new_axis_id = max(
+                (
+                    int(axis.get("id", axis.get("axisId")))
+                    for axis in self.timelineContext or []
+                    if isinstance(axis, dict)
+                    and isinstance(axis.get("id", axis.get("axisId")), int)
+                ),
+                default=0,
+            ) + 1
+            normalized_message = str(message or "").casefold()
+            axis_name = (
+                "Speaker Attitudes" if "attitude" in normalized_message
+                else "AI Annotations"
+            )
+            add_axis = {
+                "action": "addAxi",
+                "parameters": {
+                    "axisId": new_axis_id,
+                    "axisName": axis_name,
+                    "axistype": "Type-in",
+                },
+            }
+            steps.insert(0, add_axis)
+        new_axis_id = add_axis["parameters"].get("axisId")
+        for step in add_blocks:
+            parameters = step.get("parameters")
+            if isinstance(parameters, dict):
+                parameters["axisId"] = new_axis_id
+        return json.dumps(instruction, ensure_ascii=False)
 
     def _validate_timeline_instruction(self, response_text, message=""):
         error_message = (
@@ -212,7 +306,7 @@ class RemoteAPI(AIAssistant):
         selected_labels = self._codebook_labels(self._codebook_for_message(message))
         normalized_message = str(message or "").casefold()
         is_deletion_request = any(
-            word in normalized_message for word in ("delete", "remove")
+            word in normalized_message for word in ("delete", "remove", "clear")
         )
         requires_codebook_label = not is_deletion_request and bool(selected_labels) and any(
             phrase in normalized_message
@@ -314,6 +408,9 @@ class RemoteAPI(AIAssistant):
                     }}
 
                     axis Name are normally the topic of this axi.
+                    Every axis name must be unique. If creating multiple axes with
+                    the same topic, number them as "Topic 1", "Topic 2", and so on.
+                    Never reuse an existing axis name.
                     Remove axi could remove all blocks in the axi.
                     Axi type always equal "Type-in"
                     Always create steps, even there only one step.
@@ -351,7 +448,7 @@ class RemoteAPI(AIAssistant):
 
                     """
         request_parameters = {"model": "gpt-4o"}
-        if self._requests_timeline_change(message) and self._timeline_edits_enabled():
+        if self._is_timeline_request(message):
             # Timeline edits must be machine-readable for the frontend to apply.
             request_parameters["response_format"] = {"type": "json_object"}
         messages = [
@@ -447,9 +544,7 @@ class LocalAI(AIAssistant):
                 "a video before requesting gesture annotation."
             )
 
-        is_timeline_request = (
-            self._requests_timeline_change(message) and self._timeline_edits_enabled()
-        )
+        is_timeline_request = self._is_timeline_request(message)
         is_auto_annotation = self._requests_auto_annotation(message)
         if requests_visual_analysis and is_timeline_request and self._new_axis_allowed():
             return self._respond_visual_annotation(message, chatHistory)
@@ -1056,7 +1151,7 @@ TIMESTAMPED SEGMENTS:
     @staticmethod
     def _requests_auto_annotation(message):
         normalized_message = message.lower()
-        if any(word in normalized_message for word in ("delete", "remove")):
+        if any(word in normalized_message for word in ("delete", "remove", "clear")):
             return False
         annotation_words = ("annotate", "label", "classify", "categorize", "tag")
         return any(word in normalized_message for word in annotation_words) and any(
@@ -1575,7 +1670,7 @@ PREVIOUS CHAT HISTORY:
 {history}
 """
 
-        if self._requests_timeline_change(message) and self._timeline_edits_enabled():
+        if self._is_timeline_request(message):
             timeline_context = json.dumps(
                 self.timelineContext, ensure_ascii=False, indent=2
             )
@@ -1615,6 +1710,8 @@ for the matching blocks and preserve the axes. Return deleteAxi only when the us
 explicitly asks to delete an axis or timeline.
 
 The next unused axisId is {next_axis_id}. Use it for the new axis and every block.
+Every new axis name must be unique. If multiple axes share a topic, number them
+as "Topic 1", "Topic 2", and so on. Never reuse a current timeline name.
 For addBlock, use an exact codebook label as text when the user asks for
 codebook annotation; otherwise use concise transcript-grounded text. Use the same axisId
 for its blocks. Do not create overlapping blocks on one axis. Include all

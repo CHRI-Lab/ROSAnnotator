@@ -327,7 +327,7 @@ const Annotator = ({
                 };
               }
               const requestsDeleteAllAnnotations =
-                /\b(?:delete|remove)\s+(?:all\s+)?(?:the\s+)?(?:annotations?|blocks?)\b/i.test(message);
+                /\b(?:delete|remove|clear)\s+(?:all\s+)?(?:the\s+)?(?:annotations?|blocks?)\b/i.test(message);
               if (requestsDeleteAllAnnotations) {
                 const targetAxisIds = new Set(timelineScope.axisIds);
                 parsedInstruction = {
@@ -376,7 +376,7 @@ const Annotator = ({
                 };
               }
               const updatedAxes = applyAIInstruction(axesData, parsedInstruction, duration);
-              const requestsDeletion = /\b(?:delete|remove)\b/i.test(message);
+              const requestsDeletion = /\b(?:delete|remove|clear)\b/i.test(message);
               const requestedAnnotationBlocks =
                 !requestsDeletion &&
                 /\b(?:annotat(?:e|ion|ions|ing)|label(?:s|ed|ing)?|classif(?:y|ies|ied|ication)|categoriz(?:e|es|ed|ing|ation)|tag(?:s|ged|ging)?)\b/i.test(message);

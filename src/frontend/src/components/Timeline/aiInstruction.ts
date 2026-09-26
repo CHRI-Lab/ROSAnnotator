@@ -69,6 +69,31 @@ export const filterInstructionToTimelineScope = (
 const cloneAxes = (axes: TimelineAxis[]) =>
   JSON.parse(JSON.stringify(axes)) as TimelineAxis[];
 
+const normalizedAxisName = (name: string) => name.trim().toLocaleLowerCase();
+
+export const isDuplicateAxisName = (
+  axes: Array<{ id: number; axisName?: string }>,
+  axisId: number,
+  proposedName: string,
+) => {
+  const normalizedName = normalizedAxisName(proposedName);
+  return Boolean(normalizedName) && axes.some(
+    (axis) =>
+      axis.id !== axisId &&
+      normalizedAxisName(axis.axisName || "") === normalizedName,
+  );
+};
+
+const nextUniqueAxisName = (baseName: string, usedNames: Set<string>) => {
+  let suffix = 1;
+  let candidate = `${baseName} ${suffix}`;
+  while (usedNames.has(normalizedAxisName(candidate))) {
+    suffix += 1;
+    candidate = `${baseName} ${suffix}`;
+  }
+  return candidate;
+};
+
 export const requiresAIChangeConfirmation = (
   instruction: AIInstruction,
   currentAxes: Array<{ id: number }>,
@@ -101,6 +126,19 @@ export const applyAIInstruction = (
   duration: number,
 ) => {
   const nextAxes = cloneAxes(currentAxes);
+  const usedAxisNames = new Set(
+    nextAxes
+      .map((axis) => normalizedAxisName(axis.axisName || ""))
+      .filter(Boolean),
+  );
+  const proposedNameCounts = instruction.steps.reduce((counts, step) => {
+    if (step.action !== "addAxi") return counts;
+    const baseName = String(step.parameters?.axisName || "").trim();
+    if (!baseName) return counts;
+    const normalizedName = normalizedAxisName(baseName);
+    counts.set(normalizedName, (counts.get(normalizedName) || 0) + 1);
+    return counts;
+  }, new Map<string, number>());
   instruction.steps.forEach((step) => {
     const parameters = step.parameters ?? {};
     const axisId = Number(parameters.axisId);
@@ -109,10 +147,19 @@ export const applyAIInstruction = (
       if (!Number.isFinite(axisId) || nextAxes.some((axis) => axis.id === axisId)) {
         return;
       }
+      const baseName = String(parameters.axisName || `Axis ${axisId}`).trim();
+      const normalizedName = normalizedAxisName(baseName);
+      const needsSuffix =
+        usedAxisNames.has(normalizedName) ||
+        (proposedNameCounts.get(normalizedName) || 0) > 1;
+      const axisName = needsSuffix
+        ? nextUniqueAxisName(baseName, usedAxisNames)
+        : baseName;
+      usedAxisNames.add(normalizedAxisName(axisName));
       nextAxes.push({
         id: axisId,
         type: "Type-in",
-        axisName: String(parameters.axisName || `Axis ${axisId}`),
+        axisName,
         blocks: [],
         typeName: "",
         shortcutKey: "",

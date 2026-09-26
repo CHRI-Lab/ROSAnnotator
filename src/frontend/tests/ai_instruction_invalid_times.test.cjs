@@ -106,3 +106,54 @@ test('a model block ending exactly at duration is accepted', () => {
     text: 'Model proposal',
   });
 });
+
+test('AI-created axes with the same proposed name receive numeric suffixes', () => {
+  const { applyAIInstruction } = loadAIInstructionHelpers();
+  const instruction = {
+    type: 'instruction',
+    steps: [1, 2, 3].map((axisId) => ({
+      action: 'addAxi',
+      parameters: { axisId, axisName: "Speaker's attitude", axistype: 'Type-in' },
+    })),
+  };
+
+  const result = applyAIInstruction([], instruction, 60);
+
+  assert.deepEqual(
+    normalize(result.map((axis) => axis.axisName)),
+    ["Speaker's attitude 1", "Speaker's attitude 2", "Speaker's attitude 3"],
+  );
+});
+
+test('AI-created axis avoids an existing name case-insensitively', () => {
+  const { applyAIInstruction } = loadAIInstructionHelpers();
+  const existing = [{
+    id: 1,
+    type: 'Type-in',
+    axisName: "Speaker's Attitude",
+    blocks: [],
+  }];
+  const instruction = {
+    type: 'instruction',
+    steps: [{
+      action: 'addAxi',
+      parameters: { axisId: 2, axisName: "speaker's attitude", axistype: 'Type-in' },
+    }],
+  };
+
+  const result = applyAIInstruction(existing, instruction, 60);
+
+  assert.equal(result[1].axisName, "speaker's attitude 1");
+});
+
+test('manual axis names detect trimmed case-insensitive duplicates', () => {
+  const { isDuplicateAxisName } = loadAIInstructionHelpers();
+  const axes = [
+    { id: 1, axisName: 'Speaker Attitude' },
+    { id: 2, axisName: 'Notes' },
+  ];
+
+  assert.equal(isDuplicateAxisName(axes, 2, ' speaker attitude '), true);
+  assert.equal(isDuplicateAxisName(axes, 1, 'Speaker Attitude'), false);
+  assert.equal(isDuplicateAxisName(axes, 2, 'Different name'), false);
+});
