@@ -51,6 +51,67 @@ class AIAssistant(ABC):
         """Return safe provider metadata for the most recent response."""
         return self.last_run_metadata
 
+    @staticmethod
+    def _requests_timeline_change(message):
+        """Return whether a user asks for a machine-applied timeline edit."""
+        normalized_message = message.casefold()
+        action_words = (
+            "annotate", "label", "classify", "categorize", "tag",
+            "add", "create", "delete", "remove",
+        )
+        timeline_words = (
+            "timeline", "time axis", "timestamp", "time range",
+            "axis", "axi", "block", "annotation",
+        )
+        return any(word in normalized_message for word in action_words) and any(
+            word in normalized_message for word in timeline_words
+        )
+
+    @staticmethod
+    def _codebook_labels(codebook):
+        if isinstance(codebook, dict):
+            values = codebook.values()
+        elif isinstance(codebook, list):
+            values = (codebook,)
+        else:
+            return []
+        return list(
+            dict.fromkeys(
+                str(label).strip()
+                for labels in values
+                if isinstance(labels, list)
+                for label in labels
+                if str(label).strip()
+            )
+        )
+
+    def _codebook_for_message(self, message):
+        """Select the codebook categories named by the user's request."""
+        if not isinstance(self.codebookContext, dict):
+            return self.codebookContext
+
+        normalized_message = str(message or "").casefold()
+        category_terms = ()
+        if "attitude" in normalized_message:
+            category_terms = ("attitude",)
+        elif any(
+            term in normalized_message
+            for term in ("gesture", "body language", "visual")
+        ):
+            category_terms = ("gesture", "body language", "visual")
+        elif "request" in normalized_message:
+            category_terms = ("request",)
+
+        if not category_terms:
+            return self.codebookContext
+
+        selected_categories = {
+            category: labels
+            for category, labels in self.codebookContext.items()
+            if any(term in str(category).casefold() for term in category_terms)
+        }
+        return selected_categories or self.codebookContext
+
     @abstractmethod
     def _respond(self, message, chatHistory=""):
         """Execute provider-specific inference and return raw response text."""
@@ -82,22 +143,10 @@ class RemoteAPI(AIAssistant):
         except AuthenticationError as error:
             raise RemoteAuthenticationError from error
         if self._requests_timeline_change(message):
-            self._validate_timeline_instruction(response_text)
+            self._validate_timeline_instruction(response_text, message)
         return response_text
 
-    @staticmethod
-    def _requests_timeline_change(message):
-        normalized_message = message.lower()
-        return any(
-            word in normalized_message
-            for word in ("annotate", "add", "create", "delete", "remove")
-        ) and any(
-            word in normalized_message
-            for word in ("timeline", "axis", "axi", "block", "annotation")
-        )
-
-    @staticmethod
-    def _validate_timeline_instruction(response_text):
+    def _validate_timeline_instruction(self, response_text, message=""):
         error_message = (
             "The remote model returned an invalid timeline instruction. "
             "No annotation changes were applied."
@@ -129,6 +178,12 @@ class RemoteAPI(AIAssistant):
             "deleteBlock": {"axisId": int, "blockIndex": int},
             "deleteAxi": {"axisId": int},
         }
+        selected_labels = self._codebook_labels(self._codebook_for_message(message))
+        requires_codebook_label = bool(selected_labels) and any(
+            phrase in str(message or "").casefold()
+            for phrase in ("according to", "attitude", "codebook")
+        )
+        add_block_count = 0
         for step in steps:
             if not isinstance(step, dict) or step.get("action") not in required_parameters:
                 raise RemoteResponseError(error_message)
@@ -141,10 +196,24 @@ class RemoteAPI(AIAssistant):
                     raise RemoteResponseError(error_message)
             if step["action"] == "addBlock" and parameters["end"] < parameters["start"]:
                 raise RemoteResponseError(error_message)
+            if step["action"] == "addBlock":
+                add_block_count += 1
+                if requires_codebook_label and parameters["text"] not in selected_labels:
+                    raise RemoteResponseError(
+                        "The remote model returned an annotation label that is not "
+                        "in the selected codebook. No annotation changes were applied."
+                    )
+        if requires_codebook_label and add_block_count == 0:
+            raise RemoteResponseError(
+                "The remote model did not return any codebook annotation blocks. "
+                "No annotation changes were applied."
+            )
 
     def _request_completion(self, message, chatHistory=""):
         client = OpenAI(api_key=self.APIKey)
         timeline_context = json.dumps(self.timelineContext, indent=2)
+        selected_codebook = self._codebook_for_message(message)
+        allowed_labels = self._codebook_labels(selected_codebook)
         selected_frames = self.frameContext[
             0::max(1, len(self.frameContext) // 50)
         ][:50]
@@ -209,6 +278,7 @@ class RemoteAPI(AIAssistant):
                     Remove axi could remove all blocks in the axi.
                     Axi type always equal "Type-in"
                     Always create steps, even there only one step.
+                    For timeline changes, return only one valid JSON object in the specified format.
                     The newest axi id will be current largest id+1.
                     Overlap with other block in one axi will lead to error.
                     For an annotation request, an axis alone is not a completed annotation.
@@ -217,14 +287,21 @@ class RemoteAPI(AIAssistant):
                     transcript timestamps for speech-based annotations and the
                     supplied video frames for visible gestures. Do not invent a
                     gesture when the frames do not show it.
+                    For attitude annotation, create one block per applicable utterance
+                    using that utterance's start and end timestamps. Do not create one
+                    large summary block across separate utterances.
                     If the response is a normal conversation, return the plain text as usual.
                     Here is the current Axi information, you can consider axiId based on this:
 
                     {timeline_context}
 
-                    Here is the Codebook predefined by user:
+                    Here is the Codebook predefined by user. When the request asks
+                    for codebook annotation, every addBlock text must be exactly one
+                    of these labels; do not use summaries or explanations:
 
-                    {self.codebookContext}
+                    {selected_codebook}
+
+                    Allowed exact labels: {allowed_labels}
                     
                     Here is previous chat history between you and user:
 
@@ -233,6 +310,9 @@ class RemoteAPI(AIAssistant):
 
                     """
         request_parameters = {"model": "gpt-4o"}
+        if self._requests_timeline_change(message):
+            # Timeline edits must be machine-readable for the frontend to apply.
+            request_parameters["response_format"] = {"type": "json_object"}
         messages = [
             {
                 "role": "system",
@@ -593,24 +673,6 @@ class LocalAI(AIAssistant):
         return response_text
 
     @staticmethod
-    def _codebook_labels(codebook):
-        if isinstance(codebook, dict):
-            values = codebook.values()
-        elif isinstance(codebook, list):
-            values = (codebook,)
-        else:
-            return []
-        return list(
-            dict.fromkeys(
-                str(label).strip()
-                for labels in values
-                if isinstance(labels, list)
-                for label in labels
-                if str(label).strip()
-            )
-        )
-
-    @staticmethod
     def _is_none_label(label):
         normalized_label = str(label).casefold()
         return normalized_label in {"none", "no gesture", "gesture_none"} or (
@@ -916,15 +978,6 @@ TIMESTAMPED SEGMENTS:
         return response_text
 
     @staticmethod
-    def _requests_timeline_change(message):
-        normalized_message = message.lower()
-        action_words = ("annotate", "add", "create", "delete", "remove")
-        timeline_words = ("timeline", "axis", "axi", "block", "annotation")
-        return any(word in normalized_message for word in action_words) and any(
-            word in normalized_message for word in timeline_words
-        )
-
-    @staticmethod
     def _requests_code_selection(message):
         normalized_message = message.lower()
         code_words = ("code", "codebook", "label", "classify", "categorize")
@@ -957,7 +1010,8 @@ TIMESTAMPED SEGMENTS:
     @staticmethod
     def _requests_auto_annotation(message):
         normalized_message = message.lower()
-        return "annotate" in normalized_message and any(
+        annotation_words = ("annotate", "label", "classify", "categorize", "tag")
+        return any(word in normalized_message for word in annotation_words) and any(
             phrase in normalized_message
             for phrase in (
                 "all ",
@@ -982,33 +1036,6 @@ TIMESTAMPED SEGMENTS:
         ):
             return "Participant Gestures"
         return "Auto Annotation"
-
-    def _codebook_for_message(self, message):
-        """Select relevant categories while retaining combined codebook support."""
-        if not isinstance(self.codebookContext, dict):
-            return self.codebookContext
-
-        normalized_message = str(message or "").casefold()
-        category_terms = ()
-        if "attitude" in normalized_message:
-            category_terms = ("attitude",)
-        elif any(
-            term in normalized_message
-            for term in ("gesture", "body language", "visual")
-        ):
-            category_terms = ("gesture", "body language", "visual")
-        elif "request" in normalized_message:
-            category_terms = ("request",)
-
-        if not category_terms:
-            return self.codebookContext
-
-        selected_categories = {
-            category: labels
-            for category, labels in self.codebookContext.items()
-            if any(term in str(category).casefold() for term in category_terms)
-        }
-        return selected_categories or self.codebookContext
 
     @staticmethod
     def _is_request_candidate(text):

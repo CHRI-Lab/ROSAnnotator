@@ -295,3 +295,105 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
                 self.assertEqual(
                     openai_class.return_value.chat.completions.create.call_count, 2
                 )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_remote_label_on_time_axis_requests_timeline_json(self, openai_class):
+        """Codebook labels on a time axis are timeline actions, not chat prose."""
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addAxi",
+                        "parameters": {
+                            "axisId": 1,
+                            "axisName": "User attitude",
+                            "axistype": "Type-in",
+                        },
+                    },
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 1,
+                            "start": 15,
+                            "end": 19,
+                            "text": "ATTITUDE_COOPERATIVE",
+                        },
+                    },
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="00:15 - 00:19 Can you please turn it around?",
+            frameContext=[],
+            codebookContext={"Attitude": ["ATTITUDE_COOPERATIVE"]},
+            timelineContext=[],
+        )
+
+        result = assistant.respond(
+            "Label user's attitude according to codebook on time axis"
+        )
+
+        self.assertEqual(result, response_text)
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["response_format"], {"type": "json_object"})
+        self.assertIn(
+            "json",
+            " ".join(str(item["content"]) for item in request["messages"]).casefold(),
+        )
+        self.assertIn("one block per applicable utterance", request["messages"][0]["content"])
+
+    def test_label_without_time_axis_remains_a_text_classification(self):
+        self.assertFalse(
+            RemoteAPI._requests_timeline_change(
+                "Label the user's attitude according to the codebook"
+            )
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_remote_rejects_summary_text_for_codebook_blocks(self, openai_class):
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 1,
+                            "start": 15,
+                            "end": 57,
+                            "text": "The user is generally cooperative and neutral.",
+                        },
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="00:15 - 00:19 Please turn it around.",
+            frameContext=[],
+            codebookContext={
+                "Speech attitude": ["ATTITUDE_COOPERATIVE", "ATTITUDE_NEUTRAL"],
+                "Visible gesture": ["GESTURE_WAVING"],
+            },
+            timelineContext=[],
+        )
+
+        with self.assertRaisesRegex(RemoteResponseError, "not in the selected codebook"):
+            assistant.respond(
+                "Annotate user's attitude according to codebook on time axis"
+            )
+
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        system_prompt = request["messages"][0]["content"]
+        self.assertIn("ATTITUDE_COOPERATIVE", system_prompt)
+        self.assertNotIn("GESTURE_WAVING", system_prompt)

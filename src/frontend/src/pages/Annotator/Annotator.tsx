@@ -303,7 +303,7 @@ const Annotator = ({
                 };
               }
               const updatedAxes = applyAIInstruction(axesData, parsedInstruction, duration);
-              const requestedAnnotation = /\bannotat(?:e|ion|ions|ing)\b/i.test(message);
+              const requestedAnnotation = /\b(?:annotat(?:e|ion|ions|ing)|label(?:s|ed|ing)?|classif(?:y|ies|ied|ication)|categoriz(?:e|es|ed|ing|ation)|tag(?:s|ged|ging)?)\b/i.test(message);
               const addedBlockApplied = parsedInstruction.steps.some((step) => {
                 if (step.action !== "addBlock") return false;
                 const axisId = Number(step.parameters?.axisId);
