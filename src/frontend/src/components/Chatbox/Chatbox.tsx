@@ -12,6 +12,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AssistantRequestOptions } from "../../types/aiRecords";
 import {
+  AssistantTimeRange,
+  formatChunkTime,
+  validateChunkTimeRange,
+} from "./timeRange";
+import {
   AssistantMode,
   AssistantReply,
   AssistantRouting,
@@ -27,6 +32,7 @@ type ChatMessage = {
 };
 
 type ChatboxProps = {
+  duration: number;
   onSendMessage: (
     message: string,
     assistantRouting: AssistantRouting,
@@ -39,6 +45,7 @@ type PendingFallback = {
   reason: string;
   from: "local" | "remote";
   to: "local" | "remote";
+  timeRange: AssistantTimeRange;
 };
 
 const ASSISTANT_ROUTING_STORAGE_KEY = "rosannotator-assistant-routing";
@@ -70,7 +77,7 @@ const formatAssistantMode = (mode: AssistantMode | undefined) => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
-const Chatbox = ({ onSendMessage }: ChatboxProps) => {
+const Chatbox = ({ onSendMessage, duration }: ChatboxProps) => {
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [initialAssistantRouting] = useState(loadAssistantRouting);
@@ -82,6 +89,15 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
   );
   const [pendingFallback, setPendingFallback] =
     useState<PendingFallback | null>(null);
+  const [rangeStart, setRangeStart] = useState("00:00");
+  const [rangeEnd, setRangeEnd] = useState(() => formatChunkTime(duration));
+
+  useEffect(() => {
+    setRangeStart("00:00");
+    setRangeEnd(formatChunkTime(duration));
+  }, [duration]);
+
+  const timeSelection = validateChunkTimeRange(rangeStart, rangeEnd, duration);
 
   useEffect(() => {
     if (!hasAssistantSelection) {
@@ -112,18 +128,22 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
   };
 
   const handleSendMessage = () => {
-    if (message.trim() !== "") {
+    if (message.trim() !== "" && timeSelection.range) {
       const submittedMessage = message;
+      const submittedRange = timeSelection.range;
       const newMessage: ChatMessage = { sender: "user", text: message };
       setChatHistory([...chatHistory, newMessage]);
 
-      onSendMessage(submittedMessage, assistantRouting).then((assistantResponse) => {
+      onSendMessage(submittedMessage, assistantRouting, {
+        timeRange: submittedRange,
+      }).then((assistantResponse) => {
         if (assistantResponse.canFallbackToRemote) {
           setPendingFallback({
             message: submittedMessage,
             reason: assistantResponse.text,
             from: "local",
             to: "remote",
+            timeRange: submittedRange,
           });
           return;
         }
@@ -133,6 +153,7 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
             reason: assistantResponse.text,
             from: "remote",
             to: "local",
+            timeRange: submittedRange,
           });
           return;
         }
@@ -177,6 +198,7 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
         to: fallbackTo,
         userConsented: true,
       },
+      timeRange: pendingFallback.timeRange,
     }).then((assistantResponse) => {
       setChatHistory((history) => [
         ...history,
@@ -354,6 +376,30 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
         </TextField>
       </Box>
 
+      <Box display="flex" gap={1} mb={1} alignItems="flex-start">
+        <TextField
+          size="small"
+          label="Range start"
+          value={rangeStart}
+          onChange={(event) => setRangeStart(event.target.value)}
+          error={Boolean(timeSelection.error)}
+          inputProps={{ "aria-label": "AI range start", inputMode: "numeric" }}
+          sx={{ width: 112 }}
+        />
+        <TextField
+          size="small"
+          label="Range end"
+          value={rangeEnd}
+          onChange={(event) => setRangeEnd(event.target.value)}
+          error={Boolean(timeSelection.error)}
+          inputProps={{ "aria-label": "AI range end", inputMode: "numeric" }}
+          sx={{ width: 112 }}
+        />
+      </Box>
+      <Box color={timeSelection.error ? "error.main" : "text.secondary"} fontSize="0.75rem" mb={1}>
+        {timeSelection.error || `Chunk-relative range · 00:00–${formatChunkTime(duration)}`}
+      </Box>
+
       <Box display="flex" gap={1}>
         <TextField
           value={message}
@@ -362,7 +408,11 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
           variant="outlined"
           placeholder="ROSAnnotator can help you annotate"
         />
-        <Button onClick={handleSendMessage} variant="contained">
+        <Button
+          onClick={handleSendMessage}
+          variant="contained"
+          disabled={!message.trim() || !timeSelection.range}
+        >
           Send
         </Button>
       </Box>

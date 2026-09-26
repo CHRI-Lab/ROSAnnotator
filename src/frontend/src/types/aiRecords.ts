@@ -28,6 +28,10 @@ export type AIRecord = {
 };
 
 export type AssistantRequestOptions = {
+  timeRange?: {
+    start: number;
+    end: number;
+  };
   fallbackConsent?: {
     from: "local" | "remote";
     to: "local" | "remote";

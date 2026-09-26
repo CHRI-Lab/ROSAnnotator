@@ -3,7 +3,9 @@ from django.core.cache import cache
 from django.conf import settings
 from uuid import UUID, uuid4
 import json
+import math
 import os
+import re
 import base64
 from pathlib import Path
 import cv2
@@ -39,7 +41,7 @@ ROSBAG_DATA_DIR = '/app/datas/rosbag-data/'
 PROCESSED_DATA_DIR = '/app/processed_data'
 
 
-def frames_for_video(video_path, max_frames=50):
+def frames_for_video(video_path, max_frames=50, start_seconds=None, end_seconds=None):
     """Sample the selected processed MP4, never a different request's global frames."""
     if not isinstance(video_path, str) or not video_path or Path(video_path).is_absolute():
         raise ValueError('Invalid video path.')
@@ -55,8 +57,18 @@ def frames_for_video(video_path, max_frames=50):
         frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
         if frame_count <= 0:
             raise ValueError('Selected video has no readable frames.')
-        count = min(frame_count, max_frames)
-        positions = sorted({round(index * (frame_count - 1) / max(count - 1, 1))
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        if start_seconds is not None and end_seconds is not None and fps > 0:
+            first_frame = max(0, math.floor(start_seconds * fps))
+            last_frame = min(frame_count - 1, math.ceil(end_seconds * fps) - 1)
+        else:
+            first_frame, last_frame = 0, frame_count - 1
+        if last_frame < first_frame:
+            raise ValueError('Selected time range has no readable video frames.')
+        available_count = last_frame - first_frame + 1
+        count = min(available_count, max_frames)
+        positions = sorted({round(first_frame + index * (last_frame - first_frame) /
+                                  max(count - 1, 1))
                             for index in range(count)})
         frames = []
         for position in positions:
@@ -72,6 +84,55 @@ def frames_for_video(video_path, max_frames=50):
         return frames
     finally:
         capture.release()
+
+
+def validate_context_time_range(value, duration):
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {'start', 'end'}:
+        raise ValueError('time_range must contain start and end seconds.')
+    start, end = value.get('start'), value.get('end')
+    if (type(start) not in (int, float) or type(end) not in (int, float)
+            or not math.isfinite(start) or not math.isfinite(end)):
+        raise ValueError('Time range boundaries must be finite seconds.')
+    if type(duration) not in (int, float) or not math.isfinite(duration) or duration <= 0:
+        raise ValueError('A valid current chunk duration is required.')
+    if start < 0 or start >= end or end > duration:
+        raise ValueError('Select a time range within the current chunk.')
+    return float(start), float(end)
+
+
+def transcript_for_time_range(transcript, start, end):
+    """Keep timestamped transcript entries overlapping a chunk-relative range."""
+    entries = []
+    matches = list(re.finditer(r'\[(\d+):(\d{2})\]', transcript or ''))
+    for index, match in enumerate(matches):
+        entry_start = int(match.group(1)) * 60 + int(match.group(2))
+        entry_end = (
+            int(matches[index + 1].group(1)) * 60 + int(matches[index + 1].group(2))
+            if index + 1 < len(matches) else math.inf
+        )
+        if entry_start < end and entry_end > start:
+            boundary = matches[index + 1].start() if index + 1 < len(matches) else len(transcript)
+            entries.append(transcript[match.start():boundary].strip())
+    return '\n'.join(entries)
+
+
+def timeline_for_time_range(timeline, start, end):
+    if not isinstance(timeline, list):
+        return timeline
+    filtered = []
+    for axis in timeline:
+        if not isinstance(axis, dict):
+            continue
+        block_key = 'blocks' if isinstance(axis.get('blocks'), list) else 'annotationBlocks'
+        blocks = axis.get(block_key, [])
+        selected = [block for block in blocks if isinstance(block, dict)
+                    and type(block.get('start')) in (int, float)
+                    and type(block.get('end')) in (int, float)
+                    and block['start'] < end and block['end'] > start]
+        filtered.append({**axis, block_key: selected})
+    return filtered
 
 
 @api_view(['POST'])
@@ -321,6 +382,12 @@ def gpt_chat(request):
         assistant_mode = data.get("assistant_mode", "remote")
         context_routes = data.get("context_routes", {})
         fallback_consent = data.get("fallback_consent")
+        try:
+            selected_range = validate_context_time_range(
+                data.get('time_range'), data.get('context_duration'),
+            )
+        except ValueError as error:
+            return JsonResponse({'error': str(error)}, status=400)
         requested_mode = assistant_mode
         accepted_local_to_remote = (
             isinstance(fallback_consent, dict)
@@ -354,11 +421,24 @@ def gpt_chat(request):
         selected_video_path = data.get('video_path')
         try:
             request_frames = (
-                frames_for_video(selected_video_path)
+                frames_for_video(selected_video_path, start_seconds=selected_range[0],
+                                 end_seconds=selected_range[1])
+                if selected_video_path is not None and selected_range is not None
+                else frames_for_video(selected_video_path)
                 if selected_video_path is not None else context_frames
             )
         except ValueError as error:
             return JsonResponse({'error': str(error)}, status=400)
+
+        if selected_range is not None:
+            start, end = selected_range
+            audio_transcript = transcript_for_time_range(audio_transcript, start, end)
+            Axiinfo = timeline_for_time_range(Axiinfo, start, end)
+            if not audio_transcript:
+                return JsonResponse(
+                    {'error': 'No transcript data exists in the selected time range.'},
+                    status=400,
+                )
 
         common_context = {
             "transcriptContext": audio_transcript,

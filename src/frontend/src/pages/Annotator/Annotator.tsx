@@ -233,6 +233,8 @@ const Annotator = ({
         chat_context_id: data.chat_context_id,
         assistant_mode: assistantRouting.mode,
         context_routes: assistantRouting.contextRoutes,
+        context_duration: duration,
+        time_range: options?.timeRange,
         fallback_consent: options?.fallbackConsent
           ? {
               from: options.fallbackConsent.from,
@@ -655,7 +657,7 @@ const Annotator = ({
               </Box>
             )
           }
-          assistant={<Chatbox key={conversationKey} onSendMessage={handleSendMessageToGPT} />}
+          assistant={<Chatbox key={conversationKey} duration={duration} onSendMessage={handleSendMessageToGPT} />}
         />
         </Box>
       </Box>
