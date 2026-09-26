@@ -160,9 +160,12 @@ not exist, and leaves the loaded one untouched.
 flag, and the source size and nanosecond mtime recorded in the manifest.
 
 The same input therefore produces the same manifest ID across sessions, which is
-what allows a reopened bag to find its processed views and its chunk recovery
-files. A different chunk size correctly produces a different ID, since chunk 0
-then covers a different range.
+what allows a reopened bag to find its chunk recovery files and its per-manifest
+chunk status summaries. A different chunk size correctly produces a different
+ID, since chunk 0 then covers a different range.
+
+Processed media is not affected either way: `ViewCache` is content-addressed, so
+a different manifest ID already reuses the same processed views.
 
 `MANIFEST_NAMESPACE` in `chunks.py` is fixed for the life of the project.
 Changing it orphans every existing cache entry and recovery file.
