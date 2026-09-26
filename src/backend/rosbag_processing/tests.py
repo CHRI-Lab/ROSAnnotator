@@ -1274,6 +1274,105 @@ class ChunkAnnotationTests(SimpleTestCase):
             {'start': 290, 'end': 300, 'text': 'crosses end'},
         ])
 
+class ChunkMergeTests(SimpleTestCase):
+    """merge_chunk_annotations: chunk-local in, whole-recording time out."""
+
+    chunk = {'index': 1, 'start_seconds': 300, 'end_seconds': 600}
+
+    @staticmethod
+    def axis(blocks):
+        return [{
+            'id': 1,
+            'axisType': 'Type-in',
+            'axisName': 'Notes',
+            'axisBooklistName': '',
+            'annotationBlocks': blocks,
+        }]
+
+    def merge(self, existing, incoming):
+        from .views import merge_chunk_annotations
+        return merge_chunk_annotations(
+            existing, incoming, self.chunk,
+        )[0]['annotationBlocks']
+
+    def test_text_only_edit_is_preserved(self):
+        """Editing only a block's text must not be treated as unedited."""
+        existing = self.axis([{'start': 320, 'end': 330, 'text': 'before'}])
+        incoming = self.axis([{'start': 20, 'end': 30, 'text': 'after'}])
+
+        blocks = self.merge(existing, incoming)
+
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]['text'], 'after')
+        self.assertEqual(blocks[0]['start'], 320)
+        self.assertEqual(blocks[0]['end'], 330)
+
+    def test_unedited_round_trip_is_exact(self):
+        """Loading a chunk and saving it back unchanged must not alter the file."""
+        existing = self.axis([
+            {'start': 290, 'end': 310, 'text': 'crosses start'},
+            {'start': 320, 'end': 330, 'text': 'inside'},
+            {'start': 700, 'end': 710, 'text': 'outside'},
+        ])
+        incoming = self.axis([
+            {'start': 0, 'end': 10, 'text': 'crosses start'},
+            {'start': 20, 'end': 30, 'text': 'inside'},
+        ])
+
+        blocks = self.merge(existing, incoming)
+
+        self.assertEqual(blocks, existing[0]['annotationBlocks'])
+
+    def test_blocks_outside_the_chunk_are_untouched(self):
+        existing = self.axis([
+            {'start': 100, 'end': 110, 'text': 'earlier chunk'},
+            {'start': 320, 'end': 330, 'text': 'this chunk'},
+        ])
+        incoming = self.axis([{'start': 20, 'end': 30, 'text': 'edited'}])
+
+        blocks = self.merge(existing, incoming)
+
+        self.assertEqual(
+            blocks[0], {'start': 100, 'end': 110, 'text': 'earlier chunk'},
+        )
+        self.assertEqual(blocks[1]['text'], 'edited')
+
+    def test_deleted_block_does_not_return(self):
+        existing = self.axis([{'start': 320, 'end': 330, 'text': 'delete me'}])
+
+        blocks = self.merge(existing, self.axis([]))
+
+        self.assertEqual(blocks, [])
+
+
+class ManifestIdentityTests(SimpleTestCase):
+    """The manifest records the source fingerprint process_chunk_view checks."""
+
+    def test_source_identity_is_stored_and_reloaded(self):
+        from tempfile import TemporaryDirectory
+        from .chunks import load_manifest, save_manifest
+
+        with TemporaryDirectory() as directory:
+            manifest = save_manifest(
+                directory, 'sample.bag', 600.0, 300.0,
+                source_size=1234, source_mtime_ns=5678,
+            )
+            reloaded = load_manifest(directory, manifest['id'])
+
+        self.assertEqual(manifest['source_size'], 1234)
+        self.assertEqual(manifest['source_mtime_ns'], 5678)
+        self.assertEqual(reloaded['source_size'], 1234)
+        self.assertEqual(reloaded['source_mtime_ns'], 5678)
+
+    def test_same_inputs_give_the_same_id(self):
+        from .chunks import manifest_id
+
+        first = manifest_id('sample.bag', 300.0, True, 1234, 5678)
+        second = manifest_id('sample.bag', 300, True, 1234, 5678)
+        different_size = manifest_id('sample.bag', 60.0, True, 1234, 5678)
+
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, different_size)
 
 class ChunkApiTests(SimpleTestCase):
     def setUp(self):

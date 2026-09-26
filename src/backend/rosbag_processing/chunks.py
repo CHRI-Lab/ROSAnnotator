@@ -61,6 +61,15 @@ def save_manifest(
         'view_options': view_options or {},
     }
 
+    # process_chunk_view compares these against the file on disk. They are also
+    # inputs to manifest_id, so a replaced bag normally produces a new manifest
+    # rather than reaching that check; it still fires for a stale manifest ID
+    # held in a bookmarked or reloaded URL.
+    if source_size is not None:
+        manifest['source_size'] = source_size
+    if source_mtime_ns is not None:
+        manifest['source_mtime_ns'] = source_mtime_ns
+
     temporary = destination.with_suffix('.tmp')
     try:
         with temporary.open('w', encoding='utf-8') as stream:

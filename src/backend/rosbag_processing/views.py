@@ -613,10 +613,16 @@ def describe_chunk_conflict(file_path, annotation_name, chunk):
         'chunk_end_seconds': chunk['end_seconds'],
     }
 
-def _same_block(incoming, clipped):
+def _same_block(incoming, original, clipped):
+    """True when an incoming block is the unedited clipped form of original.
+
+    Times alone are not enough: editing only the text of a block leaves its
+    bounds identical, and treating that as unedited would restore the old text.
+    """
     return (
         math.isclose(incoming['start'], clipped[0], abs_tol=1e-6)
         and math.isclose(incoming['end'], clipped[1], abs_tol=1e-6)
+        and (incoming.get('text') or '') == (original.get('text') or '')
     )
 
 
@@ -668,7 +674,7 @@ def merge_chunk_annotations(existing, incoming, chunk):
         for block in axis.get('annotationBlocks', []):
             match = next(
                 (original for original, clipped in target['_displayed']
-                 if _same_block(block, clipped)),
+                 if _same_block(block, original, clipped)),
                 None,
             )
             if match is not None:
