@@ -20,12 +20,15 @@ import {
   isValidAnnotationName,
   collectAnnotationData,
   postAnnotation,
+  AnnotationSaveConflict,
+  formatSeconds
 } from "./saveUtils";
 import useAutosave from "../Autosave/useAutosave";
 import {
   highestAxisId,
   deleteAutosave,
   AutosaveScope,
+  formatAutosaveTimestamp,
 } from "../Autosave/autosaveUtils";
 import { AIInstruction, AIRecord } from "../../types/aiRecords";
 import { applyAIInstruction } from "./aiInstruction";
@@ -49,7 +52,9 @@ interface TimelineProps {
   onAxesUpdate: (axes: any) => void;
   instruction: AIInstruction | null;
   aiRecords: AIRecord[];
-  onSave: () => void;
+  onSaveReady?: (openSaveDialog: (() => void) | null) => void;
+  savedAnnotationName?: string;
+  onAnnotationSaved?: (name: string) => void;
 }
 
 type PendingDeletion =
@@ -105,7 +110,6 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
   userSelect: "none",
 }));
 
-
 const Timeline: React.FC<TimelineProps> = ({
   duration,
   played,
@@ -121,7 +125,10 @@ const Timeline: React.FC<TimelineProps> = ({
   autosaveEnabled = true,
   autosaveScope,
   onAutosaveReady,
+  onSaveReady,
   switchingChunk = false,
+  savedAnnotationName,
+  onAnnotationSaved
 }) => {
   const [seekTime, setSeekTime] = useState(played);
   const [markInterval] = useState(1);
@@ -141,7 +148,15 @@ const Timeline: React.FC<TimelineProps> = ({
   // SAVE FUNCTIONALITY
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false); // flag controlling whether the "name your annotation" popup is currently visible
   const [annotationName, setAnnotationName] = useState(""); //container for annotation name text
+  // Holds a save the backend refused because the file already exists, until
+  // the user either confirms the replacement or picks another name.
+  const [pendingOverwrite, setPendingOverwrite] = useState<{
+    name: string;
+    data: any;
+    conflict: AnnotationSaveConflict;
+  } | null>(null);
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
+  
 
   const autosave = useAutosave({
     enabled: autosaveEnabled && Boolean(rosBagFileName),
@@ -289,18 +304,59 @@ const Timeline: React.FC<TimelineProps> = ({
     setSeekTime(played);
   }, [played]);
 
-  // Prompts user for annotation file name, with prefilled defined filename set.
   const handleOpenSaveDialog = () => {
-    // Pre-fill with the existing auto-generated name as a sensible default
-    const defaultName = buildDefaultAnnotationName(rosBagFileName, bookListFileName);
+    // Prefer the file this session is working in, so a save goes back to the
+    // file it came from. The merge in a chunk save depends on this: a
+    // different name merges into a file that does not exist.
+    const defaultName =
+      savedAnnotationName ||
+      buildDefaultAnnotationName(rosBagFileName, bookListFileName);
     setAnnotationName(defaultName);
     setIsSaveDialogOpen(true);
   };
 
+  useEffect(() => {
+    onSaveReady?.(handleOpenSaveDialog);
+    return () => onSaveReady?.(null);
+  });
 
 
-  // ensures sensible name is provided by user (no whitespace, no invalid characters),
-  // before gathering current annotation state via collectAnnotationData() and sending it to backend.
+  const finishSave = (name: string) => {
+    alert("Data saved successfully.");
+    setHasUnsavedEdits(false);
+    autosave.markSynced(axes);
+    // Later saves in this session default to the file just written, including
+    // after a chunk switch.
+    onAnnotationSaved?.(name);
+    if (autosaveEnabled && !autosaveScope) {
+      deleteAutosave(rosBagFileName).catch((err) =>
+        console.warn(" [autosave] Could not clear autosave after save.", err)
+      );
+    }
+  };
+
+  const attemptSave = async (
+    name: string,
+    data: any,
+    confirmOverwrite: boolean,
+  ) => {
+    try {
+      const result = await postAnnotation(name, data, {
+        confirmOverwrite,
+        scope: autosaveScope,
+      });
+      if (result.status === "conflict") {
+        setPendingOverwrite({ name, data, conflict: result.conflict });
+        return;
+      }
+      if (autosaveScope) await autosave.flush();
+      finishSave(name);
+    } catch (error) {
+      setError("Failed to save data. Please try again.\n" + error);
+      setIsErrorDialogOpen(true);
+    }
+  };
+
   const handleConfirmSave = async () => {
     const validation = isValidAnnotationName(annotationName);
     if (!validation.valid) {
@@ -310,24 +366,23 @@ const Timeline: React.FC<TimelineProps> = ({
     }
 
     setIsSaveDialogOpen(false);
-    const data = collectAnnotationData(axes); //collects axis data
+    await attemptSave(annotationName, collectAnnotationData(axes), false);
+  };
 
-    try {
-      await postAnnotation(annotationName, data);
-      if (autosaveScope) await autosave.flush();
-      alert("Data saved successfully.");
-      setHasUnsavedEdits(false);
-      autosave.markSynced(axes);
-      if (autosaveEnabled && !autosaveScope) {
-        deleteAutosave(rosBagFileName).catch((err) =>
-          console.warn(" [autosave] Could not clear autosave after save.", err)
-        );
-      }
+  const handleConfirmOverwrite = async () => {
+    if (!pendingOverwrite) return;
+    const { name } = pendingOverwrite;
+    setPendingOverwrite(null);
+    // Re-collect rather than reusing the snapshot from the first attempt, so
+    // anything created while the prompt was open is included.
+    await attemptSave(name, collectAnnotationData(axes), true);
+  };
 
-    } catch (error) {
-      setError("Failed to save data. Please try again.\n" + error);
-      setIsErrorDialogOpen(true);
-    }
+  // Cancelling returns to the name dialog: the usual next step is choosing a
+  // different name rather than abandoning the save.
+  const handleCancelOverwrite = () => {
+    setPendingOverwrite(null);
+    setIsSaveDialogOpen(true);
   };
 
 
@@ -551,6 +606,57 @@ const Timeline: React.FC<TimelineProps> = ({
   };
   const totalWidth = (duration / markInterval) * 50;
 
+  const conflict = pendingOverwrite?.conflict;
+  const chunkRange = conflict
+    ? `${formatSeconds(conflict.chunk_start_seconds)} to ${formatSeconds(conflict.chunk_end_seconds)}`
+    : "";
+  const chunkLabel = conflict?.chunk_index !== undefined
+    ? `chunk ${conflict.chunk_index + 1}`
+    : "this chunk";
+
+  const overwritePrompt = (() => {
+    if (!conflict) return null;
+    const file = `"${conflict.annotation_name}.csv"`;
+
+    if (conflict.reason === "file_unreadable") {
+      return {
+        title: "That file could not be read",
+        body: `${file} already exists but could not be read as an annotation file. Saving replaces it completely, and whatever it currently holds will be lost.`,
+        cancel: "Choose another name",
+        confirm: "Replace file",
+        destructive: true,
+      };
+    }
+
+    if (conflict.reason === "chunk_is_empty") {
+      return {
+        title: "Add to the existing file?",
+        body: `${file} already holds ${conflict.block_count ?? 0} annotations from other parts of the recording, but none in ${chunkLabel} (${chunkRange}). Your work for this chunk will be added to it.`,
+        cancel: "Choose another name",
+        confirm: "Add to file",
+        destructive: false,
+      };
+    }
+
+    if (conflict.reason === "chunk_has_annotations") {
+      return {
+        title: "Replace this chunk's annotations?",
+        body: `${file} already holds ${conflict.chunk_block_count ?? 0} annotations in ${chunkLabel} (${chunkRange}). Saving replaces them with your current work. Annotations elsewhere in the recording are kept.`,
+        cancel: "Choose another name",
+        confirm: "Replace this chunk",
+        destructive: true,
+      };
+    }
+
+    return {
+      title: "Replace the existing annotation file?",
+      body: `${file} was last saved at ${formatAutosaveTimestamp(conflict.modified_at)} and holds ${conflict.axis_count ?? 0} time ${conflict.axis_count === 1 ? "axis" : "axes"} and ${conflict.block_count ?? 0} annotations. Saving replaces all of it with your current work.`,
+      cancel: "Choose another name",
+      confirm: "Replace file",
+      destructive: true,
+    };
+  })();
+
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
     <MainContainer>
@@ -573,8 +679,8 @@ const Timeline: React.FC<TimelineProps> = ({
   <DialogTitle>Name Your Annotation</DialogTitle>
   <DialogContent>
     <DialogContentText>
-      Enter a name to save this annotation under. You can reuse this name later
-      to overwrite it, or choose a new one to save a separate version.
+      Enter a name to save this annotation under. Reusing an existing name replaces
+      that file, and you will be asked to confirm first.
     </DialogContentText>
     <TextField
       autoFocus
@@ -593,7 +699,22 @@ const Timeline: React.FC<TimelineProps> = ({
     </Button>
   </DialogActions>
 </Dialog>
-
+<Dialog open={pendingOverwrite !== null} disableEscapeKeyDown>
+  <DialogTitle>{overwritePrompt?.title}</DialogTitle>
+  <DialogContent>
+    <DialogContentText>{overwritePrompt?.body}</DialogContentText>
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={handleCancelOverwrite}>{overwritePrompt?.cancel}</Button>
+    <Button
+      onClick={handleConfirmOverwrite}
+      color={overwritePrompt?.destructive ? "error" : "primary"}
+      variant="contained"
+    >
+      {overwritePrompt?.confirm}
+    </Button>
+  </DialogActions>
+</Dialog>
 <Dialog
   open={pendingDeletion !== null}
   onClose={() => setPendingDeletion(null)}

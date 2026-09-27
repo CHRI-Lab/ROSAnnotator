@@ -129,8 +129,7 @@ def get_relative_path(path):
     relative_path = os.path.relpath(path, base_path)
     return relative_path
 
-def load_annotation(annotation_filename):
-    annotation_path = '/app/datas/annotation/'
+def load_annotation(annotation_filename, annotation_path='/app/datas/annotation/'):
     file_path = os.path.join(annotation_path, f'{annotation_filename}')
 
     if not os.path.exists(file_path):

@@ -1,5 +1,4 @@
 import Box from "@mui/material/Box";
-import CircularProgress from "@mui/material/CircularProgress";
 import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
@@ -8,13 +7,13 @@ import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 
 type AppHeaderProps = {
   rosBagFileName: string;
-  isSaving: boolean;
+  disabled: boolean;
   onSave: () => void;
 };
 
 const AppHeader = ({
   rosBagFileName,
-  isSaving,
+  disabled,
   onSave,
 }: AppHeaderProps) => (
   <Box
@@ -48,15 +47,15 @@ const AppHeader = ({
 
     <Box flex={1} />
 
-    <Tooltip title={isSaving ? "Saving annotation" : "Save annotation"}>
+    <Tooltip title={disabled ? "Waiting for data to finish loading" : "Save annotation"}>
       <span>
         <IconButton
           aria-label="Save annotation"
           onClick={onSave}
-          disabled={isSaving}
+          disabled={disabled}
           color="inherit"
         >
-          {isSaving ? <CircularProgress size={24} /> : <SaveOutlinedIcon />}
+          <SaveOutlinedIcon />
         </IconButton>
       </span>
     </Tooltip>
