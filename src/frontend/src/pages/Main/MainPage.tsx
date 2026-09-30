@@ -11,13 +11,14 @@ import {
 
 import type { BackendDataView } from "../../components/FrontEndWorkspace/viewTypes";
 
-import { loadDataViews, ViewPayload } from "../../api/dataViews";
+import { loadDataViews, ViewPayload, AnnotationSourceCheck} from "../../api/dataViews";
 
-import { stripExtension } from "../../components/Timeline/saveUtils";
+import { stripExtension, formatSeconds } from "../../components/Timeline/saveUtils";
 
 interface ChunkPageData {
   views?: Record<string, BackendDataView>;
   duration_seconds?: number;
+  annotation_source_check?: AnnotationSourceCheck | null;
   video_path: string;
   audio_transcript: string;
   booklist_data: unknown;
@@ -69,6 +70,15 @@ const requireAvailableViews = (data: ChunkPageData) => {
   }
 };
 
+// A file with no recorded source loads silently: every annotation file written
+// before this feature has none, and prompting on all of them would train people
+// to dismiss the dialogue without reading it. Overhang is asked about whatever
+// the provenance, because blocks are lost either way.
+const needsSourceConfirmation = (
+  check?: AnnotationSourceCheck | null,
+): check is AnnotationSourceCheck =>
+  Boolean(check && (check.status === "mismatch" || check.overflows));
+
 const MainPage = () => {
   const { rosBagFile, bookListFile, annotationFile } = useParams();
   const [searchParams] = useSearchParams();
@@ -84,10 +94,13 @@ const MainPage = () => {
   const [error, setError] = useState<unknown>(null);
   const [errorDisplay, setErrorDisplay] = useState(false);
   const [pendingRecovery, setPendingRecovery] = useState<PendingRecovery | null>(null);
+  const [pendingSourceCheck, setPendingSourceCheck] =                    
+    useState<AnnotationSourceCheck | null>(null);                        
     // Survives chunk switches, unlike anything held in Annotator or Timeline.
   const [savedAnnotationName, setSavedAnnotationName] = useState("");
   const requestGeneration = useRef(0);
   const chunkChangeInProgress = useRef(false);
+  const sourceCheckAsked = useRef(false);            // Asked at most once per load.                     
   const autosaveFlush = useRef<(() => Promise<void>) | null>(null);
   const registerAutosave = useCallback((flush: (() => Promise<void>) | null) => {
     autosaveFlush.current = flush;
@@ -108,6 +121,8 @@ const MainPage = () => {
     setCurrentChunkIndex(0);
     setRestoredAxes(null);
     setPendingRecovery(null);
+    setPendingSourceCheck(null);      
+    sourceCheckAsked.current = false;
     setSavedAnnotationName(annotationFile ? stripExtension(annotationFile) : "");
 
     const fetchData = async () => {
@@ -137,6 +152,11 @@ const MainPage = () => {
           setChunkManifest(manifest);
           setRestoredAxes(recoveredAxes);
           setPendingRecovery(pending);
+          if (!sourceCheckAsked.current                                  
+              && needsSourceConfirmation(payload.annotation_source_check)) {
+            sourceCheckAsked.current = true;
+            setPendingSourceCheck(payload.annotation_source_check);
+          }
           setData(payload);
           setBookListData(payload.booklist_data);
           setLoading(false);
@@ -152,6 +172,11 @@ const MainPage = () => {
         setChunkManifest(manifest);
         setRestoredAxes(recoveredAxes);
         setPendingRecovery(pending);
+        if (!sourceCheckAsked.current                                    
+            && needsSourceConfirmation(loadedData.annotation_source_check)) {
+          sourceCheckAsked.current = true;
+          setPendingSourceCheck(loadedData.annotation_source_check);
+        }
         setData(loadedData);
         setBookListData(loadedData.booklist_data);
       } catch (error) {
@@ -242,8 +267,51 @@ const MainPage = () => {
     return <LoadingPage />;
   }
 
+  const sourceCheckPrompt = (() => {
+    const check = pendingSourceCheck;
+    if (!check) return null;
 
-  return (
+    const lines: string[] = [];
+
+    if (check.status === "mismatch" && check.name_differs && check.recorded_bag_filename) {
+      lines.push(
+        `This annotation file records that it was made against "${check.recorded_bag_filename}", but you are loading "${check.loaded_bag_filename}".`
+      );
+    } else if (check.status === "mismatch" && check.duration_differs) {
+      lines.push(
+        `This annotation file records a recording ${formatSeconds(check.recorded_duration ?? undefined)} long, but "${check.loaded_bag_filename}" is ${formatSeconds(check.loaded_duration ?? undefined)} long. It may be a different recording saved under the same name.`
+      );
+    }
+
+    if (check.overflows) {
+      const trimmed = check.overflow_block_count;
+      const dropped = check.orphan_block_count;
+      const effects: string[] = [];
+      if (dropped) {
+        effects.push(
+          `${dropped} ${dropped === 1 ? "annotation falls" : "annotations fall"} entirely outside it and will be discarded`
+        );
+      }
+      if (trimmed) {
+        effects.push(
+          `${trimmed} ${trimmed === 1 ? "annotation extends" : "annotations extend"} past the end and will be trimmed to it`
+        );
+      }
+      lines.push(
+        `The annotations run to ${formatSeconds(check.annotation_end_seconds)}, past the end of this recording at ${formatSeconds(check.loaded_duration ?? undefined)}. ${effects.join(", and ")}.`
+      );
+    }
+
+    return {
+      title:
+        check.status === "mismatch"
+          ? "This annotation file may not belong to this recording"
+          : "Some annotations fall outside this recording",
+      lines,
+    };
+  })();
+
+    return (
     <div>
       <Dialog open={switchingChunk}>
         <DialogTitle>Autosaving and switching chunk…</DialogTitle>
@@ -256,7 +324,33 @@ const MainPage = () => {
           {!data && <Button href="/">Back to file selection</Button>}
         </DialogContent>
       </Dialog>
-      <Dialog open={pendingRecovery !== null} disableEscapeKeyDown>
+      <Dialog open={pendingSourceCheck !== null} disableEscapeKeyDown>
+        <DialogTitle>{sourceCheckPrompt?.title}</DialogTitle>
+        <DialogContent>
+          {sourceCheckPrompt?.lines.map((line, index) => (
+            <Typography key={index} sx={{ mt: index ? 2 : 0 }}>
+              {line}
+            </Typography>
+          ))}
+          <Typography sx={{ mt: 2 }}>
+            Nothing is written until you save, so the file on disk is unchanged
+            either way.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button href="/" color="error">
+            Back to file selection
+          </Button>
+          <Button onClick={() => setPendingSourceCheck(null)} variant="contained">
+            Load anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={pendingSourceCheck === null && pendingRecovery !== null}  
+        disableEscapeKeyDown
+      >
         <DialogTitle>Unsaved work found in this chunk</DialogTitle>
         <DialogContent>
           <Typography>
@@ -281,7 +375,8 @@ const MainPage = () => {
             Restore work
           </Button>
         </DialogActions>
-    </Dialog>
+      </Dialog>
+
       {data && <Annotator
         key={manifestId ? `${manifestId}-chunk-${currentChunkIndex}` : "whole-input"}
         rosBagFileName={rosBagFile}
@@ -293,7 +388,7 @@ const MainPage = () => {
         switchingChunk={switchingChunk}
         onChunkChange={handleChunkChange}
         restoredAxes={restoredAxes}
-        autosaveEnabled={pendingRecovery === null}
+        autosaveEnabled={pendingRecovery === null && pendingSourceCheck === null}
         onAutosaveReady={registerAutosave}
         savedAnnotationName={savedAnnotationName}
         onAnnotationSaved={setSavedAnnotationName}
