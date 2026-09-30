@@ -3,7 +3,8 @@ import LoadingPage from "../Loading";
 import Annotator from "../Annotator";
 import { useParams, useSearchParams } from "react-router-dom";
 
-import { Dialog, DialogTitle, DialogActions, DialogContent, Typography, Button } from "@mui/material";
+import { Box, Dialog, DialogTitle, DialogActions, DialogContent, Typography, Button } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import {
   ChunkManifest,
   getChunkManifest,
@@ -271,16 +272,26 @@ const MainPage = () => {
     const check = pendingSourceCheck;
     if (!check) return null;
 
-    const lines: string[] = [];
+    // "loss" marks a line describing annotations that will not survive the
+    // load. Those get a tint; identification details do not, so the weight on
+    // the page matches the weight of the consequence.
+    const lines: { text: string; severity: "info" | "loss" }[] = [];
 
-    if (check.status === "mismatch" && check.name_differs && check.recorded_bag_filename) {
-      lines.push(
-        `This annotation file records that it was made against "${check.recorded_bag_filename}", but you are loading "${check.loaded_bag_filename}".`
-      );
-    } else if (check.status === "mismatch" && check.duration_differs) {
-      lines.push(
-        `This annotation file records a recording ${formatSeconds(check.recorded_duration ?? undefined)} long, but "${check.loaded_bag_filename}" is ${formatSeconds(check.loaded_duration ?? undefined)} long. It may be a different recording saved under the same name.`
-      );
+    if (check.status === "mismatch") {
+      if (check.name_differs && check.recorded_bag_filename) {
+        lines.push({
+          severity: "info",
+          text: `This annotation file records that it was made against "${check.recorded_bag_filename}", but you are loading "${check.loaded_bag_filename}".`,
+        });
+      }
+      if (check.duration_differs) {
+        lines.push({
+          severity: "info",
+          text: check.name_differs
+            ? `They are also different lengths: the recorded one is ${formatSeconds(check.recorded_duration ?? undefined)}, this one is ${formatSeconds(check.loaded_duration ?? undefined)}.`
+            : `This annotation file records a recording ${formatSeconds(check.recorded_duration ?? undefined)} long, but "${check.loaded_bag_filename}" is ${formatSeconds(check.loaded_duration ?? undefined)} long. It may be a different recording saved under the same name.`,
+        });
+      }
     }
 
     if (check.overflows) {
@@ -297,9 +308,11 @@ const MainPage = () => {
           `${trimmed} ${trimmed === 1 ? "annotation extends" : "annotations extend"} past the end and will be trimmed to it`
         );
       }
-      lines.push(
-        `The annotations run to ${formatSeconds(check.annotation_end_seconds)}, past the end of this recording at ${formatSeconds(check.loaded_duration ?? undefined)}. ${effects.join(", and ")}.`
-      );
+      lines.push({
+        // The only line describing annotations that do not survive.
+        severity: dropped ? "loss" : "info",
+        text: `The annotations run to ${formatSeconds(check.annotation_end_seconds)}, past the end of this recording at ${formatSeconds(check.loaded_duration ?? undefined)}. ${effects.join(", and ")}.`,
+      });
     }
 
     return {
@@ -327,12 +340,28 @@ const MainPage = () => {
       <Dialog open={pendingSourceCheck !== null} disableEscapeKeyDown>
         <DialogTitle>{sourceCheckPrompt?.title}</DialogTitle>
         <DialogContent>
-          {sourceCheckPrompt?.lines.map((line, index) => (
-            <Typography key={index} sx={{ mt: index ? 2 : 0 }}>
-              {line}
-            </Typography>
-          ))}
-          <Typography sx={{ mt: 2 }}>
+          {sourceCheckPrompt?.lines.map((line, index) =>
+            line.severity === "loss" ? (
+              <Box
+                key={index}
+                sx={(theme) => ({
+                  mt: index ? 2 : 0,
+                  px: 2,
+                  py: 1.5,
+                  borderRadius: 1,
+                  bgcolor: alpha(theme.palette.error.main, 0.12),
+                  borderLeft: `3px solid ${theme.palette.error.main}`,
+                })}
+              >
+                <Typography>{line.text}</Typography>
+              </Box>
+            ) : (
+              <Typography key={index} sx={{ mt: index ? 2 : 0 }}>
+                {line.text}
+              </Typography>
+            )
+          )}
+          <Typography sx={{ mt: 2 }} color="text.secondary">
             Nothing is written until you save, so the file on disk is unchanged
             either way.
           </Typography>

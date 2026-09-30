@@ -704,7 +704,7 @@ def merge_chunk_annotations(existing, incoming, chunk):
     return result
 
 def resolve_chunk(manifest_id, chunk_index):
-    """Return the chunk spec from a manifest, or raise."""
+    """Return (manifest, chunk) for a manifest id and index, or raise."""
     # chunk_views imports from this module, so import inside the function.
     from .chunk_views import manifest_directory
     from .chunks import load_manifest
@@ -713,7 +713,7 @@ def resolve_chunk(manifest_id, chunk_index):
     chunks = manifest.get('chunks') or []
     if chunk_index >= len(chunks):
         raise ValueError('Chunk not found in that manifest.')
-    return chunks[chunk_index]
+    return manifest, chunks[chunk_index]
 
 def write_annotation_csv(file_path, annotation_list,
                          bag_filename='', source_duration=None):
@@ -780,9 +780,10 @@ def save_annotation(request):
     file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
 
     chunk = None
+    manifest = None                                        
     if manifest_id is not None:
         try:
-            chunk = resolve_chunk(str(manifest_id), chunk_index)
+            manifest, chunk = resolve_chunk(str(manifest_id), chunk_index)   
         except FileNotFoundError:
             return JsonResponse({'error': 'Chunk manifest not found.'}, status=404)
         except (OSError, ValueError) as error:
@@ -807,7 +808,14 @@ def save_annotation(request):
                 describe_chunk_conflict(file_path, annotation_name, chunk),
                 status=409,
             )
+        
+        # the merge carries through every block outside the current chunk,
+        # which would restore the ones the load already discarded. It reads the
+        # file, not the response, so it has to apply the same rule itself.
+        from .view_metadata import clip_to_recording
+        existing = clip_to_recording(existing, manifest.get('duration_seconds'))
         annotation_list = merge_chunk_annotations(existing, annotation_list, chunk)
+
 
     # a save that does not carry the source must not erase what the file
     # already recorded. Some save paths have no source to send, and silently

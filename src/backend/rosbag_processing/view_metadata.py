@@ -110,6 +110,33 @@ def clip_to_chunk(block, chunk):
         return None
     return (max(block['start'], start) - start, min(block['end'], end) - start)
 
+def clip_to_recording(annotation_data, source_duration):
+    """Drop or trim blocks falling outside the recording.
+
+    A block starting past the end has no referent here and goes. A block
+    straddling the end is trimmed to it, but only once it runs more than
+    OVERFLOW_TOLERANCE_SECONDS over, so ordinary editing at the end of a
+    timeline is left exactly as it is.
+
+    Used on both the load response and the existing file during a chunk merge,
+    so the two cannot disagree about what survives.
+    """
+    if source_duration is None:
+        return annotation_data
+    limit = source_duration + OVERFLOW_TOLERANCE_SECONDS
+    result = []
+    for axis in annotation_data or []:
+        blocks = []
+        for block in axis.get('annotationBlocks', []):
+            if block['start'] >= source_duration:
+                continue
+            blocks.append(
+                {**block, 'end': source_duration}
+                if block['end'] > limit else block
+            )
+        result.append({**axis, 'annotationBlocks': blocks})
+    return result
+
 def annotations_for_chunk(annotation_data, chunk):
     result = []
     for axis in annotation_data or []:
@@ -142,10 +169,16 @@ def attach_metadata(result, booklist_filename=None, annotation_filename=None,
                 recorded = read_annotation_metadata(annotation_filename)
             except (OSError, ValueError):
                 recorded = {}
-            result['annotation_source_check'] = check_annotation_source(
+            check = check_annotation_source(
                 annotations, recorded, bag_filename, source_duration,
             )
-            result['annotation_data'] = annotations_for_chunk(annotations, chunk) if chunk else annotations
+            result['annotation_source_check'] = check
+            if chunk:
+                result['annotation_data'] = annotations_for_chunk(annotations, chunk)
+            else:
+                result['annotation_data'] = clip_to_recording(
+                    annotations, source_duration,
+                )
         except (OSError, ValueError, TypeError, KeyError) as exc:
             warnings.append(f'Unable to read annotation: {exc}')
 
