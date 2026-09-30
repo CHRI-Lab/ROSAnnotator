@@ -201,8 +201,16 @@ def process_chunk_view(request, manifest_id, chunk_index):
             }, status=503)
         return Response({'error': 'Unable to process chunk.'}, status=500)
 
-    result = attach_metadata(result, manifest.get('booklist_filename'),
-                             manifest.get('annotation_filename'), manifest['chunks'][chunk_index])
+    result = attach_metadata(
+        result, manifest.get('booklist_filename'),
+        manifest.get('annotation_filename'), manifest['chunks'][chunk_index],
+        bag_filename=manifest['bag_filename'],
+        # The manifest's duration, not the chunk's. The chunk spec is also in
+        # scope here and holds duration_seconds too, which is the chunk's
+        # length: using it would report every annotation file as a huge overhang.
+        source_duration=manifest.get('duration_seconds'),
+    )
+
     booklist_filename = manifest.get('booklist_filename')
     from .views import load_ai_records
     annotation_name = build_ai_record_annotation_name(

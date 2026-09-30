@@ -36,7 +36,11 @@ class RosbagProcessingSession(BaseDataProcessingSession):
 
     def _finalize(self, request: ProcessingRequest, result: ProcessingResult) -> ProcessingResult:
         from .view_metadata import attach_metadata
-        result = attach_metadata(result, request.booklist_filename, request.annotation_filename)
+        result = attach_metadata(
+            result, request.booklist_filename, request.annotation_filename,
+            bag_filename=Path(request.bag_path).name,
+            source_duration=result.get('duration_seconds'),
+        )
         if not result.get('video_path') or (request.view_ids is not None and 'video' not in request.view_ids):
             return result
         # Optional chat frames must not make a playable view fail.
