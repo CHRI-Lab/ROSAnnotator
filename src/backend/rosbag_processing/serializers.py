@@ -100,6 +100,33 @@ class SaveAnnotationSerializer(serializers.Serializer):
     # chunk, so neither is meaningful alone.
     manifest_id = serializers.UUIDField(allow_null=True, default=None)
     chunk_index = serializers.IntegerField(allow_null=True, default=None, min_value=0)
+    
+    # The recording this annotation set belongs to. Optional: a save that omits
+    # it preserves whatever the file already records, rather than clearing it.
+    bag_filename = serializers.CharField(
+        required=False, allow_blank=True, default='',
+        max_length=255, trim_whitespace=True,
+    )
+    source_duration = serializers.FloatField(
+        required=False, allow_null=True, default=None,
+    )
+
+    def validate_bag_filename(self, value):
+        if not value:
+            return ''
+        if value != os.path.basename(value) or not value.lower().endswith('.bag'):
+            raise serializers.ValidationError('A valid .bag filename is required.')
+        return value
+
+    def validate_source_duration(self, value):
+        if value is None:
+            return None
+        value = _finite(value, 'source_duration')
+        if value <= 0:
+            raise serializers.ValidationError(
+                'source_duration must be greater than zero.'
+            )
+        return value
 
     def validate(self, values):
         has_manifest = values.get('manifest_id') is not None

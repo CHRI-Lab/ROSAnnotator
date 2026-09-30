@@ -1,4 +1,4 @@
-from .data_utils import get_rosbag_duration, load_annotation, transcribe_audio_to_srt
+from .data_utils import get_rosbag_duration, load_annotation, transcribe_audio_to_srt, read_annotation_metadata
 from django.core.cache import cache
 from django.conf import settings
 from uuid import UUID, uuid4
@@ -715,9 +715,16 @@ def resolve_chunk(manifest_id, chunk_index):
         raise ValueError('Chunk not found in that manifest.')
     return chunks[chunk_index]
 
-def write_annotation_csv(file_path, annotation_list):
+def write_annotation_csv(file_path, annotation_list,
+                         bag_filename='', source_duration=None):
     """Write atomically: the merge reads the file first, so a crash mid-write
-    must not truncate a set that was complete a moment ago."""
+    must not truncate a set that was complete a moment ago.
+
+    bagFilename and sourceDuration repeat on every row. That is redundant, but
+    it keeps the file a plain flat table that Excel and pandas both read without
+    special handling, which is what the team already relies on.
+    """
+    duration_cell = '' if source_duration is None else repr(float(source_duration))
     temporary_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -729,6 +736,7 @@ def write_annotation_csv(file_path, annotation_list):
             writer = csv.DictWriter(temporary_file, fieldnames=[
                 'id', 'axisType', 'axisName', 'axisBooklistName',
                 'start', 'end', 'text',
+                'bagFilename', 'sourceDuration',
             ])
             writer.writeheader()
             for axis in annotation_list:
@@ -741,6 +749,8 @@ def write_annotation_csv(file_path, annotation_list):
                         'start': block['start'],
                         'end': block['end'],
                         'text': block.get('text', ''),
+                        'bagFilename': bag_filename or '',
+                        'sourceDuration': duration_cell,
                     })
             temporary_file.flush()
             os.fsync(temporary_file.fileno())
@@ -756,12 +766,15 @@ def save_annotation(request):
     serializer = SaveAnnotationSerializer(data=request.data)
     if not serializer.is_valid():
         return JsonResponse(serializer.errors, status=400)
-    
+
     annotation_name = serializer.validated_data['annotation_name']
     annotation_list = serializer.validated_data['annotation_data']
     confirm_overwrite = serializer.validated_data['confirm_overwrite']
     manifest_id = serializer.validated_data['manifest_id']
     chunk_index = serializer.validated_data['chunk_index']
+    # NEW: pulled out alongside the others, purely so the names exist.
+    bag_filename = serializer.validated_data['bag_filename']
+    source_duration = serializer.validated_data['source_duration']
 
     os.makedirs(ANNOTATION_PATH, exist_ok=True)
     file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
@@ -796,8 +809,27 @@ def save_annotation(request):
             )
         annotation_list = merge_chunk_annotations(existing, annotation_list, chunk)
 
+    # a save that does not carry the source must not erase what the file
+    # already recorded. Some save paths have no source to send, and silently
+    # blanking provenance is worse than never having recorded it.
+    if not bag_filename or source_duration is None:
+        try:
+            recorded = read_annotation_metadata(
+                f'{annotation_name}.csv', ANNOTATION_PATH,
+            )
+        except (FileNotFoundError, OSError, IOError):
+            recorded = {}
+        bag_filename = bag_filename or recorded.get('bag_filename', '')
+        if source_duration is None:
+            source_duration = recorded.get('source_duration')
+
     try:
-        write_annotation_csv(file_path, annotation_list)
+        # NEW: the two keyword arguments. The call itself is otherwise unchanged.
+        write_annotation_csv(
+            file_path, annotation_list,
+            bag_filename=bag_filename,
+            source_duration=source_duration,
+        )
     except Exception as error:
         return JsonResponse({'error': str(error)}, status=500)
 

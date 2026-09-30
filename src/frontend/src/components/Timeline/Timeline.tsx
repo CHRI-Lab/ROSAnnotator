@@ -37,6 +37,7 @@ let globalAxisId = 1;
 
 interface TimelineProps {
   duration: number;
+  sourceDuration?: number;
   played: number;
   onSeek: (time: number) => void;
   rosBagFileName: string;
@@ -112,6 +113,7 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
 
 const Timeline: React.FC<TimelineProps> = ({
   duration,
+  sourceDuration,
   played,
   onSeek,
   rosBagFileName,
@@ -344,6 +346,10 @@ const Timeline: React.FC<TimelineProps> = ({
       const result = await postAnnotation(name, data, {
         confirmOverwrite,
         scope: autosaveScope,
+        source: {
+          bag_filename: rosBagFileName,
+          source_duration: sourceDuration,
+        },
       });
       if (result.status === "conflict") {
         setPendingOverwrite({ name, data, conflict: result.conflict });

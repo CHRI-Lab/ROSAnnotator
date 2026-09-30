@@ -105,6 +105,12 @@ const Annotator = ({
     [],
   );
 
+  // Timeline's duration is chunk-local in a chunked session. The source length
+  // must always describe the whole recording, so take it from the manifest
+  // whenever there is one.
+  const sourceDuration = chunkManifest
+    ? chunkManifest.duration_seconds
+    : duration;
 
   const handleClearConversation = async () => {
     const response = await fetch("http://localhost:8000/api/gpt_chat/clear/", {
@@ -590,6 +596,7 @@ const Annotator = ({
               rosBagFileName={rosBagFileName}
               bookListFileName={bookListFileName}
               duration={duration}
+              sourceDuration={sourceDuration}
               played={played}
               onSeek={handleSeek}
               booklist={bookList}

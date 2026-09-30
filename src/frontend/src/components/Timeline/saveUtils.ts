@@ -99,10 +99,19 @@ const collectMessages = (value: unknown): string[] => {
     return [];
 };
 
+export interface AnnotationSource {
+    bag_filename: string;
+    source_duration?: number;
+}
+
 export const postAnnotation = async (
     annotationName: string,
     annotationData: any,
-    options?: { confirmOverwrite?: boolean; scope?: AnnotationSaveScope }
+    options?: {
+        confirmOverwrite?: boolean;
+        scope?: AnnotationSaveScope;
+        source?: AnnotationSource;
+    }
     ): Promise<AnnotationSaveResult> => {
     const response = await fetch("http://localhost:8000/api/save_annotation/", {
         method: "POST",
@@ -112,9 +121,9 @@ export const postAnnotation = async (
         annotation_data: annotationData,
         confirm_overwrite: options?.confirmOverwrite ?? false,
         ...(options?.scope ?? {}),
+        ...(options?.source ?? {}),
         }),
     });
-
     if (response.ok) {
         return { status: "saved" };
     }
