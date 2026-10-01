@@ -9,6 +9,11 @@ from openai import APIConnectionError, APIStatusError, AuthenticationError, Open
 
 logger = logging.getLogger(__name__)
 
+ALL_DATA_VIEWS = (
+    "audio", "video", "transcript", "waveform", "annotations",
+    "statistics-annotations", "statistics-tiers", "codebook",
+)
+
 
 class RemoteAuthenticationError(RuntimeError):
     """The remote provider rejected its configured credentials."""
@@ -37,12 +42,18 @@ class AIAssistant(ABC):
         codebookContext,
         timelineContext,
         timelineScope=None,
+        selectedDataViews=None,
+        dataViewContexts=None,
     ):
         self.transcriptContext = transcriptContext
         self.frameContext = frameContext
         self.codebookContext = codebookContext
         self.timelineContext = timelineContext
         self.timelineScope = timelineScope
+        self.selectedDataViews = tuple(
+            ALL_DATA_VIEWS if selectedDataViews is None else selectedDataViews
+        )
+        self.dataViewContexts = dataViewContexts or {}
         self.last_run_metadata = {}
 
     def respond(self, message, chatHistory=""):
@@ -123,6 +134,8 @@ class AIAssistant(ABC):
         )
 
     def _is_timeline_request(self, message):
+        if self._missing_required_data_views(message):
+            return False
         if not self._timeline_edits_enabled():
             return False
         if self._requests_timeline_change(message):
@@ -145,6 +158,82 @@ class AIAssistant(ABC):
                 "clear",
             )
         )
+
+    def _missing_required_data_views(self, message):
+        """Return obvious evidence prerequisites omitted by the user."""
+        normalized = str(message or "").casefold()
+        missing = []
+        selected = set(self.selectedDataViews)
+        if any(word in normalized for word in (
+            "gesture", "body language", "facial expression", "visible", "video",
+        )) and "video" not in selected:
+            missing.append("video")
+        if any(word in normalized for word in (
+            "transcript", "utterance", "speech", "said", "speaker attitude",
+        )) and "transcript" not in selected:
+            missing.append("transcript")
+        if any(phrase in normalized for phrase in (
+            "codebook", "according to the codebook", "use the codes",
+        )) and "codebook" not in selected:
+            missing.append("codebook")
+        if any(word in normalized for word in (
+            "delete", "remove", "rename", "modify existing", "existing axis",
+        )) and not (
+            isinstance(self.timelineScope, dict)
+            and self.timelineScope.get("axis_ids")
+        ) and not selected.intersection({
+            "annotations", "statistics-annotations", "statistics-tiers"
+        }):
+            missing.append("annotations")
+        return list(dict.fromkeys(missing))
+
+    def _data_view_policy_prompt(self):
+        labels = {
+            "audio": "audio",
+            "transcript": "transcript",
+            "video": "video frames",
+            "waveform": "waveform",
+            "annotations": "annotations",
+            "statistics-annotations": "annotation statistics",
+            "statistics-tiers": "tier statistics",
+            "codebook": "codebook",
+        }
+        selected = [labels[view] for view in ALL_DATA_VIEWS if view in self.selectedDataViews]
+        omitted = [labels[view] for view in ALL_DATA_VIEWS if view not in self.selectedDataViews]
+        available_text = ", ".join(selected) if selected else "none"
+        omitted_text = ", ".join(omitted) if omitted else "none"
+        scoped_axis_ids = (
+            self.timelineScope.get("axis_ids", [])
+            if isinstance(self.timelineScope, dict) else []
+        )
+        axis_scope_text = (
+            "Separately selected timeline axes: "
+            + ", ".join(str(axis_id) for axis_id in scoped_axis_ids)
+            + ". Their supplied axis structure and annotation blocks are available "
+              "for actions on those axes, even when the full annotations data view is unselected."
+            if scoped_axis_ids else
+            "No existing timeline axes were separately selected."
+        )
+        return f"""AVAILABLE DATA POLICY
+Available selected data views: {available_text}.
+Unavailable or unselected data views: {omitted_text}.
+{axis_scope_text}
+
+Use only the selected data views and any separately selected axes described
+above. Do not assume access to omitted data and do not infer, fabricate, or
+guess missing evidence. Before answering or producing annotation actions,
+decide whether the available context is sufficient.
+A selected view is usable only to the extent that its supplied context contains
+inspectable evidence. A file path or availability flag alone is not evidence.
+
+If it is insufficient, do not return timeline or annotation actions. Reply in
+plain text using exactly this structure:
+INSUFFICIENT_DATA
+Missing data views: <comma-separated data views>
+Reason: <why the missing views are required>
+Request: Please select or provide <required data views> and try again.
+
+Absence of evidence in selected data is not evidence that an event did not occur."""
 
     def _new_axis_allowed(self):
         return self.timelineScope is None or self.timelineScope.get("allow_new") is True
@@ -188,6 +277,8 @@ class RemoteAPI(AIAssistant):
         timelineContext,
         APIKey,
         timelineScope=None,
+        selectedDataViews=None,
+        dataViewContexts=None,
     ):
         super().__init__(
             transcriptContext=transcriptContext,
@@ -195,6 +286,8 @@ class RemoteAPI(AIAssistant):
             codebookContext=codebookContext,
             timelineContext=timelineContext,
             timelineScope=timelineScope,
+            selectedDataViews=selectedDataViews,
+            dataViewContexts=dataViewContexts,
         )
         self.APIKey = APIKey
 
@@ -340,27 +433,55 @@ class RemoteAPI(AIAssistant):
 
     def _request_completion(self, message, chatHistory=""):
         client = OpenAI(api_key=self.APIKey)
-        timeline_context = json.dumps(self.timelineContext, indent=2)
+        timeline_available = bool(set(self.selectedDataViews).intersection({
+            "annotations", "statistics-annotations", "statistics-tiers",
+        })) or bool(
+            isinstance(self.timelineScope, dict)
+            and self.timelineScope.get("axis_ids")
+        )
+        timeline_context = (
+            json.dumps(self.timelineContext, indent=2)
+            if timeline_available else "Not selected."
+        )
         selected_codebook = self._codebook_for_message(message)
         allowed_labels = self._codebook_labels(selected_codebook)
         scope_prompt = self._timeline_scope_prompt()
-        selected_frames = self.frameContext[
-            0::max(1, len(self.frameContext) // 50)
-        ][:50]
+        selected_frames = (
+            self.frameContext[0::max(1, len(self.frameContext) // 50)][:50]
+            if "video" in self.selectedDataViews else []
+        )
+        transcript_section = (
+            f"Here is the audio transcription:\n{self.transcriptContext}"
+            if "transcript" in self.selectedDataViews else ""
+        )
+        codebook_section = (
+            f"""Here is the Codebook predefined by user. When the request asks
+                    for codebook annotation, every addBlock text must be exactly one
+                    of these labels; do not use summaries or explanations:
+
+                    {selected_codebook}
+
+                    Allowed exact labels: {allowed_labels}"""
+            if "codebook" in self.selectedDataViews else "Codebook: Not selected."
+        )
+        data_view_policy = self._data_view_policy_prompt()
+        structured_view_context = json.dumps(
+            self.dataViewContexts, ensure_ascii=False, indent=2
+        )
 
         prompt = f"""
-        User want you based on the audio_transcript and video frames answer some qustion 
-        Now, based on this transcript and frames, answer the following question:
-
+        Answer the following request using only the selected data views and axes:
         {message}
-        If the question not relative with audio and video, you dont need to watch the following data.
-        Here is the audio transcription:
-        {self.transcriptContext}
-        Here is the video frames
+        {transcript_section}
         """
 
         system_prompt = f"""
                     You are an assistant that can manipulate timelines. Based on the audio transcript, here are the actions you can perform:
+
+                    {data_view_policy}
+
+                    SELECTED DATA VIEW CONTEXTS:
+                    {structured_view_context}
                     
                     1. Add a new `axi`: Method: `addAxi`, Parameters: `axisId` (integer),'axisName' (string),'axistype' (string).
                     2. Add a new `block`: Method: `addBlock`, Parameters: `axisId` (integer), `start` (float), `end` (float), `text` (string).
@@ -433,13 +554,7 @@ class RemoteAPI(AIAssistant):
 
                     {scope_prompt}
 
-                    Here is the Codebook predefined by user. When the request asks
-                    for codebook annotation, every addBlock text must be exactly one
-                    of these labels; do not use summaries or explanations:
-
-                    {selected_codebook}
-
-                    Allowed exact labels: {allowed_labels}
+                    {codebook_section}
                     
                     Here is previous chat history between you and user:
 
@@ -516,6 +631,8 @@ class LocalAI(AIAssistant):
         checkpointPath,
         model=None,
         timelineScope=None,
+        selectedDataViews=None,
+        dataViewContexts=None,
     ):
         super().__init__(
             transcriptContext=transcriptContext,
@@ -523,6 +640,8 @@ class LocalAI(AIAssistant):
             codebookContext=codebookContext,
             timelineContext=timelineContext,
             timelineScope=timelineScope,
+            selectedDataViews=selectedDataViews,
+            dataViewContexts=dataViewContexts,
         )
         self.checkpointPath = checkpointPath
         self.baseURL = os.getenv("LOCAL_AI_BASE_URL", "http://local-llm:8080/v1")
@@ -532,13 +651,14 @@ class LocalAI(AIAssistant):
 
     def _respond(self, message, chatHistory=""):
         requests_visual_analysis = self._requests_visual_analysis(message)
-        if not self.supports_visual_annotation and requests_visual_analysis:
+        video_selected = "video" in self.selectedDataViews
+        if video_selected and not self.supports_visual_annotation and requests_visual_analysis:
             raise LocalInferenceError(
                 f"The selected local model ({self.model}) is text-only and cannot "
                 "perform gesture annotation or inspect video frames. Select a "
                 "vision-capable model or Remote for video-based annotation."
             )
-        if requests_visual_analysis and not self.frameContext:
+        if video_selected and requests_visual_analysis and not self.frameContext:
             raise LocalInferenceError(
                 "No video frames are available for visual annotation. Process "
                 "a video before requesting gesture annotation."
@@ -868,7 +988,12 @@ class LocalAI(AIAssistant):
 
     def _build_request_system_prompt(self, message, chatHistory=""):
         """Add capability-specific guidance to the shared local prompt."""
-        prompt = self._build_system_prompt(message, chatHistory)
+        prompt = (
+            f"{self._data_view_policy_prompt()}\n\n"
+            f"SELECTED DATA VIEW CONTEXTS:\n"
+            f"{json.dumps(self.dataViewContexts, ensure_ascii=False, indent=2)}\n\n"
+            f"{self._build_system_prompt(message, chatHistory)}"
+        )
         if (
             not self.supports_visual_annotation
             or not self._requests_visual_analysis(message)

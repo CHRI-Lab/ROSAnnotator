@@ -146,6 +146,40 @@ test('AI-created axis avoids an existing name case-insensitively', () => {
   assert.equal(result[1].axisName, "speaker's attitude 1");
 });
 
+test('AI-created axis IDs are remapped when they collide with existing axes', () => {
+  const { applyAIInstruction, remapAIInstructionAxisIds } = loadAIInstructionHelpers();
+  const existing = [
+    { id: 1, type: 'Type-in', axisName: 'Unknown Speaker', blocks: [
+      { start: 0, end: 7.8, text: 'Existing transcript' },
+    ] },
+    { id: 2, type: 'Type-in', axisName: 'SPEAKER_00', blocks: [] },
+    { id: 3, type: 'Type-in', axisName: 'SPEAKER_01', blocks: [] },
+  ];
+  const instruction = {
+    type: 'instruction',
+    steps: [
+      { action: 'addAxi', parameters: {
+        axisId: 1, axisName: 'Speech Attitude', axistype: 'Type-in',
+      } },
+      { action: 'addBlock', parameters: {
+        axisId: 1, start: 0, end: 7.8, text: 'ATTITUDE_NEUTRAL',
+      } },
+    ],
+  };
+
+  const remapped = remapAIInstructionAxisIds(existing, instruction);
+  const result = applyAIInstruction(existing, remapped, 60);
+
+  assert.equal(remapped.steps[0].parameters.axisId, 4);
+  assert.equal(remapped.steps[1].parameters.axisId, 4);
+  assert.equal(result.length, 4);
+  assert.equal(result[0].blocks.length, 1);
+  assert.equal(result[3].axisName, 'Speech Attitude');
+  assert.deepEqual(normalize(result[3].blocks), [
+    { start: 0, end: 7.8, text: 'ATTITUDE_NEUTRAL' },
+  ]);
+});
+
 test('manual axis names detect trimmed case-insensitive duplicates', () => {
   const { isDuplicateAxisName } = loadAIInstructionHelpers();
   const axes = [

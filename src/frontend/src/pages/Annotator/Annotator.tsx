@@ -27,12 +27,14 @@ import Booklist from "../../components/Booklist/Booklist";
 import Chatbox from "../../components/Chatbox";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
 import FrontEndWorkspace from "../../components/FrontEndWorkspace";
+import { availableViews } from "../../components/FrontEndWorkspace/viewRegistry";
 import RightAssistantPanel from "../../components/RightAssistantPanel";
 import Timeline from "../../components/Timeline";
 import {
   applyAIInstruction,
   filterInstructionToTimelineScope,
   instructionExceedsTimelineScope,
+  remapAIInstructionAxisIds,
   requiresAIChangeConfirmation,
   type TimelineScope,
 } from "../../components/Timeline/aiInstruction";
@@ -44,6 +46,8 @@ import {
 import {
   AIInstruction,
   AIRecord,
+  AssistantDataViewId,
+  AssistantDataViewOption,
   AssistantRequestOptions,
   buildAIRecordAnnotationName,
 } from "../../types/aiRecords";
@@ -235,6 +239,32 @@ const Annotator = ({
     options?: AssistantRequestOptions,
   ) => {
     if (processingPending) return Promise.resolve({ text: "Please wait for annotation data to finish loading.", isError: true } as AssistantReply);
+    const selectedDataViews = new Set(options?.selectedDataViews ?? []);
+    const timelineViewIds: AssistantDataViewId[] = [
+      "annotations",
+      "statistics-annotations",
+      "statistics-tiers",
+    ];
+    const timelineSelected = timelineViewIds.some((viewId) =>
+      selectedDataViews.has(viewId)
+    );
+    const selectedAxisIds = new Set(options?.timelineScope?.axisIds ?? []);
+    const scopedAxesData = axesData.filter((axis) => selectedAxisIds.has(axis.id));
+    const timelineContext = timelineSelected
+      ? axesData
+      : scopedAxesData.length > 0
+        ? scopedAxesData
+        : undefined;
+    const selectedDataViewContexts = Object.fromEntries(
+      (options?.selectedDataViews ?? [])
+        .filter((viewId) => viewId !== "codebook")
+        .map((viewId) => [
+          viewId,
+          viewId === "annotations"
+            ? { axes: axesData }
+            : data.views?.[viewId]?.processed_data ?? {},
+        ]),
+    );
     return fetch("http://localhost:8000/api/gpt_chat/", {
       method: "POST",
       headers: {
@@ -242,10 +272,14 @@ const Annotator = ({
       },
       body: JSON.stringify({
         message: message, 
-        audio_transcript: data.audio_transcript, 
-        video_path: data.video_path,
-        Axeinfo: axesData,
-        Codebook: bookList,
+        audio_transcript: selectedDataViews.has("transcript") ? data.audio_transcript : undefined,
+        video_path: selectedDataViews.has("video") ? data.video_path : undefined,
+        // Axis selection is an independent, narrow action context. This lets
+        // the model edit selected axes without disclosing the whole timeline.
+        Axeinfo: timelineContext,
+        Codebook: selectedDataViews.has("codebook") ? bookList : undefined,
+        selected_data_views: options?.selectedDataViews ?? [],
+        data_view_contexts: selectedDataViewContexts,
         chat_context_id: data.chat_context_id,
         assistant_mode: assistantRouting.mode,
         context_routes: assistantRouting.contextRoutes,
@@ -375,6 +409,10 @@ const Annotator = ({
                   isError: true,
                 };
               }
+              parsedInstruction = remapAIInstructionAxisIds(
+                axesData,
+                parsedInstruction,
+              );
               const updatedAxes = applyAIInstruction(axesData, parsedInstruction, duration);
               const requestsDeletion = /\b(?:delete|remove|clear)\b/i.test(message);
               const requestedAnnotationBlocks =
@@ -444,6 +482,22 @@ const Annotator = ({
         } as AssistantReply;
       });
   };
+
+  const availableAssistantDataViews: AssistantDataViewOption[] = [
+    ...availableViews
+      .filter((view) => {
+        const backendView = data.views?.[view.id];
+        return Boolean(
+          backendView?.status === "ready" &&
+          backendView.available &&
+          backendView.processed_data != null
+        );
+      })
+      .map((view) => ({ id: view.id as AssistantDataViewOption["id"], label: view.label })),
+    ...(bookList && (Array.isArray(bookList) ? bookList.length : Object.keys(bookList).length)
+      ? [{ id: "codebook", label: "Codebook" } as const]
+      : []),
+  ];
   
 
 
@@ -753,7 +807,15 @@ const Annotator = ({
               </Box>
             )
           }
-          assistant={<Chatbox key={conversationKey} duration={duration} axes={axesData} onSendMessage={handleSendMessageToGPT} />}
+          assistant={
+            <Chatbox
+              key={conversationKey}
+              duration={duration}
+              axes={axesData}
+              availableDataViews={availableAssistantDataViews}
+              onSendMessage={handleSendMessageToGPT}
+            />
+          }
         />
         </Box>
       </Box>

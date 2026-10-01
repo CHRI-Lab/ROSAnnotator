@@ -8,6 +8,21 @@ export type AIInstruction = {
   steps: AIInstructionStep[];
 };
 
+export type AssistantDataViewId =
+  | "audio"
+  | "video"
+  | "transcript"
+  | "waveform"
+  | "annotations"
+  | "statistics-annotations"
+  | "statistics-tiers"
+  | "codebook";
+
+export type AssistantDataViewOption = {
+  id: AssistantDataViewId;
+  label: string;
+};
+
 export type AIRecord = {
   schema_version: number;
   run_id: string;
@@ -28,6 +43,7 @@ export type AIRecord = {
 };
 
 export type AssistantRequestOptions = {
+  selectedDataViews?: AssistantDataViewId[];
   timeRange?: {
     start: number;
     end: number;

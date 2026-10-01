@@ -85,6 +85,128 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
             "Annotate the greeting", ""
         )
 
+    def test_selected_data_view_subset_is_the_only_context_given_to_model(self):
+        from rosbag_processing import views
+
+        views.cache.set('chat:test-context', {'history': "", 'frames': ["private-frame"]})
+        request = self.make_request(selected_data_views=["transcript"])
+
+        with patch.object(views, "create_local_ai") as local_ai:
+            local_ai.return_value.respond.return_value = "local result"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        context = local_ai.call_args.kwargs
+        self.assertEqual(context["transcriptContext"], "Speaker 1: Hello")
+        self.assertEqual(context["frameContext"], [])
+        self.assertEqual(context["codebookContext"], {})
+        self.assertEqual(context["timelineContext"], [])
+        self.assertEqual(context["selectedDataViews"], ["transcript"])
+
+    def test_zero_selected_data_views_still_calls_model_with_no_context(self):
+        from rosbag_processing import views
+
+        views.cache.set('chat:test-context', {'history': "", 'frames': ["private-frame"]})
+        request = self.make_request(
+            selected_data_views=[],
+            audio_transcript=None,
+            Axeinfo=None,
+            Codebook=None,
+        )
+
+        with patch.object(views, "create_local_ai") as local_ai:
+            local_ai.return_value.respond.return_value = "INSUFFICIENT_DATA"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        context = local_ai.call_args.kwargs
+        self.assertEqual(context["transcriptContext"], "")
+        self.assertEqual(context["frameContext"], [])
+        self.assertEqual(context["codebookContext"], {})
+        self.assertEqual(context["timelineContext"], [])
+        self.assertEqual(context["selectedDataViews"], [])
+        local_ai.return_value.respond.assert_called_once_with(
+            "Annotate the greeting", ""
+        )
+
+    def test_selected_axis_is_available_without_annotations_data_view(self):
+        from rosbag_processing import views
+
+        views.cache.set('chat:test-context', {'history': "earlier", 'frames': []})
+        request = self.make_request(
+            message="Delete all annotation blocks",
+            selected_data_views=[],
+            Axeinfo=[
+                {"id": 1, "axisName": "Selected", "blocks": [{"start": 1, "end": 2}]},
+                {"id": 2, "axisName": "Private", "blocks": [{"start": 3, "end": 4}]},
+            ],
+            timeline_scope={"axis_ids": [1], "allow_new": False},
+        )
+
+        with patch.object(views, "create_local_ai") as local_ai:
+            local_ai.return_value.respond.return_value = '{"instructions": []}'
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        context = local_ai.call_args.kwargs
+        self.assertEqual(context["timelineContext"], [
+            {"id": 1, "axisName": "Selected", "blocks": [{"start": 1, "end": 2}]},
+        ])
+        self.assertEqual(context["timelineScope"], {"axis_ids": [1], "allow_new": False})
+        local_ai.return_value.respond.assert_called_once_with(
+            "Delete all annotation blocks", "earlier"
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_selected_axis_satisfies_delete_context_policy(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"instructions": []}'))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="",
+            frameContext=[],
+            codebookContext={},
+            timelineContext=[{"id": 1, "axisName": "Selected", "blocks": []}],
+            timelineScope={"axis_ids": [1], "allow_new": False},
+            selectedDataViews=[],
+        )
+
+        self.assertEqual(
+            assistant._missing_required_data_views("Delete all annotation blocks"),
+            [],
+        )
+        self.assertIn("Separately selected timeline axes: 1", assistant._data_view_policy_prompt())
+        assistant._request_completion("Delete all annotation blocks")
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertIn('"axisName": "Selected"', request["messages"][0]["content"])
+        self.assertNotIn("CURRENT TIMELINE:\n                    Not selected.", request["messages"][0]["content"])
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_missing_video_policy_uses_plain_text_and_sends_no_frames(
+        self, openai_class
+    ):
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="INSUFFICIENT_DATA"))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: waves",
+            frameContext=["private-frame"],
+            codebookContext={},
+            timelineContext=[],
+            selectedDataViews=["transcript"],
+        )
+
+        assistant.respond("Annotate visible gestures")
+
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertNotIn("response_format", request)
+        self.assertIn("Missing data views", request["messages"][0]["content"])
+        self.assertNotIn("private-frame", str(request["messages"]))
+
     def test_local_failure_preserves_history_and_does_not_call_remote(self):
         '''local mode fails when remote fall back is available: failure message shown, with remote fallback. fallback does not start automatically'''
         '''if user reject local to remote fall back, no remote request is made'''

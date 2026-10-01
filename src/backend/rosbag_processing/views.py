@@ -379,6 +379,49 @@ def gpt_chat(request):
         audio_transcript = data.get("audio_transcript")
         Axiinfo = data.get("Axeinfo")
         Codebook = data.get("Codebook")
+        allowed_data_views = {
+            "audio", "video", "transcript", "waveform", "annotations",
+            "statistics-annotations", "statistics-tiers", "codebook",
+        }
+        raw_selected_data_views = data.get("selected_data_views")
+        selected_data_views = (
+            list(allowed_data_views)
+            if raw_selected_data_views is None
+            else raw_selected_data_views
+        )
+        if (
+            not isinstance(selected_data_views, list)
+            or any(
+                not isinstance(view_id, str) or view_id not in allowed_data_views
+                for view_id in selected_data_views
+            )
+        ):
+            return JsonResponse({"error": "Invalid selected data views"}, status=400)
+        selected_data_views = list(dict.fromkeys(selected_data_views))
+        selected_data_view_set = set(selected_data_views)
+        raw_data_view_contexts = data.get("data_view_contexts", {})
+        if not isinstance(raw_data_view_contexts, dict):
+            return JsonResponse({"error": "Invalid data view contexts"}, status=400)
+        def safe_view_payload(value):
+            if isinstance(value, dict):
+                return {
+                    key: safe_view_payload(item)
+                    for key, item in value.items()
+                    if key != "artifacts"
+                }
+            if isinstance(value, list):
+                return [safe_view_payload(item) for item in value]
+            return value if isinstance(value, (str, int, float, bool)) or value is None else str(value)
+
+        data_view_contexts = {
+            view_id: safe_view_payload(payload)
+            for view_id, payload in raw_data_view_contexts.items()
+            if view_id in selected_data_view_set and view_id != "codebook"
+        }
+        timeline_view_ids = {
+            "annotations", "statistics-annotations", "statistics-tiers"
+        }
+        timeline_selected = bool(selected_data_view_set & timeline_view_ids)
         timeline_scope = data.get("timeline_scope")
         if timeline_scope is not None:
             if not isinstance(timeline_scope, dict):
@@ -395,6 +438,19 @@ def gpt_chat(request):
                 "axis_ids": list(dict.fromkeys(raw_axis_ids)),
                 "allow_new": allow_new,
             }
+        scope_axis_ids = set(
+            timeline_scope.get("axis_ids", [])
+            if isinstance(timeline_scope, dict) else []
+        )
+        if not timeline_selected:
+            # A selected axis is an explicit, narrow action context. Enforce
+            # that scope server-side even if a client sends additional axes.
+            Axiinfo = [
+                axis for axis in (Axiinfo if isinstance(Axiinfo, list) else [])
+                if isinstance(axis, dict)
+                and axis.get("id", axis.get("axisId")) in scope_axis_ids
+            ]
+        timeline_context_available = timeline_selected or bool(scope_axis_ids)
         assistant_mode = data.get("assistant_mode", "remote")
         context_routes = data.get("context_routes", {})
         fallback_consent = data.get("fallback_consent")
@@ -425,8 +481,8 @@ def gpt_chat(request):
 
         if not message:
             return JsonResponse({"error": "No message provided"}, status=400)
-        if not audio_transcript:
-            return JsonResponse({"error": "No audio transcript provided"}, status=400)
+        if "transcript" in selected_data_view_set and not audio_transcript:
+            return JsonResponse({"error": "Selected transcript data is unavailable"}, status=400)
         if assistant_mode not in {"remote", "local"}:
             return JsonResponse({"error": "Invalid assistant mode"}, status=400)
         if not isinstance(context_routes, dict) or any(
@@ -434,7 +490,9 @@ def gpt_chat(request):
         ):
             return JsonResponse({"error": "Invalid context routes"}, status=400)
 
-        selected_video_path = data.get('video_path')
+        selected_video_path = (
+            data.get('video_path') if "video" in selected_data_view_set else None
+        )
         try:
             request_frames = (
                 frames_for_video(selected_video_path, start_seconds=selected_range[0],
@@ -448,29 +506,42 @@ def gpt_chat(request):
 
         if selected_range is not None:
             start, end = selected_range
-            audio_transcript = transcript_for_time_range(audio_transcript, start, end)
-            Axiinfo = timeline_for_time_range(Axiinfo, start, end)
-            if not audio_transcript:
+            if "transcript" in selected_data_view_set:
+                audio_transcript = transcript_for_time_range(audio_transcript, start, end)
+            if timeline_context_available:
+                Axiinfo = timeline_for_time_range(Axiinfo, start, end)
+            if "transcript" in selected_data_view_set and not audio_transcript:
                 return JsonResponse(
                     {'error': 'No transcript data exists in the selected time range.'},
                     status=400,
                 )
 
         common_context = {
-            "transcriptContext": audio_transcript,
-            "frameContext": request_frames,
-            "codebookContext": Codebook,
-            "timelineContext": Axiinfo,
+            "transcriptContext": audio_transcript if "transcript" in selected_data_view_set else "",
+            "frameContext": request_frames if "video" in selected_data_view_set else [],
+            "codebookContext": Codebook if "codebook" in selected_data_view_set else {},
+            "timelineContext": Axiinfo if timeline_context_available else [],
         }
-        if timeline_scope is not None:
+        if raw_selected_data_views is not None:
+            common_context["selectedDataViews"] = selected_data_views
+            common_context["dataViewContexts"] = data_view_contexts
+        has_timeline_scope = bool(scope_axis_ids) or bool(
+            isinstance(timeline_scope, dict) and timeline_scope.get("allow_new")
+        )
+        if not selected_data_views and not has_timeline_scope:
+            # A confirmed empty selection is prompt-only: do not expose axis IDs
+            # or grant model-generated timeline changes without evidence.
+            common_context["timelineScope"] = {"axis_ids": [], "allow_new": False}
+        elif timeline_scope is not None:
             common_context["timelineScope"] = timeline_scope
+        request_history = conversation_history if selected_data_views or has_timeline_scope else ""
         if assistant_mode == "local":
             assistant = create_local_ai(
                 **common_context,
                 checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
             )
             try:
-                response_text = assistant.respond(message, conversation_history)
+                response_text = assistant.respond(message, request_history)
             except LocalInferenceError as error:
                 remote_configured = bool(openai_api_key)
                 error_message = str(error) or "The local language model is not connected."
@@ -503,7 +574,7 @@ def gpt_chat(request):
                     **common_context,
                     APIKey=openai_api_key,
                 )
-                response_text = assistant.respond(message, conversation_history)
+                response_text = assistant.respond(message, request_history)
             except RemoteAuthenticationError:
                 return JsonResponse(
                     {
