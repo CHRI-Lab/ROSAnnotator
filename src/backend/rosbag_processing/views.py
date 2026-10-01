@@ -177,11 +177,50 @@ def build_ai_record(
     actual_mode,
     response_text,
     context_routes,
+    selected_data_views=None,
+    timeline_scope=None,
+    timeline_context=None,
+    selected_range=None,
+    current_chunk=None,
 ):
     """Build a secret-free record of one successful model interaction."""
     provider_metadata = assistant.get_run_metadata()
     if not isinstance(provider_metadata, dict):
         provider_metadata = {}
+
+    scope_axis_ids = (
+        timeline_scope.get("axis_ids", [])
+        if isinstance(timeline_scope, dict) else []
+    )
+    axes_by_id = {
+        axis.get("id", axis.get("axisId")): axis
+        for axis in (timeline_context if isinstance(timeline_context, list) else [])
+        if isinstance(axis, dict)
+    }
+    selected_timelines = [
+        {
+            "axis_id": axis_id,
+            "axis_name": axes_by_id.get(axis_id, {}).get("axisName"),
+        }
+        for axis_id in scope_axis_ids
+    ]
+    chunk = current_chunk or {
+        "index": 0,
+        "start_seconds": 0.0,
+        "end_seconds": None,
+        "is_chunked": False,
+    }
+    recorded_range = None
+    if selected_range is not None:
+        start, end = selected_range
+        offset = chunk["start_seconds"]
+        recorded_range = {
+            "chunk_relative_seconds": {"start": start, "end": end},
+            "whole_video_seconds": {
+                "start": offset + start,
+                "end": offset + end,
+            },
+        }
 
     return {
         "schema_version": 1,
@@ -200,6 +239,15 @@ def build_ai_record(
         "parameters": provider_metadata.get("parameters", {}),
         "prompts": provider_metadata.get("prompts", {}),
         "ai_response": response_text,
+        "request_options": {
+            "selected_data_types": list(selected_data_views or []),
+            "selected_timelines": selected_timelines,
+            "allow_new_timeline": bool(
+                isinstance(timeline_scope, dict) and timeline_scope.get("allow_new")
+            ),
+            "selected_time_range": recorded_range,
+            "current_chunk": chunk,
+        },
     }
 
 
@@ -460,6 +508,29 @@ def gpt_chat(request):
             )
         except ValueError as error:
             return JsonResponse({'error': str(error)}, status=400)
+        raw_current_chunk = data.get("current_chunk")
+        current_chunk = None
+        if raw_current_chunk is not None:
+            if not isinstance(raw_current_chunk, dict):
+                return JsonResponse({"error": "Invalid current chunk"}, status=400)
+            chunk_index = raw_current_chunk.get("index")
+            chunk_start = raw_current_chunk.get("start_seconds")
+            chunk_end = raw_current_chunk.get("end_seconds")
+            is_chunked = raw_current_chunk.get("is_chunked")
+            if (
+                type(chunk_index) is not int or chunk_index < 0
+                or isinstance(chunk_start, bool) or not isinstance(chunk_start, (int, float))
+                or isinstance(chunk_end, bool) or not isinstance(chunk_end, (int, float))
+                or chunk_start < 0 or chunk_end <= chunk_start
+                or type(is_chunked) is not bool
+            ):
+                return JsonResponse({"error": "Invalid current chunk"}, status=400)
+            current_chunk = {
+                "index": chunk_index,
+                "start_seconds": float(chunk_start),
+                "end_seconds": float(chunk_end),
+                "is_chunked": is_chunked,
+            }
         requested_mode = assistant_mode
         accepted_local_to_remote = (
             isinstance(fallback_consent, dict)
@@ -619,6 +690,11 @@ def gpt_chat(request):
             actual_mode=assistant_mode,
             response_text=response_text,
             context_routes=context_routes,
+            selected_data_views=selected_data_views,
+            timeline_scope=timeline_scope,
+            timeline_context=Axiinfo,
+            selected_range=selected_range,
+            current_chunk=current_chunk,
         )
         return JsonResponse(
             {

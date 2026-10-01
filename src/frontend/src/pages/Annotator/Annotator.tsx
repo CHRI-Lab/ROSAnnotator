@@ -285,6 +285,12 @@ const Annotator = ({
         context_routes: assistantRouting.contextRoutes,
         context_duration: duration,
         time_range: options?.timeRange,
+        current_chunk: {
+          index: currentChunk?.index ?? 0,
+          start_seconds: currentChunk?.start_seconds ?? 0,
+          end_seconds: currentChunk?.end_seconds ?? duration,
+          is_chunked: Boolean(chunkManifest),
+        },
         timeline_scope: options?.timelineScope
           ? {
               axis_ids: options.timelineScope.axisIds,

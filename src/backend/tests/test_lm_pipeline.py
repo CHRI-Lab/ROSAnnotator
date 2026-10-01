@@ -183,6 +183,46 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
         self.assertIn('"axisName": "Selected"', request["messages"][0]["content"])
         self.assertNotIn("CURRENT TIMELINE:\n                    Not selected.", request["messages"][0]["content"])
 
+    def test_ai_record_contains_selected_options_and_both_time_references(self):
+        from rosbag_processing import views
+
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        request = self.make_request(
+            selected_data_views=["transcript", "annotations"],
+            audio_transcript="[00:10] Speaker 1: Hello",
+            time_range={"start": 10, "end": 20},
+            context_duration=300,
+            current_chunk={
+                "index": 2,
+                "start_seconds": 600,
+                "end_seconds": 900,
+                "is_chunked": True,
+            },
+            Axeinfo=[{"id": 1, "axisName": "Topics", "blocks": []}],
+            timeline_scope={"axis_ids": [1], "allow_new": False},
+        )
+
+        with patch.object(views, "create_local_ai") as local_ai:
+            local_ai.return_value.respond.return_value = "Done"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        options = json.loads(response.content)["ai_record"]["request_options"]
+        self.assertEqual(options["selected_data_types"], ["transcript", "annotations"])
+        self.assertEqual(options["selected_timelines"], [
+            {"axis_id": 1, "axis_name": "Topics"},
+        ])
+        self.assertEqual(options["current_chunk"], {
+            "index": 2,
+            "start_seconds": 600.0,
+            "end_seconds": 900.0,
+            "is_chunked": True,
+        })
+        self.assertEqual(options["selected_time_range"], {
+            "chunk_relative_seconds": {"start": 10.0, "end": 20.0},
+            "whole_video_seconds": {"start": 610.0, "end": 620.0},
+        })
+
     @patch("rosbag_processing.ai_assistant.OpenAI")
     def test_missing_video_policy_uses_plain_text_and_sends_no_frames(
         self, openai_class

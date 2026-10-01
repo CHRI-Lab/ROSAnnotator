@@ -86,6 +86,9 @@ test('selected data views are the only contexts serialized for the backend', () 
   assert.match(annotatorSource, /selected_data_views: options\?\.selectedDataViews \?\? \[\]/);
   assert.match(annotatorSource, /\.\.\.availableViews/);
   assert.match(annotatorSource, /data_view_contexts: selectedDataViewContexts/);
+  assert.match(annotatorSource, /current_chunk: \{/);
+  assert.match(annotatorSource, /start_seconds: currentChunk\?\.start_seconds \?\? 0/);
+  assert.match(annotatorSource, /end_seconds: currentChunk\?\.end_seconds \?\? duration/);
 });
 
 test('a refreshed or remounted chat starts without cleared messages', () => {

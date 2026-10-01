@@ -39,6 +39,24 @@ export type AIRecord = {
     user?: string;
   };
   ai_response: string;
+  request_options?: {
+    selected_data_types: AssistantDataViewId[];
+    selected_timelines: Array<{
+      axis_id: number;
+      axis_name: string | null;
+    }>;
+    allow_new_timeline: boolean;
+    selected_time_range: null | {
+      chunk_relative_seconds: { start: number; end: number };
+      whole_video_seconds: { start: number; end: number };
+    };
+    current_chunk: {
+      index: number;
+      start_seconds: number;
+      end_seconds: number | null;
+      is_chunked: boolean;
+    };
+  };
   [key: string]: unknown;
 };
 
