@@ -57,7 +57,7 @@ def check_annotation_source(annotations, recorded, bag_filename, source_duration
         and source_duration is not None
         and not math.isclose(
             recorded_duration, source_duration,
-            rel_tol=1e-3, abs_tol=DURATION_TOLERANCE_SECONDS,
+            rel_tol=0.0, abs_tol=DURATION_TOLERANCE_SECONDS,
         )
     )
 

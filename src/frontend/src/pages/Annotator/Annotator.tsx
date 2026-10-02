@@ -110,7 +110,7 @@ const Annotator = ({
   // whenever there is one.
   const sourceDuration = chunkManifest
     ? chunkManifest.duration_seconds
-    : duration;
+    : data.duration_seconds || duration;
 
   const handleClearConversation = async () => {
     const response = await fetch("http://localhost:8000/api/gpt_chat/clear/", {
