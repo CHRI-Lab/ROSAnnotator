@@ -22,6 +22,7 @@ flowchart TD
     Parent --> Transcript[TranscriptProcessor]
     Parent --> Waveform[WaveformProcessor]
     Parent --> Annotation[AnnotationProcessor and two statistics processors]
+    Parent --> Wrench[WrenchProcessor: force and torque]
     Audio -. optional mux input .-> Video
     Audio --> Transcript
     Audio --> Waveform
@@ -30,7 +31,7 @@ flowchart TD
     Metadata --> Loader
     Loader --> Annotator[Annotator: shared playback state and seek callback]
     Annotator --> Panels[Frontend registry and isolated ViewPanel boundaries]
-    Annotator --> Clock[Shared Play/Pause and seek slider]
+    Annotator --> Clock[Shared Play/Pause and seek slider; sensor-only clock]
     Annotator --> Timeline[Timeline: mount after initial data and recovery are complete]
     Timeline --> Recovery[Autosave API: bag or manifest/chunk scope]
 ```
