@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactPlayer from "react-player";
 import {
   Box,
@@ -66,6 +66,8 @@ interface AnnotatorProps {
   restoredAxes?: any[] | null;
   autosaveEnabled?: boolean;
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
+  savedAnnotationName?: string;
+  onAnnotationSaved?: (name: string) => void;
 }
 
 const Annotator = ({
@@ -80,13 +82,14 @@ const Annotator = ({
   restoredAxes = null,
   autosaveEnabled = true,
   onAutosaveReady,
+  savedAnnotationName = "",
+  onAnnotationSaved,
 }: AnnotatorProps) => {
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(data.duration_seconds || 0);
   const [played, setPlayed] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [bookList, setBookList] = useState(bookListData);
   const [axesData, setAxesData] = useState<AxisData[]>([]);
   const [instruction, setInstruction] = useState<AIInstruction | null>(null);
@@ -102,6 +105,22 @@ const Annotator = ({
   const [pendingChunkIndex, setPendingChunkIndex] = useState<number | null>(null);
   const [confirmingChunkSwitch, setConfirmingChunkSwitch] = useState(false);
   const [chunkSwitchError, setChunkSwitchError] = useState("");
+
+  // Timeline owns the save dialog; the header button opens it.
+  const openSaveDialog = useRef<(() => void) | null>(null);
+  const registerSaveDialog = useCallback(
+    (open: (() => void) | null) => {
+      openSaveDialog.current = open;
+    },
+    [],
+  );
+
+  // Timeline's duration is chunk-local in a chunked session. The source length
+  // must always describe the whole recording, so take it from the manifest
+  // whenever there is one.
+  const sourceDuration = chunkManifest
+    ? chunkManifest.duration_seconds
+    : data.duration_seconds || duration;
 
   const handleClearConversation = async () => {
     const response = await fetch("http://localhost:8000/api/gpt_chat/clear/", {
@@ -668,8 +687,8 @@ const Annotator = ({
   >
     <AppHeader
       rosBagFileName={rosBagFileName}
-      isSaving={isSaving}
-      onSave={handleSaveAnnotations}
+      disabled={processingPending}
+      onSave={() => openSaveDialog.current?.()}
     />
 
     <Box display="flex" flex={1} minHeight={0} overflow="hidden">
@@ -774,6 +793,7 @@ const Annotator = ({
               rosBagFileName={rosBagFileName}
               bookListFileName={bookListFileName}
               duration={duration}
+              sourceDuration={sourceDuration}
               played={played}
               onSeek={handleSeek}
               booklist={bookList}
@@ -788,9 +808,11 @@ const Annotator = ({
                 chunk_index: currentChunkIndex,
               } : undefined}
               onAutosaveReady={onAutosaveReady}
+              savedAnnotationName={savedAnnotationName}
+              onAnnotationSaved={onAnnotationSaved}
               switchingChunk={switchingChunk}
               aiRecords={aiRecords}
-              onSave={handleSaveAnnotations}
+              onSaveReady={registerSaveDialog}
             />}
           </Box>
         </Box>

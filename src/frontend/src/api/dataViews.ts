@@ -1,7 +1,22 @@
 import type { BackendDataView } from '../components/FrontEndWorkspace/viewTypes';
 
+export type AnnotationSourceCheck = {
+  status: "ok" | "mismatch" | "unknown";
+  name_differs: boolean;
+  duration_differs: boolean;
+  recorded_bag_filename: string | null;
+  recorded_duration: number | null;
+  loaded_bag_filename: string | null;
+  loaded_duration: number | null;
+  annotation_end_seconds: number;
+  overflows: boolean;
+  overflow_block_count: number;
+  orphan_block_count: number;
+};
+
 export type ViewPayload = {
   duration_seconds?: number;
+  annotation_source_check?: AnnotationSourceCheck | null; 
   video_path: string;
   audio_path: string | null;
   audio_transcript: string;

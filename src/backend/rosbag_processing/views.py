@@ -1,4 +1,4 @@
-from .data_utils import get_rosbag_duration, load_annotation, transcribe_audio_to_srt
+from .data_utils import get_rosbag_duration, load_annotation, transcribe_audio_to_srt, read_annotation_metadata
 from django.core.cache import cache
 from django.conf import settings
 from uuid import UUID, uuid4
@@ -7,6 +7,7 @@ import math
 import os
 import re
 import base64
+import math
 from pathlib import Path
 import cv2
 from django.http import JsonResponse
@@ -14,7 +15,11 @@ from datetime import datetime, timezone
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .serializers import BooklistSerializer, InputInspectionSerializer, TranscriptionRequestSerializer
+from .serializers import (
+    BooklistSerializer, 
+    InputInspectionSerializer, 
+    SaveAnnotationSerializer,
+    TranscriptionRequestSerializer)
 import csv
 import fcntl
 import tempfile
@@ -351,6 +356,7 @@ def complete_ai_record(request):
         if temporary_path and os.path.exists(temporary_path):
             os.unlink(temporary_path)
     return JsonResponse({'saved': True, 'run_id': record['run_id']})
+
 
 
 @api_view(['POST'])
@@ -774,51 +780,316 @@ def update_booklist(request):
     else:
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
+def describe_existing_annotation(file_path, annotation_name):
+    """Summarise a file that a save is about to replace.
+
+    Returns None when nothing is there. A file that cannot be parsed is
+    reported rather than silently overwritten: it may not be an annotation
+    file at all.
+    """
+    if not os.path.isfile(file_path):
+        return None
+
+    modified_at = datetime.fromtimestamp(
+        os.path.getmtime(file_path), tz=timezone.utc,
+    ).isoformat()
+
+    try:
+        existing = load_annotation(f'{annotation_name}.csv', ANNOTATION_PATH)
+    except Exception:
+        return {
+            'reason': 'file_unreadable',
+            'annotation_name': annotation_name,
+            'modified_at': modified_at,
+        }
+
+    return {
+        'reason': 'file_exists',
+        'annotation_name': annotation_name,
+        'modified_at': modified_at,
+        'axis_count': len(existing),
+        'block_count': sum(
+            len(axis.get('annotationBlocks', [])) for axis in existing
+        ),
+    }
+
+def describe_chunk_conflict(file_path, annotation_name, chunk):
+    """Describe what a chunk save would do to an existing file.
+
+    Counts blocks the chunk currently displays, using the same clip_to_chunk
+    rule the merge uses, so the prompt cannot describe a different set from
+    the one that gets replaced.
+    """
+    if not os.path.isfile(file_path):
+        return None
+
+    modified_at = datetime.fromtimestamp(
+        os.path.getmtime(file_path), tz=timezone.utc,
+    ).isoformat()
+
+    try:
+        existing = load_annotation(f'{annotation_name}.csv', ANNOTATION_PATH)
+    except Exception:
+        return {
+            'reason': 'file_unreadable',
+            'annotation_name': annotation_name,
+            'modified_at': modified_at,
+        }
+
+    from .view_metadata import clip_to_chunk
+
+    in_chunk = sum(
+        1
+        for axis in existing
+        for block in axis.get('annotationBlocks', [])
+        if clip_to_chunk(block, chunk) is not None
+    )
+    total = sum(len(axis.get('annotationBlocks', [])) for axis in existing)
+
+    return {
+        'reason': 'chunk_has_annotations' if in_chunk else 'chunk_is_empty',
+        'annotation_name': annotation_name,
+        'modified_at': modified_at,
+        'axis_count': len(existing),
+        'block_count': total,
+        'chunk_block_count': in_chunk,
+        'chunk_index': chunk['index'],
+        'chunk_start_seconds': chunk['start_seconds'],
+        'chunk_end_seconds': chunk['end_seconds'],
+    }
+
+def _same_block(incoming, original, clipped):
+    """True when an incoming block is the unedited clipped form of original.
+
+    Times alone are not enough: editing only the text of a block leaves its
+    bounds identical, and treating that as unedited would restore the old text.
+    """
+    return (
+        math.isclose(incoming['start'], clipped[0], abs_tol=1e-6)
+        and math.isclose(incoming['end'], clipped[1], abs_tol=1e-6)
+        and (incoming.get('text') or '') == (original.get('text') or '')
+    )
+
+
+def merge_chunk_annotations(existing, incoming, chunk):
+    """Replace one chunk's contribution to an absolute-time annotation set.
+
+    incoming holds chunk-local times as annotations_for_chunk produced them.
+    An incoming block still matching an existing block's clipped form is
+    unedited, so the original absolute block is restored rather than replaced
+    by its clipped copy. Blocks the chunk never displayed are untouched.
+
+    Axes match on name and type: Timeline reassigns numeric ids on load, so
+    they are not stable across sessions or chunks.
+    """
+    from .view_metadata import clip_to_chunk
+
+    start = chunk['start_seconds']
+
+    def key(axis):
+        return (axis.get('axisName', ''), axis.get('axisType', ''))
+
+    merged = {}
+    order = []
+
+    def slot(axis):
+        axis_key = key(axis)
+        if axis_key not in merged:
+            order.append(axis_key)
+            merged[axis_key] = {**axis, 'annotationBlocks': [], '_displayed': []}
+        return merged[axis_key]
+
+    # Carry through everything, remembering which blocks this chunk displayed.
+    for axis in existing or []:
+        target = slot(axis)
+        for block in axis.get('annotationBlocks', []):
+            clipped = clip_to_chunk(block, chunk)
+            if clipped is None:
+                target['annotationBlocks'].append(block)
+            else:
+                target['_displayed'].append((block, clipped))
+
+    # Re-add what the chunk holds now.
+    for axis in incoming or []:
+        target = slot(axis)
+        target.update({
+            name: value for name, value in axis.items()
+            if name not in ('annotationBlocks', 'id')
+        })
+        for block in axis.get('annotationBlocks', []):
+            match = next(
+                (original for original, clipped in target['_displayed']
+                 if _same_block(block, original, clipped)),
+                None,
+            )
+            if match is not None:
+                # Unedited: keep the original, including any part outside
+                # this chunk that the user never saw.
+                target['_displayed'] = [
+                    pair for pair in target['_displayed'] if pair[0] is not match
+                ]
+                target['annotationBlocks'].append(match)
+            else:
+                target['annotationBlocks'].append({
+                    **block,
+                    'start': block['start'] + start,
+                    'end': block['end'] + start,
+                })
+
+    # Anything still in _displayed was shown and is now gone: the user
+    # deleted it, so it does not come back.
+    result = []
+    for index, axis_key in enumerate(order, start=1):
+        axis = merged[axis_key]
+        del axis['_displayed']
+        axis['annotationBlocks'].sort(key=lambda block: block['start'])
+        # load_annotation groups rows by id, so ids must be unique per axis.
+        axis['id'] = index
+        result.append(axis)
+    return result
+
+def resolve_chunk(manifest_id, chunk_index):
+    """Return (manifest, chunk) for a manifest id and index, or raise."""
+    # chunk_views imports from this module, so import inside the function.
+    from .chunk_views import manifest_directory
+    from .chunks import load_manifest
+
+    manifest = load_manifest(manifest_directory(), manifest_id)
+    chunks = manifest.get('chunks') or []
+    if chunk_index >= len(chunks):
+        raise ValueError('Chunk not found in that manifest.')
+    return manifest, chunks[chunk_index]
+
+def write_annotation_csv(file_path, annotation_list,
+                         bag_filename='', source_duration=None):
+    """Write atomically: the merge reads the file first, so a crash mid-write
+    must not truncate a set that was complete a moment ago.
+
+    bagFilename and sourceDuration repeat on every row. That is redundant, but
+    it keeps the file a plain flat table that Excel and pandas both read without
+    special handling, which is what the team already relies on.
+    """
+    duration_cell = '' if source_duration is None else repr(float(source_duration))
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w', newline='', encoding='utf-8',
+            dir=os.path.dirname(file_path),
+            prefix='.annotation-', suffix='.tmp', delete=False,
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+            writer = csv.DictWriter(temporary_file, fieldnames=[
+                'id', 'axisType', 'axisName', 'axisBooklistName',
+                'start', 'end', 'text',
+                'bagFilename', 'sourceDuration',
+            ])
+            writer.writeheader()
+            for axis in annotation_list:
+                for block in axis['annotationBlocks']:
+                    writer.writerow({
+                        'id': axis['id'],
+                        'axisType': axis.get('axisType', ''),
+                        'axisName': axis.get('axisName', ''),
+                        'axisBooklistName': axis.get('axisBooklistName', ''),
+                        'start': block['start'],
+                        'end': block['end'],
+                        'text': block.get('text', ''),
+                        'bagFilename': bag_filename or '',
+                        'sourceDuration': duration_cell,
+                    })
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, file_path)
+        temporary_path = None
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.unlink(temporary_path)
 
 @csrf_exempt
 @api_view(['POST'])
 def save_annotation(request):
-    if request.method == 'POST':
-        annotation_name = request.data.get('annotation_name')
-        annotation_data = request.data.get('annotation_data')
+    serializer = SaveAnnotationSerializer(data=request.data)
+    if not serializer.is_valid():
+        return JsonResponse(serializer.errors, status=400)
 
+    annotation_name = serializer.validated_data['annotation_name']
+    annotation_list = serializer.validated_data['annotation_data']
+    confirm_overwrite = serializer.validated_data['confirm_overwrite']
+    manifest_id = serializer.validated_data['manifest_id']
+    chunk_index = serializer.validated_data['chunk_index']
+    # NEW: pulled out alongside the others, purely so the names exist.
+    bag_filename = serializer.validated_data['bag_filename']
+    source_duration = serializer.validated_data['source_duration']
+
+    os.makedirs(ANNOTATION_PATH, exist_ok=True)
+    file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
+
+    chunk = None
+    manifest = None                                        
+    if manifest_id is not None:
         try:
-            annotation_list_str = json.dumps(annotation_data)
-            annotation_list = json.loads(annotation_list_str)
-        except json.JSONDecodeError:
-            return JsonResponse({'error': 'Invalid JSON format'}, status=400)
+            manifest, chunk = resolve_chunk(str(manifest_id), chunk_index)   
+        except FileNotFoundError:
+            return JsonResponse({'error': 'Chunk manifest not found.'}, status=404)
+        except (OSError, ValueError) as error:
+            return JsonResponse({'error': str(error)}, status=400)
 
-        # Save annotation data to a new CSV file
-        os.makedirs(ANNOTATION_PATH, exist_ok=True)
-        file_path = os.path.join(ANNOTATION_PATH, f'{annotation_name}.csv')
-
-        try:
-            with open(file_path, 'w', newline='') as csvfile:
-                fieldnames = ['id', 'axisType', 'axisName', 'axisBooklistName', 'start', 'end', 'text']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
-                writer.writeheader()
-                for annotation_entry in annotation_list:
-                    for block in annotation_entry['annotationBlocks']:
-                        writer.writerow({
-                            'id': annotation_entry['id'],
-                            'axisType': annotation_entry['axisType'],
-                            'axisName': annotation_entry['axisName'],
-                            'axisBooklistName': annotation_entry.get('axisBooklistName', ''),
-                            'start': block['start'],
-                            'end': block['end'],
-                            'text': block['text']
-                        })
-
-            return JsonResponse(
-                {'message': 'Annotation data saved successfully'},
-                status=200,
-            )
-        except Exception as e:
-            return JsonResponse({'error': str(e)}, status=500)
+    if chunk is None:
+        if not confirm_overwrite:
+            conflict = describe_existing_annotation(file_path, annotation_name)
+            if conflict is not None:
+                return JsonResponse(conflict, status=409)
     else:
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-    
+        if not confirm_overwrite:
+            conflict = describe_chunk_conflict(file_path, annotation_name, chunk)
+            if conflict is not None:
+                return JsonResponse(conflict, status=409)
+        try:
+            existing = load_annotation(f'{annotation_name}.csv', ANNOTATION_PATH)
+        except FileNotFoundError:
+            existing = []
+        except Exception:
+            return JsonResponse(
+                describe_chunk_conflict(file_path, annotation_name, chunk),
+                status=409,
+            )
+        
+        # the merge carries through every block outside the current chunk,
+        # which would restore the ones the load already discarded. It reads the
+        # file, not the response, so it has to apply the same rule itself.
+        from .view_metadata import clip_to_recording
+        existing = clip_to_recording(existing, manifest.get('duration_seconds'))
+        annotation_list = merge_chunk_annotations(existing, annotation_list, chunk)
+
+
+    # a save that does not carry the source must not erase what the file
+    # already recorded. Some save paths have no source to send, and silently
+    # blanking provenance is worse than never having recorded it.
+    if not bag_filename or source_duration is None:
+        try:
+            recorded = read_annotation_metadata(
+                f'{annotation_name}.csv', ANNOTATION_PATH,
+            )
+        except (FileNotFoundError, OSError, IOError):
+            recorded = {}
+        bag_filename = bag_filename or recorded.get('bag_filename', '')
+        if source_duration is None:
+            source_duration = recorded.get('source_duration')
+
+    try:
+        # NEW: the two keyword arguments. The call itself is otherwise unchanged.
+        write_annotation_csv(
+            file_path, annotation_list,
+            bag_filename=bag_filename,
+            source_duration=source_duration,
+        )
+    except Exception as error:
+        return JsonResponse({'error': str(error)}, status=500)
+
+    return JsonResponse(
+        {'message': 'Annotation data saved successfully'}, status=200,
+    )
+
 # testing the load_annotation function 
 @api_view(['GET'])
 def get_annotation(request):

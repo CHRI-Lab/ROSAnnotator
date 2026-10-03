@@ -113,8 +113,9 @@ OS file locks serialize identical work and release on worker termination. Unique
 temporary files plus atomic replacement publish results. Per-manifest chunk
 `result.json` files now summarize status; reusable media is stored under
 `views/<cache-key>/`. A different manifest ID can reuse the same processed views.
-Manifest generation itself remains UUID4, so recovery identity semantics have
-not changed in this refactor.
+Manifest generation uses a UUID5 derived from the bag, chunk size, and source
+identity, so the same input reuses one manifest and its recovery files. See
+[chunked annotation saving](chunk-annotation-saving.md).
 
 Legacy caches lack source/topic/options identity and are left on disk but are
 not reused automatically. The first load regenerates data into the new cache.
