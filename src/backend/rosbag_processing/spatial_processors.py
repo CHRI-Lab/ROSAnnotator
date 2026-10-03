@@ -24,6 +24,13 @@ def number_option(context, key, default, minimum, maximum):
     return value
 
 
+def integer_option(context, key, default, minimum, maximum):
+    value = context.options.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise ViewUnavailable(f'{key} must be an integer between {minimum} and {maximum}.')
+    return value
+
+
 class MultiTopicProcessor(DataViewProcessor):
     def check_availability(self, context):
         candidates = sorted(name for name, info in context.reader.topics.items()
@@ -34,7 +41,7 @@ class MultiTopicProcessor(DataViewProcessor):
         return sorted(set(topics))
 
     def preprocess(self, context, data):
-        limit = int(number_option(context, 'max_samples', 2000, 2, 20000))
+        limit = integer_option(context, 'max_samples', 2000, 2, 20000)
         tolerance = number_option(context, 'sample_tolerance_seconds', 0.5, 0, 60)
         used_hues = set()
         for entity in data['entities']:

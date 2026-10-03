@@ -68,9 +68,11 @@ class SpatialViewTests(unittest.TestCase):
         entries = [('/a', 'geometry_msgs/WrenchStamped', wrench()), ('/b', 'geometry_msgs/WrenchStamped', wrench())]
         result = self.run_processor(WrenchProcessor(), entries, {'topics': ['/b']})
         self.assertEqual(result['selected_topics'], ['/b'])
-        for options in [{'topics': ['/missing']}, {'max_samples': 1}, {'sample_tolerance_seconds': -1}]:
+        for options in [{'topics': ['/missing']}, {'max_samples': 1}, {'max_samples': 2.5},
+                        {'max_samples': 2.0}, {'sample_tolerance_seconds': -1}]:
             with self.assertRaises(ViewUnavailable):
                 self.run_processor(WrenchProcessor(), entries, options)
+
     def test_only_empty_wrench_topic_makes_view_unavailable(self):
         with self.assertRaises(ViewUnavailable):
             self.run_processor(WrenchProcessor(), [], extra_types={'/empty': ('geometry_msgs/WrenchStamped', 0)})
