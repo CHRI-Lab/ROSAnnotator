@@ -1,6 +1,7 @@
 import base64
 import csv
 import os
+import math
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -161,3 +162,42 @@ def load_annotation(annotation_filename, annotation_path='/app/datas/annotation/
         return annotations
     except Exception as e:
         raise IOError(f'Error loading annotation data: {str(e)}')
+
+def read_annotation_metadata(annotation_filename, annotation_path='/app/datas/annotation/'):
+    """Return the source recording an annotation file records, if any.
+
+    Both keys are optional: files written before this column existed carry
+    neither, which means "provenance unknown", not "mismatch". Only the first
+    data row is read, since the values repeat on every row.
+    """
+    file_path = os.path.join(annotation_path, f'{annotation_filename}')
+
+    if not os.path.exists(file_path):
+        raise FileNotFoundError('File not found')
+
+    try:
+        with open(file_path, 'r') as csvfile:
+            row = next(csv.DictReader(csvfile), None)
+    except Exception as e:
+        raise IOError(f'Error reading annotation metadata: {str(e)}')
+
+    if row is None:
+        return {}
+
+    metadata = {}
+
+    bag_filename = (row.get('bagFilename') or '').strip()
+    if bag_filename:
+        metadata['bag_filename'] = bag_filename
+
+    raw_duration = (row.get('sourceDuration') or '').strip()
+    if raw_duration:
+        try:
+            duration = float(raw_duration)
+        except ValueError:
+            pass
+        else:
+            if math.isfinite(duration) and duration > 0:
+                metadata['source_duration'] = duration
+
+    return metadata
