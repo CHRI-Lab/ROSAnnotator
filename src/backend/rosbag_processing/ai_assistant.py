@@ -9,6 +9,11 @@ from openai import APIConnectionError, APIStatusError, AuthenticationError, Open
 
 logger = logging.getLogger(__name__)
 
+ALL_DATA_VIEWS = (
+    "audio", "video", "transcript", "waveform", "annotations",
+    "statistics-annotations", "statistics-tiers", "codebook",
+)
+
 
 class RemoteAuthenticationError(RuntimeError):
     """The remote provider rejected its configured credentials."""
@@ -36,11 +41,19 @@ class AIAssistant(ABC):
         frameContext,
         codebookContext,
         timelineContext,
+        timelineScope=None,
+        selectedDataViews=None,
+        dataViewContexts=None,
     ):
         self.transcriptContext = transcriptContext
         self.frameContext = frameContext
         self.codebookContext = codebookContext
         self.timelineContext = timelineContext
+        self.timelineScope = timelineScope
+        self.selectedDataViews = tuple(
+            ALL_DATA_VIEWS if selectedDataViews is None else selectedDataViews
+        )
+        self.dataViewContexts = dataViewContexts or {}
         self.last_run_metadata = {}
 
     def respond(self, message, chatHistory=""):
@@ -50,6 +63,202 @@ class AIAssistant(ABC):
     def get_run_metadata(self):
         """Return safe provider metadata for the most recent response."""
         return self.last_run_metadata
+
+    @staticmethod
+    def _requests_timeline_change(message):
+        """Return whether a user asks for a machine-applied timeline edit."""
+        normalized_message = message.casefold()
+        action_words = (
+            "annotate", "label", "classify", "categorize", "tag",
+            "add", "create", "delete", "remove",
+        )
+        timeline_words = (
+            "timeline", "time axis", "timestamp", "time range",
+            "axis", "axi", "block", "annotation",
+        )
+        return any(word in normalized_message for word in action_words) and any(
+            word in normalized_message for word in timeline_words
+        )
+
+    @staticmethod
+    def _codebook_labels(codebook):
+        if isinstance(codebook, dict):
+            values = codebook.values()
+        elif isinstance(codebook, list):
+            values = (codebook,)
+        else:
+            return []
+        return list(
+            dict.fromkeys(
+                str(label).strip()
+                for labels in values
+                if isinstance(labels, list)
+                for label in labels
+                if str(label).strip()
+            )
+        )
+
+    def _codebook_for_message(self, message):
+        """Select the codebook categories named by the user's request."""
+        if not isinstance(self.codebookContext, dict):
+            return self.codebookContext
+
+        normalized_message = str(message or "").casefold()
+        category_terms = ()
+        if "attitude" in normalized_message:
+            category_terms = ("attitude",)
+        elif any(
+            term in normalized_message
+            for term in ("gesture", "body language", "visual")
+        ):
+            category_terms = ("gesture", "body language", "visual")
+        elif "request" in normalized_message:
+            category_terms = ("request",)
+
+        if not category_terms:
+            return self.codebookContext
+
+        selected_categories = {
+            category: labels
+            for category, labels in self.codebookContext.items()
+            if any(term in str(category).casefold() for term in category_terms)
+        }
+        return selected_categories or self.codebookContext
+
+    def _timeline_edits_enabled(self):
+        if self.timelineScope is None:
+            return True
+        return bool(
+            self.timelineScope.get("axis_ids")
+            or self.timelineScope.get("allow_new")
+        )
+
+    def _is_timeline_request(self, message):
+        if self._missing_required_data_views(message):
+            return False
+        if not self._timeline_edits_enabled():
+            return False
+        if self._requests_timeline_change(message):
+            return True
+        if self.timelineScope is None:
+            return False
+        normalized_message = str(message or "").casefold()
+        return any(
+            word in normalized_message
+            for word in (
+                "annotate",
+                "annotation",
+                "label",
+                "classify",
+                "classification",
+                "categorize",
+                "tag",
+                "delete",
+                "remove",
+                "clear",
+            )
+        )
+
+    def _missing_required_data_views(self, message):
+        """Return obvious evidence prerequisites omitted by the user."""
+        normalized = str(message or "").casefold()
+        missing = []
+        selected = set(self.selectedDataViews)
+        if any(word in normalized for word in (
+            "gesture", "body language", "facial expression", "visible", "video",
+        )) and "video" not in selected:
+            missing.append("video")
+        if any(word in normalized for word in (
+            "transcript", "utterance", "speech", "said", "speaker attitude",
+        )) and "transcript" not in selected:
+            missing.append("transcript")
+        if any(phrase in normalized for phrase in (
+            "codebook", "according to the codebook", "use the codes",
+        )) and "codebook" not in selected:
+            missing.append("codebook")
+        if any(word in normalized for word in (
+            "delete", "remove", "rename", "modify existing", "existing axis",
+        )) and not (
+            isinstance(self.timelineScope, dict)
+            and self.timelineScope.get("axis_ids")
+        ) and not selected.intersection({
+            "annotations", "statistics-annotations", "statistics-tiers"
+        }):
+            missing.append("annotations")
+        return list(dict.fromkeys(missing))
+
+    def _data_view_policy_prompt(self):
+        labels = {
+            "audio": "audio",
+            "transcript": "transcript",
+            "video": "video frames",
+            "waveform": "waveform",
+            "annotations": "annotations",
+            "statistics-annotations": "annotation statistics",
+            "statistics-tiers": "tier statistics",
+            "codebook": "codebook",
+        }
+        selected = [labels[view] for view in ALL_DATA_VIEWS if view in self.selectedDataViews]
+        omitted = [labels[view] for view in ALL_DATA_VIEWS if view not in self.selectedDataViews]
+        available_text = ", ".join(selected) if selected else "none"
+        omitted_text = ", ".join(omitted) if omitted else "none"
+        scoped_axis_ids = (
+            self.timelineScope.get("axis_ids", [])
+            if isinstance(self.timelineScope, dict) else []
+        )
+        axis_scope_text = (
+            "Separately selected timeline axes: "
+            + ", ".join(str(axis_id) for axis_id in scoped_axis_ids)
+            + ". Their supplied axis structure and annotation blocks are available "
+              "for actions on those axes, even when the full annotations data view is unselected."
+            if scoped_axis_ids else
+            "No existing timeline axes were separately selected."
+        )
+        return f"""AVAILABLE DATA POLICY
+Available selected data views: {available_text}.
+Unavailable or unselected data views: {omitted_text}.
+{axis_scope_text}
+
+Use only the selected data views and any separately selected axes described
+above. Do not assume access to omitted data and do not infer, fabricate, or
+guess missing evidence. Before answering or producing annotation actions,
+decide whether the available context is sufficient.
+A selected view is usable only to the extent that its supplied context contains
+inspectable evidence. A file path or availability flag alone is not evidence.
+
+If it is insufficient, do not return timeline or annotation actions. Reply in
+plain text using exactly this structure:
+INSUFFICIENT_DATA
+Missing data views: <comma-separated data views>
+Reason: <why the missing views are required>
+Request: Please select or provide <required data views> and try again.
+
+Absence of evidence in selected data is not evidence that an event did not occur."""
+
+    def _new_axis_allowed(self):
+        return self.timelineScope is None or self.timelineScope.get("allow_new") is True
+
+    def _timeline_scope_prompt(self):
+        if self.timelineScope is None:
+            return "Timeline scope: unrestricted."
+        axis_ids = self.timelineScope.get("axis_ids", [])
+        allow_new = self.timelineScope.get("allow_new") is True
+        if not axis_ids and not allow_new:
+            return (
+                "Timeline scope: none. Do not return timeline instructions or change "
+                "annotations. Reply conversationally in plain text."
+            )
+        if allow_new and not axis_ids:
+            return (
+                "Timeline scope: create one new axis. Return addAxi first, then target "
+                "that new axis ID in every addBlock step. Do not target any existing "
+                "axis."
+            )
+        return (
+            f"Timeline scope: existing axis IDs {axis_ids}; permission to create a "
+            f"new axis: {allow_new}. Only target those existing axes. Only use "
+            "addAxi when permission to create a new axis is true."
+        )
 
     @abstractmethod
     def _respond(self, message, chatHistory=""):
@@ -67,12 +276,18 @@ class RemoteAPI(AIAssistant):
         codebookContext,
         timelineContext,
         APIKey,
+        timelineScope=None,
+        selectedDataViews=None,
+        dataViewContexts=None,
     ):
         super().__init__(
             transcriptContext=transcriptContext,
             frameContext=frameContext,
             codebookContext=codebookContext,
             timelineContext=timelineContext,
+            timelineScope=timelineScope,
+            selectedDataViews=selectedDataViews,
+            dataViewContexts=dataViewContexts,
         )
         self.APIKey = APIKey
 
@@ -81,23 +296,75 @@ class RemoteAPI(AIAssistant):
             response_text = self._request_completion(message, chatHistory)
         except AuthenticationError as error:
             raise RemoteAuthenticationError from error
-        if self._requests_timeline_change(message):
-            self._validate_timeline_instruction(response_text)
+        if self._is_timeline_request(message):
+            response_text = self._repair_new_only_annotation(response_text, message)
+            self._validate_timeline_instruction(response_text, message)
         return response_text
 
-    @staticmethod
-    def _requests_timeline_change(message):
-        normalized_message = message.lower()
-        return any(
-            word in normalized_message
-            for word in ("annotate", "add", "create", "delete", "remove")
-        ) and any(
-            word in normalized_message
-            for word in ("timeline", "axis", "axi", "block", "annotation")
-        )
+    def _repair_new_only_annotation(self, response_text, message):
+        """Route model-produced blocks to a new axis when that is the only scope."""
+        if not (
+            isinstance(self.timelineScope, dict)
+            and self.timelineScope.get("allow_new") is True
+            and not self.timelineScope.get("axis_ids")
+        ):
+            return response_text
+        try:
+            json_start = response_text.find("{")
+            json_end = response_text.rfind("}")
+            instruction = json.loads(response_text[json_start : json_end + 1])
+        except (AttributeError, json.JSONDecodeError):
+            return response_text
+        steps = instruction.get("steps") if isinstance(instruction, dict) else None
+        if not isinstance(steps, list):
+            return response_text
+        add_blocks = [
+            step for step in steps
+            if isinstance(step, dict) and step.get("action") == "addBlock"
+        ]
+        if not add_blocks:
+            return response_text
 
-    @staticmethod
-    def _validate_timeline_instruction(response_text):
+        add_axis = next(
+            (
+                step for step in steps
+                if isinstance(step, dict) and step.get("action") == "addAxi"
+                and isinstance(step.get("parameters"), dict)
+            ),
+            None,
+        )
+        if add_axis is None:
+            new_axis_id = max(
+                (
+                    int(axis.get("id", axis.get("axisId")))
+                    for axis in self.timelineContext or []
+                    if isinstance(axis, dict)
+                    and isinstance(axis.get("id", axis.get("axisId")), int)
+                ),
+                default=0,
+            ) + 1
+            normalized_message = str(message or "").casefold()
+            axis_name = (
+                "Speaker Attitudes" if "attitude" in normalized_message
+                else "AI Annotations"
+            )
+            add_axis = {
+                "action": "addAxi",
+                "parameters": {
+                    "axisId": new_axis_id,
+                    "axisName": axis_name,
+                    "axistype": "Type-in",
+                },
+            }
+            steps.insert(0, add_axis)
+        new_axis_id = add_axis["parameters"].get("axisId")
+        for step in add_blocks:
+            parameters = step.get("parameters")
+            if isinstance(parameters, dict):
+                parameters["axisId"] = new_axis_id
+        return json.dumps(instruction, ensure_ascii=False)
+
+    def _validate_timeline_instruction(self, response_text, message=""):
         error_message = (
             "The remote model returned an invalid timeline instruction. "
             "No annotation changes were applied."
@@ -129,6 +396,16 @@ class RemoteAPI(AIAssistant):
             "deleteBlock": {"axisId": int, "blockIndex": int},
             "deleteAxi": {"axisId": int},
         }
+        selected_labels = self._codebook_labels(self._codebook_for_message(message))
+        normalized_message = str(message or "").casefold()
+        is_deletion_request = any(
+            word in normalized_message for word in ("delete", "remove", "clear")
+        )
+        requires_codebook_label = not is_deletion_request and bool(selected_labels) and any(
+            phrase in normalized_message
+            for phrase in ("according to", "attitude", "codebook")
+        )
+        add_block_count = 0
         for step in steps:
             if not isinstance(step, dict) or step.get("action") not in required_parameters:
                 raise RemoteResponseError(error_message)
@@ -141,32 +418,81 @@ class RemoteAPI(AIAssistant):
                     raise RemoteResponseError(error_message)
             if step["action"] == "addBlock" and parameters["end"] < parameters["start"]:
                 raise RemoteResponseError(error_message)
+            if step["action"] == "addBlock":
+                add_block_count += 1
+                if requires_codebook_label and parameters["text"] not in selected_labels:
+                    raise RemoteResponseError(
+                        "The remote model returned an annotation label that is not "
+                        "in the selected codebook. No annotation changes were applied."
+                    )
+        if requires_codebook_label and add_block_count == 0:
+            raise RemoteResponseError(
+                "The remote model did not return any codebook annotation blocks. "
+                "No annotation changes were applied."
+            )
 
     def _request_completion(self, message, chatHistory=""):
         client = OpenAI(api_key=self.APIKey)
-        timeline_context = json.dumps(self.timelineContext, indent=2)
-        selected_frames = self.frameContext[
-            0::max(1, len(self.frameContext) // 50)
-        ][:50]
+        timeline_available = bool(set(self.selectedDataViews).intersection({
+            "annotations", "statistics-annotations", "statistics-tiers",
+        })) or bool(
+            isinstance(self.timelineScope, dict)
+            and self.timelineScope.get("axis_ids")
+        )
+        timeline_context = (
+            json.dumps(self.timelineContext, indent=2)
+            if timeline_available else "Not selected."
+        )
+        selected_codebook = self._codebook_for_message(message)
+        allowed_labels = self._codebook_labels(selected_codebook)
+        scope_prompt = self._timeline_scope_prompt()
+        selected_frames = (
+            self.frameContext[0::max(1, len(self.frameContext) // 50)][:50]
+            if "video" in self.selectedDataViews else []
+        )
+        transcript_section = (
+            f"Here is the audio transcription:\n{self.transcriptContext}"
+            if "transcript" in self.selectedDataViews else ""
+        )
+        codebook_section = (
+            f"""Here is the Codebook predefined by user. When the request asks
+                    for codebook annotation, every addBlock text must be exactly one
+                    of these labels; do not use summaries or explanations:
+
+                    {selected_codebook}
+
+                    Allowed exact labels: {allowed_labels}"""
+            if "codebook" in self.selectedDataViews else "Codebook: Not selected."
+        )
+        data_view_policy = self._data_view_policy_prompt()
+        structured_view_context = json.dumps(
+            self.dataViewContexts, ensure_ascii=False, indent=2
+        )
 
         prompt = f"""
-        User want you based on the audio_transcript and video frames answer some qustion 
-        Now, based on this transcript and frames, answer the following question:
-
+        Answer the following request using only the selected data views and axes:
         {message}
-        If the question not relative with audio and video, you dont need to watch the following data.
-        Here is the audio transcription:
-        {self.transcriptContext}
-        Here is the video frames
+        {transcript_section}
         """
 
         system_prompt = f"""
                     You are an assistant that can manipulate timelines. Based on the audio transcript, here are the actions you can perform:
+
+                    {data_view_policy}
+
+                    SELECTED DATA VIEW CONTEXTS:
+                    {structured_view_context}
                     
                     1. Add a new `axi`: Method: `addAxi`, Parameters: `axisId` (integer),'axisName' (string),'axistype' (string).
                     2. Add a new `block`: Method: `addBlock`, Parameters: `axisId` (integer), `start` (float), `end` (float), `text` (string).
                     3. Delete a old 'block':Mthod:'deleteBlock', Parameters: `axisId` (integer), 'blockIndex' (integer).
                     4. Delete a old 'axi':Mthod:'deleteAxi', Parameters: `axisId` (integer).
+                    When a timeline block includes blockIndex, copy that exact
+                    value into deleteBlock. It is the block's position in the
+                    full timeline, even if only a selected time range is shown.
+                    "Delete annotations" or "delete all annotations" means delete
+                    blocks with deleteBlock while preserving their axes. Use deleteAxi
+                    only when the user explicitly asks to delete an axis or timeline.
                     When you need to perform multiple actions to complete the task, return the response in the following format:
                     {{
                       "type": "instruction",
@@ -206,9 +532,13 @@ class RemoteAPI(AIAssistant):
                     }}
 
                     axis Name are normally the topic of this axi.
+                    Every axis name must be unique. If creating multiple axes with
+                    the same topic, number them as "Topic 1", "Topic 2", and so on.
+                    Never reuse an existing axis name.
                     Remove axi could remove all blocks in the axi.
                     Axi type always equal "Type-in"
                     Always create steps, even there only one step.
+                    For timeline changes, return only one valid JSON object in the specified format.
                     The newest axi id will be current largest id+1.
                     Overlap with other block in one axi will lead to error.
                     For an annotation request, an axis alone is not a completed annotation.
@@ -217,14 +547,17 @@ class RemoteAPI(AIAssistant):
                     transcript timestamps for speech-based annotations and the
                     supplied video frames for visible gestures. Do not invent a
                     gesture when the frames do not show it.
+                    For attitude annotation, create one block per applicable utterance
+                    using that utterance's start and end timestamps. Do not create one
+                    large summary block across separate utterances.
                     If the response is a normal conversation, return the plain text as usual.
                     Here is the current Axi information, you can consider axiId based on this:
 
                     {timeline_context}
 
-                    Here is the Codebook predefined by user:
+                    {scope_prompt}
 
-                    {self.codebookContext}
+                    {codebook_section}
                     
                     Here is previous chat history between you and user:
 
@@ -233,6 +566,9 @@ class RemoteAPI(AIAssistant):
 
                     """
         request_parameters = {"model": "gpt-4o"}
+        if self._is_timeline_request(message):
+            # Timeline edits must be machine-readable for the frontend to apply.
+            request_parameters["response_format"] = {"type": "json_object"}
         messages = [
             {
                 "role": "system",
@@ -297,12 +633,18 @@ class LocalAI(AIAssistant):
         timelineContext,
         checkpointPath,
         model=None,
+        timelineScope=None,
+        selectedDataViews=None,
+        dataViewContexts=None,
     ):
         super().__init__(
             transcriptContext=transcriptContext,
             frameContext=frameContext,
             codebookContext=codebookContext,
             timelineContext=timelineContext,
+            timelineScope=timelineScope,
+            selectedDataViews=selectedDataViews,
+            dataViewContexts=dataViewContexts,
         )
         self.checkpointPath = checkpointPath
         self.baseURL = os.getenv("LOCAL_AI_BASE_URL", "http://local-llm:8080/v1")
@@ -312,25 +654,27 @@ class LocalAI(AIAssistant):
 
     def _respond(self, message, chatHistory=""):
         requests_visual_analysis = self._requests_visual_analysis(message)
-        if not self.supports_visual_annotation and requests_visual_analysis:
+        video_selected = "video" in self.selectedDataViews
+        if video_selected and not self.supports_visual_annotation and requests_visual_analysis:
             raise LocalInferenceError(
                 f"The selected local model ({self.model}) is text-only and cannot "
                 "perform gesture annotation or inspect video frames. Select a "
                 "vision-capable model or Remote for video-based annotation."
             )
-        if requests_visual_analysis and not self.frameContext:
+        if video_selected and requests_visual_analysis and not self.frameContext:
             raise LocalInferenceError(
                 "No video frames are available for visual annotation. Process "
                 "a video before requesting gesture annotation."
             )
 
-        is_timeline_request = self._requests_timeline_change(message)
+        is_timeline_request = self._is_timeline_request(message)
         is_auto_annotation = self._requests_auto_annotation(message)
-        if requests_visual_analysis and is_timeline_request:
+        if requests_visual_analysis and is_timeline_request and self._new_axis_allowed():
             return self._respond_visual_annotation(message, chatHistory)
         has_timestamped_segments = bool(self._transcript_segments())
         if (
             is_auto_annotation
+            and self._new_axis_allowed()
             and not requests_visual_analysis
             and has_timestamped_segments
             and (
@@ -381,7 +725,7 @@ class LocalAI(AIAssistant):
                 response_text = self._normalize_timeline_instruction(
                     response_text,
                     message,
-                    requires_new_axis=is_auto_annotation,
+                    requires_new_axis=is_auto_annotation and self._new_axis_allowed(),
                 )
             except LocalInferenceError:
                 logger.error(
@@ -593,24 +937,6 @@ class LocalAI(AIAssistant):
         return response_text
 
     @staticmethod
-    def _codebook_labels(codebook):
-        if isinstance(codebook, dict):
-            values = codebook.values()
-        elif isinstance(codebook, list):
-            values = (codebook,)
-        else:
-            return []
-        return list(
-            dict.fromkeys(
-                str(label).strip()
-                for labels in values
-                if isinstance(labels, list)
-                for label in labels
-                if str(label).strip()
-            )
-        )
-
-    @staticmethod
     def _is_none_label(label):
         normalized_label = str(label).casefold()
         return normalized_label in {"none", "no gesture", "gesture_none"} or (
@@ -665,7 +991,12 @@ class LocalAI(AIAssistant):
 
     def _build_request_system_prompt(self, message, chatHistory=""):
         """Add capability-specific guidance to the shared local prompt."""
-        prompt = self._build_system_prompt(message, chatHistory)
+        prompt = (
+            f"{self._data_view_policy_prompt()}\n\n"
+            f"SELECTED DATA VIEW CONTEXTS:\n"
+            f"{json.dumps(self.dataViewContexts, ensure_ascii=False, indent=2)}\n\n"
+            f"{self._build_system_prompt(message, chatHistory)}"
+        )
         if (
             not self.supports_visual_annotation
             or not self._requests_visual_analysis(message)
@@ -916,15 +1247,6 @@ TIMESTAMPED SEGMENTS:
         return response_text
 
     @staticmethod
-    def _requests_timeline_change(message):
-        normalized_message = message.lower()
-        action_words = ("annotate", "add", "create", "delete", "remove")
-        timeline_words = ("timeline", "axis", "axi", "block", "annotation")
-        return any(word in normalized_message for word in action_words) and any(
-            word in normalized_message for word in timeline_words
-        )
-
-    @staticmethod
     def _requests_code_selection(message):
         normalized_message = message.lower()
         code_words = ("code", "codebook", "label", "classify", "categorize")
@@ -957,7 +1279,10 @@ TIMESTAMPED SEGMENTS:
     @staticmethod
     def _requests_auto_annotation(message):
         normalized_message = message.lower()
-        return "annotate" in normalized_message and any(
+        if any(word in normalized_message for word in ("delete", "remove", "clear")):
+            return False
+        annotation_words = ("annotate", "label", "classify", "categorize", "tag")
+        return any(word in normalized_message for word in annotation_words) and any(
             phrase in normalized_message
             for phrase in (
                 "all ",
@@ -982,33 +1307,6 @@ TIMESTAMPED SEGMENTS:
         ):
             return "Participant Gestures"
         return "Auto Annotation"
-
-    def _codebook_for_message(self, message):
-        """Select relevant categories while retaining combined codebook support."""
-        if not isinstance(self.codebookContext, dict):
-            return self.codebookContext
-
-        normalized_message = str(message or "").casefold()
-        category_terms = ()
-        if "attitude" in normalized_message:
-            category_terms = ("attitude",)
-        elif any(
-            term in normalized_message
-            for term in ("gesture", "body language", "visual")
-        ):
-            category_terms = ("gesture", "body language", "visual")
-        elif "request" in normalized_message:
-            category_terms = ("request",)
-
-        if not category_terms:
-            return self.codebookContext
-
-        selected_categories = {
-            category: labels
-            for category, labels in self.codebookContext.items()
-            if any(term in str(category).casefold() for term in category_terms)
-        }
-        return selected_categories or self.codebookContext
 
     @staticmethod
     def _is_request_candidate(text):
@@ -1141,7 +1439,11 @@ TIMESTAMPED SEGMENTS:
                 matches_axis = False
             if not matches_axis:
                 continue
-            for block_index, block in enumerate(axis.get("blocks", [])):
+            block_key = (
+                "blocks" if isinstance(axis.get("blocks"), list)
+                else "annotationBlocks"
+            )
+            for block_index, block in enumerate(axis.get(block_key, [])):
                 if not isinstance(block, dict):
                     continue
                 try:
@@ -1150,7 +1452,12 @@ TIMESTAMPED SEGMENTS:
                 except (TypeError, ValueError):
                     continue
                 if start <= point_time <= end:
-                    return block_index
+                    original_index = block.get("blockIndex")
+                    return (
+                        original_index
+                        if type(original_index) is int and original_index >= 0
+                        else block_index
+                    )
         return None
 
     @staticmethod
@@ -1500,17 +1807,17 @@ PREVIOUS CHAT HISTORY:
 {history}
 """
 
-        if self._requests_timeline_change(message):
+        if self._is_timeline_request(message):
             timeline_context = json.dumps(
                 self.timelineContext, ensure_ascii=False, indent=2
             )
             next_axis_id = max(self._current_axis_ids(), default=0) + 1
             return f"""You control the qualitative annotation timeline.
-Complete the entire requested auto-annotation task. Create exactly one new
-axis unless the user explicitly names an existing axis. For a request that only asks
-for an axis, return one addAxi step and do not add blocks. Otherwise return the
-addAxi step first, followed by one addBlock step for every applicable utterance
-or span in the full transcript. Do not stop after the first match.
+Complete the entire requested auto-annotation task within the timeline scope below.
+When new-axis permission is false, do not return addAxi and put changes only on the
+listed existing axis IDs. When new-axis permission is true and no existing axis is
+selected, return addAxi first and then addBlock steps for the new axis. Include one
+addBlock step for every applicable utterance or span. Do not stop after the first match.
 
 Use the SRT timestamps as evidence and convert HH:MM:SS,mmm timestamps to
 seconds for block start and end. A request utterance asks another participant
@@ -1525,6 +1832,8 @@ CODEBOOK:
 CURRENT TIMELINE:
 {timeline_context}
 
+{self._timeline_scope_prompt()}
+
 Return only one valid JSON object.
 The object must have type "instruction" and a steps array. Allowed steps are:
 - addAxi with integer axisId, string axisName, and axistype "Type-in".
@@ -1533,7 +1842,17 @@ The object must have type "instruction" and a steps array. Allowed steps are:
 - deleteBlock with integer axisId and integer blockIndex.
 - deleteAxi with integer axisId.
 
+When a CURRENT TIMELINE block includes blockIndex, copy that exact value into
+deleteBlock. It is the block's position in the full timeline, even when the
+current context contains only a selected time range.
+
+"Delete annotations" or "delete all annotations" means return deleteBlock steps
+for the matching blocks and preserve the axes. Return deleteAxi only when the user
+explicitly asks to delete an axis or timeline.
+
 The next unused axisId is {next_axis_id}. Use it for the new axis and every block.
+Every new axis name must be unique. If multiple axes share a topic, number them
+as "Topic 1", "Topic 2", and so on. Never reuse a current timeline name.
 For addBlock, use an exact codebook label as text when the user asks for
 codebook annotation; otherwise use concise transcript-grounded text. Use the same axisId
 for its blocks. Do not create overlapping blocks on one axis. Include all

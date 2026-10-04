@@ -3,7 +3,9 @@ from django.core.cache import cache
 from django.conf import settings
 from uuid import UUID, uuid4
 import json
+import math
 import os
+import re
 import base64
 import math
 from pathlib import Path
@@ -44,7 +46,7 @@ ROSBAG_DATA_DIR = '/app/datas/rosbag-data/'
 PROCESSED_DATA_DIR = '/app/processed_data'
 
 
-def frames_for_video(video_path, max_frames=50):
+def frames_for_video(video_path, max_frames=50, start_seconds=None, end_seconds=None):
     """Sample the selected processed MP4, never a different request's global frames."""
     if not isinstance(video_path, str) or not video_path or Path(video_path).is_absolute():
         raise ValueError('Invalid video path.')
@@ -60,8 +62,18 @@ def frames_for_video(video_path, max_frames=50):
         frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
         if frame_count <= 0:
             raise ValueError('Selected video has no readable frames.')
-        count = min(frame_count, max_frames)
-        positions = sorted({round(index * (frame_count - 1) / max(count - 1, 1))
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        if start_seconds is not None and end_seconds is not None and fps > 0:
+            first_frame = max(0, math.floor(start_seconds * fps))
+            last_frame = min(frame_count - 1, math.ceil(end_seconds * fps) - 1)
+        else:
+            first_frame, last_frame = 0, frame_count - 1
+        if last_frame < first_frame:
+            raise ValueError('Selected time range has no readable video frames.')
+        available_count = last_frame - first_frame + 1
+        count = min(available_count, max_frames)
+        positions = sorted({round(first_frame + index * (last_frame - first_frame) /
+                                  max(count - 1, 1))
                             for index in range(count)})
         frames = []
         for position in positions:
@@ -77,6 +89,61 @@ def frames_for_video(video_path, max_frames=50):
         return frames
     finally:
         capture.release()
+
+
+def validate_context_time_range(value, duration):
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {'start', 'end'}:
+        raise ValueError('time_range must contain start and end seconds.')
+    start, end = value.get('start'), value.get('end')
+    if (type(start) not in (int, float) or type(end) not in (int, float)
+            or not math.isfinite(start) or not math.isfinite(end)):
+        raise ValueError('Time range boundaries must be finite seconds.')
+    if type(duration) not in (int, float) or not math.isfinite(duration) or duration <= 0:
+        raise ValueError('A valid current chunk duration is required.')
+    if start < 0 or start >= end or end > duration:
+        raise ValueError('Select a time range within the current chunk.')
+    return float(start), float(end)
+
+
+def transcript_for_time_range(transcript, start, end):
+    """Keep timestamped transcript entries overlapping a chunk-relative range."""
+    entries = []
+    matches = list(re.finditer(r'\[(\d+):(\d{2})\]', transcript or ''))
+    for index, match in enumerate(matches):
+        entry_start = int(match.group(1)) * 60 + int(match.group(2))
+        entry_end = (
+            int(matches[index + 1].group(1)) * 60 + int(matches[index + 1].group(2))
+            if index + 1 < len(matches) else math.inf
+        )
+        if entry_start < end and entry_end > start:
+            boundary = matches[index + 1].start() if index + 1 < len(matches) else len(transcript)
+            entries.append(transcript[match.start():boundary].strip())
+    return '\n'.join(entries)
+
+
+def timeline_for_time_range(timeline, start, end):
+    if not isinstance(timeline, list):
+        return timeline
+    filtered = []
+    for axis in timeline:
+        if not isinstance(axis, dict):
+            continue
+        block_key = 'blocks' if isinstance(axis.get('blocks'), list) else 'annotationBlocks'
+        blocks = axis.get(block_key, [])
+        # Deletion instructions are applied to the full client-side block array.
+        # Keep that position when exposing only the selected range to the model.
+        selected = [
+            {**block, 'blockIndex': block_index}
+            for block_index, block in enumerate(blocks)
+            if isinstance(block, dict)
+            and type(block.get('start')) in (int, float)
+            and type(block.get('end')) in (int, float)
+            and block['start'] < end and block['end'] > start
+        ]
+        filtered.append({**axis, block_key: selected})
+    return filtered
 
 
 @api_view(['POST'])
@@ -121,11 +188,50 @@ def build_ai_record(
     actual_mode,
     response_text,
     context_routes,
+    selected_data_views=None,
+    timeline_scope=None,
+    timeline_context=None,
+    selected_range=None,
+    current_chunk=None,
 ):
     """Build a secret-free record of one successful model interaction."""
     provider_metadata = assistant.get_run_metadata()
     if not isinstance(provider_metadata, dict):
         provider_metadata = {}
+
+    scope_axis_ids = (
+        timeline_scope.get("axis_ids", [])
+        if isinstance(timeline_scope, dict) else []
+    )
+    axes_by_id = {
+        axis.get("id", axis.get("axisId")): axis
+        for axis in (timeline_context if isinstance(timeline_context, list) else [])
+        if isinstance(axis, dict)
+    }
+    selected_timelines = [
+        {
+            "axis_id": axis_id,
+            "axis_name": axes_by_id.get(axis_id, {}).get("axisName"),
+        }
+        for axis_id in scope_axis_ids
+    ]
+    chunk = current_chunk or {
+        "index": 0,
+        "start_seconds": 0.0,
+        "end_seconds": None,
+        "is_chunked": False,
+    }
+    recorded_range = None
+    if selected_range is not None:
+        start, end = selected_range
+        offset = chunk["start_seconds"]
+        recorded_range = {
+            "chunk_relative_seconds": {"start": start, "end": end},
+            "whole_video_seconds": {
+                "start": offset + start,
+                "end": offset + end,
+            },
+        }
 
     return {
         "schema_version": 1,
@@ -144,6 +250,15 @@ def build_ai_record(
         "parameters": provider_metadata.get("parameters", {}),
         "prompts": provider_metadata.get("prompts", {}),
         "ai_response": response_text,
+        "request_options": {
+            "selected_data_types": list(selected_data_views or []),
+            "selected_timelines": selected_timelines,
+            "allow_new_timeline": bool(
+                isinstance(timeline_scope, dict) and timeline_scope.get("allow_new")
+            ),
+            "selected_time_range": recorded_range,
+            "current_chunk": chunk,
+        },
     }
 
 
@@ -324,9 +439,110 @@ def gpt_chat(request):
         audio_transcript = data.get("audio_transcript")
         Axiinfo = data.get("Axeinfo")
         Codebook = data.get("Codebook")
+        allowed_data_views = {
+            "audio", "video", "transcript", "waveform", "annotations",
+            "statistics-annotations", "statistics-tiers", "codebook",
+        }
+        raw_selected_data_views = data.get("selected_data_views")
+        selected_data_views = (
+            list(allowed_data_views)
+            if raw_selected_data_views is None
+            else raw_selected_data_views
+        )
+        if (
+            not isinstance(selected_data_views, list)
+            or any(
+                not isinstance(view_id, str) or view_id not in allowed_data_views
+                for view_id in selected_data_views
+            )
+        ):
+            return JsonResponse({"error": "Invalid selected data views"}, status=400)
+        selected_data_views = list(dict.fromkeys(selected_data_views))
+        selected_data_view_set = set(selected_data_views)
+        raw_data_view_contexts = data.get("data_view_contexts", {})
+        if not isinstance(raw_data_view_contexts, dict):
+            return JsonResponse({"error": "Invalid data view contexts"}, status=400)
+        def safe_view_payload(value):
+            if isinstance(value, dict):
+                return {
+                    key: safe_view_payload(item)
+                    for key, item in value.items()
+                    if key != "artifacts"
+                }
+            if isinstance(value, list):
+                return [safe_view_payload(item) for item in value]
+            return value if isinstance(value, (str, int, float, bool)) or value is None else str(value)
+
+        data_view_contexts = {
+            view_id: safe_view_payload(payload)
+            for view_id, payload in raw_data_view_contexts.items()
+            if view_id in selected_data_view_set and view_id != "codebook"
+        }
+        timeline_view_ids = {
+            "annotations", "statistics-annotations", "statistics-tiers"
+        }
+        timeline_selected = bool(selected_data_view_set & timeline_view_ids)
+        timeline_scope = data.get("timeline_scope")
+        if timeline_scope is not None:
+            if not isinstance(timeline_scope, dict):
+                return JsonResponse({"error": "Invalid timeline scope"}, status=400)
+            raw_axis_ids = timeline_scope.get("axis_ids", [])
+            allow_new = timeline_scope.get("allow_new", False)
+            if (
+                not isinstance(raw_axis_ids, list)
+                or any(isinstance(value, bool) or not isinstance(value, int) for value in raw_axis_ids)
+                or not isinstance(allow_new, bool)
+            ):
+                return JsonResponse({"error": "Invalid timeline scope"}, status=400)
+            timeline_scope = {
+                "axis_ids": list(dict.fromkeys(raw_axis_ids)),
+                "allow_new": allow_new,
+            }
+        scope_axis_ids = set(
+            timeline_scope.get("axis_ids", [])
+            if isinstance(timeline_scope, dict) else []
+        )
+        if not timeline_selected:
+            # A selected axis is an explicit, narrow action context. Enforce
+            # that scope server-side even if a client sends additional axes.
+            Axiinfo = [
+                axis for axis in (Axiinfo if isinstance(Axiinfo, list) else [])
+                if isinstance(axis, dict)
+                and axis.get("id", axis.get("axisId")) in scope_axis_ids
+            ]
+        timeline_context_available = timeline_selected or bool(scope_axis_ids)
         assistant_mode = data.get("assistant_mode", "remote")
         context_routes = data.get("context_routes", {})
         fallback_consent = data.get("fallback_consent")
+        try:
+            selected_range = validate_context_time_range(
+                data.get('time_range'), data.get('context_duration'),
+            )
+        except ValueError as error:
+            return JsonResponse({'error': str(error)}, status=400)
+        raw_current_chunk = data.get("current_chunk")
+        current_chunk = None
+        if raw_current_chunk is not None:
+            if not isinstance(raw_current_chunk, dict):
+                return JsonResponse({"error": "Invalid current chunk"}, status=400)
+            chunk_index = raw_current_chunk.get("index")
+            chunk_start = raw_current_chunk.get("start_seconds")
+            chunk_end = raw_current_chunk.get("end_seconds")
+            is_chunked = raw_current_chunk.get("is_chunked")
+            if (
+                type(chunk_index) is not int or chunk_index < 0
+                or isinstance(chunk_start, bool) or not isinstance(chunk_start, (int, float))
+                or isinstance(chunk_end, bool) or not isinstance(chunk_end, (int, float))
+                or chunk_start < 0 or chunk_end <= chunk_start
+                or type(is_chunked) is not bool
+            ):
+                return JsonResponse({"error": "Invalid current chunk"}, status=400)
+            current_chunk = {
+                "index": chunk_index,
+                "start_seconds": float(chunk_start),
+                "end_seconds": float(chunk_end),
+                "is_chunked": is_chunked,
+            }
         requested_mode = assistant_mode
         accepted_local_to_remote = (
             isinstance(fallback_consent, dict)
@@ -348,8 +564,8 @@ def gpt_chat(request):
 
         if not message:
             return JsonResponse({"error": "No message provided"}, status=400)
-        if not audio_transcript:
-            return JsonResponse({"error": "No audio transcript provided"}, status=400)
+        if "transcript" in selected_data_view_set and not audio_transcript:
+            return JsonResponse({"error": "Selected transcript data is unavailable"}, status=400)
         if assistant_mode not in {"remote", "local"}:
             return JsonResponse({"error": "Invalid assistant mode"}, status=400)
         if not isinstance(context_routes, dict) or any(
@@ -357,28 +573,58 @@ def gpt_chat(request):
         ):
             return JsonResponse({"error": "Invalid context routes"}, status=400)
 
-        selected_video_path = data.get('video_path')
+        selected_video_path = (
+            data.get('video_path') if "video" in selected_data_view_set else None
+        )
         try:
             request_frames = (
-                frames_for_video(selected_video_path)
+                frames_for_video(selected_video_path, start_seconds=selected_range[0],
+                                 end_seconds=selected_range[1])
+                if selected_video_path is not None and selected_range is not None
+                else frames_for_video(selected_video_path)
                 if selected_video_path is not None else context_frames
             )
         except ValueError as error:
             return JsonResponse({'error': str(error)}, status=400)
 
+        if selected_range is not None:
+            start, end = selected_range
+            if "transcript" in selected_data_view_set:
+                audio_transcript = transcript_for_time_range(audio_transcript, start, end)
+            if timeline_context_available:
+                Axiinfo = timeline_for_time_range(Axiinfo, start, end)
+            if "transcript" in selected_data_view_set and not audio_transcript:
+                return JsonResponse(
+                    {'error': 'No transcript data exists in the selected time range.'},
+                    status=400,
+                )
+
         common_context = {
-            "transcriptContext": audio_transcript,
-            "frameContext": request_frames,
-            "codebookContext": Codebook,
-            "timelineContext": Axiinfo,
+            "transcriptContext": audio_transcript if "transcript" in selected_data_view_set else "",
+            "frameContext": request_frames if "video" in selected_data_view_set else [],
+            "codebookContext": Codebook if "codebook" in selected_data_view_set else {},
+            "timelineContext": Axiinfo if timeline_context_available else [],
         }
+        if raw_selected_data_views is not None:
+            common_context["selectedDataViews"] = selected_data_views
+            common_context["dataViewContexts"] = data_view_contexts
+        has_timeline_scope = bool(scope_axis_ids) or bool(
+            isinstance(timeline_scope, dict) and timeline_scope.get("allow_new")
+        )
+        if not selected_data_views and not has_timeline_scope:
+            # A confirmed empty selection is prompt-only: do not expose axis IDs
+            # or grant model-generated timeline changes without evidence.
+            common_context["timelineScope"] = {"axis_ids": [], "allow_new": False}
+        elif timeline_scope is not None:
+            common_context["timelineScope"] = timeline_scope
+        request_history = conversation_history if selected_data_views or has_timeline_scope else ""
         if assistant_mode == "local":
             assistant = create_local_ai(
                 **common_context,
                 checkpointPath=os.getenv("LOCAL_AI_CHECKPOINT_PATH", ""),
             )
             try:
-                response_text = assistant.respond(message, conversation_history)
+                response_text = assistant.respond(message, request_history)
             except LocalInferenceError as error:
                 remote_configured = bool(openai_api_key)
                 error_message = str(error) or "The local language model is not connected."
@@ -411,7 +657,7 @@ def gpt_chat(request):
                     **common_context,
                     APIKey=openai_api_key,
                 )
-                response_text = assistant.respond(message, conversation_history)
+                response_text = assistant.respond(message, request_history)
             except RemoteAuthenticationError:
                 return JsonResponse(
                     {
@@ -456,6 +702,11 @@ def gpt_chat(request):
             actual_mode=assistant_mode,
             response_text=response_text,
             context_routes=context_routes,
+            selected_data_views=selected_data_views,
+            timeline_scope=timeline_scope,
+            timeline_context=Axiinfo,
+            selected_range=selected_range,
+            current_chunk=current_chunk,
         )
         return JsonResponse(
             {

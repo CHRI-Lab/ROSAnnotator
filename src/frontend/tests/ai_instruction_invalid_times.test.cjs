@@ -106,3 +106,88 @@ test('a model block ending exactly at duration is accepted', () => {
     text: 'Model proposal',
   });
 });
+
+test('AI-created axes with the same proposed name receive numeric suffixes', () => {
+  const { applyAIInstruction } = loadAIInstructionHelpers();
+  const instruction = {
+    type: 'instruction',
+    steps: [1, 2, 3].map((axisId) => ({
+      action: 'addAxi',
+      parameters: { axisId, axisName: "Speaker's attitude", axistype: 'Type-in' },
+    })),
+  };
+
+  const result = applyAIInstruction([], instruction, 60);
+
+  assert.deepEqual(
+    normalize(result.map((axis) => axis.axisName)),
+    ["Speaker's attitude 1", "Speaker's attitude 2", "Speaker's attitude 3"],
+  );
+});
+
+test('AI-created axis avoids an existing name case-insensitively', () => {
+  const { applyAIInstruction } = loadAIInstructionHelpers();
+  const existing = [{
+    id: 1,
+    type: 'Type-in',
+    axisName: "Speaker's Attitude",
+    blocks: [],
+  }];
+  const instruction = {
+    type: 'instruction',
+    steps: [{
+      action: 'addAxi',
+      parameters: { axisId: 2, axisName: "speaker's attitude", axistype: 'Type-in' },
+    }],
+  };
+
+  const result = applyAIInstruction(existing, instruction, 60);
+
+  assert.equal(result[1].axisName, "speaker's attitude 1");
+});
+
+test('AI-created axis IDs are remapped when they collide with existing axes', () => {
+  const { applyAIInstruction, remapAIInstructionAxisIds } = loadAIInstructionHelpers();
+  const existing = [
+    { id: 1, type: 'Type-in', axisName: 'Unknown Speaker', blocks: [
+      { start: 0, end: 7.8, text: 'Existing transcript' },
+    ] },
+    { id: 2, type: 'Type-in', axisName: 'SPEAKER_00', blocks: [] },
+    { id: 3, type: 'Type-in', axisName: 'SPEAKER_01', blocks: [] },
+  ];
+  const instruction = {
+    type: 'instruction',
+    steps: [
+      { action: 'addAxi', parameters: {
+        axisId: 1, axisName: 'Speech Attitude', axistype: 'Type-in',
+      } },
+      { action: 'addBlock', parameters: {
+        axisId: 1, start: 0, end: 7.8, text: 'ATTITUDE_NEUTRAL',
+      } },
+    ],
+  };
+
+  const remapped = remapAIInstructionAxisIds(existing, instruction);
+  const result = applyAIInstruction(existing, remapped, 60);
+
+  assert.equal(remapped.steps[0].parameters.axisId, 4);
+  assert.equal(remapped.steps[1].parameters.axisId, 4);
+  assert.equal(result.length, 4);
+  assert.equal(result[0].blocks.length, 1);
+  assert.equal(result[3].axisName, 'Speech Attitude');
+  assert.deepEqual(normalize(result[3].blocks), [
+    { start: 0, end: 7.8, text: 'ATTITUDE_NEUTRAL' },
+  ]);
+});
+
+test('manual axis names detect trimmed case-insensitive duplicates', () => {
+  const { isDuplicateAxisName } = loadAIInstructionHelpers();
+  const axes = [
+    { id: 1, axisName: 'Speaker Attitude' },
+    { id: 2, axisName: 'Notes' },
+  ];
+
+  assert.equal(isDuplicateAxisName(axes, 2, ' speaker attitude '), true);
+  assert.equal(isDuplicateAxisName(axes, 1, 'Speaker Attitude'), false);
+  assert.equal(isDuplicateAxisName(axes, 2, 'Different name'), false);
+});

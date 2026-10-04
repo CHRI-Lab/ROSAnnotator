@@ -31,7 +31,7 @@ import {
   formatAutosaveTimestamp,
 } from "../Autosave/autosaveUtils";
 import { AIInstruction, AIRecord } from "../../types/aiRecords";
-import { applyAIInstruction } from "./aiInstruction";
+import { applyAIInstruction, isDuplicateAxisName } from "./aiInstruction";
 
 let globalAxisId = 1;
 
@@ -528,6 +528,12 @@ const Timeline: React.FC<TimelineProps> = ({
   };
 
   const handleNameChange = (axisId: number, axisName: string) => {
+    if (isDuplicateAxisName(axes, axisId, axisName)) {
+      setError(`An axis named "${axisName.trim()}" already exists. Use a unique name.`);
+      setIsErrorDialogOpen(true);
+      return;
+    }
+    setError("");
     setAxes((axes) =>
       axes.map((axis) => {
         if (axis.id === axisId) {

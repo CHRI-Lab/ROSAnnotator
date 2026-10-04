@@ -682,6 +682,54 @@ class AIAssistantTests(SimpleTestCase):
             ],
         )
 
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_local_delete_block_uses_full_index_from_filtered_context(
+        self, openai_class
+    ):
+        response_message = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "deleteBlock",
+                        "parameters": {"axisId": 99, "blockIndex": 0},
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = (
+            SimpleNamespace(
+                model="qwen2.5-0.5b-instruct-q4_k_m",
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=response_message))
+                ],
+            )
+        )
+        contexts = {
+            **self.contexts,
+            "timelineContext": [
+                {
+                    "id": 7,
+                    "axisName": "Participant Requests",
+                    "blocks": [
+                        {
+                            "start": 12.0,
+                            "end": 14.0,
+                            "text": "Selected annotation",
+                            "blockIndex": 1,
+                        }
+                    ],
+                }
+            ],
+        }
+        assistant = QwenLocalAI(checkpointPath="/models/local.gguf", **contexts)
+
+        result = json.loads(
+            assistant.respond("Delete block at 12s on axis participant requests")
+        )
+
+        self.assertEqual(result["steps"][0]["parameters"]["blockIndex"], 1)
+
     def test_repeated_auto_annotation_reuses_axis_and_skips_existing_blocks(self):
         contexts = {
             **self.contexts,

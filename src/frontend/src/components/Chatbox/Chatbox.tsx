@@ -8,9 +8,20 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
 import MenuItem from "@mui/material/MenuItem";
+import Checkbox from "@mui/material/Checkbox";
+import ListItemText from "@mui/material/ListItemText";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AssistantRequestOptions } from "../../types/aiRecords";
+import {
+  AssistantDataViewId,
+  AssistantDataViewOption,
+  AssistantRequestOptions,
+} from "../../types/aiRecords";
+import {
+  AssistantTimeRange,
+  formatChunkTime,
+  validateChunkTimeRange,
+} from "./timeRange";
 import {
   AssistantMode,
   AssistantReply,
@@ -27,6 +38,9 @@ type ChatMessage = {
 };
 
 type ChatboxProps = {
+  duration: number;
+  axes: Array<{ id: number; axisName?: string }>;
+  availableDataViews: AssistantDataViewOption[];
   onSendMessage: (
     message: string,
     assistantRouting: AssistantRouting,
@@ -39,6 +53,9 @@ type PendingFallback = {
   reason: string;
   from: "local" | "remote";
   to: "local" | "remote";
+  timeRange: AssistantTimeRange;
+  timelineScope: { axisIds: number[]; allowNew: boolean };
+  selectedDataViews: AssistantDataViewId[];
 };
 
 const ASSISTANT_ROUTING_STORAGE_KEY = "rosannotator-assistant-routing";
@@ -70,7 +87,14 @@ const formatAssistantMode = (mode: AssistantMode | undefined) => {
   return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
-const Chatbox = ({ onSendMessage }: ChatboxProps) => {
+const NEW_TIMELINE_VALUE = "new";
+
+const Chatbox = ({
+  onSendMessage,
+  duration,
+  axes,
+  availableDataViews,
+}: ChatboxProps) => {
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [initialAssistantRouting] = useState(loadAssistantRouting);
@@ -82,6 +106,20 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
   );
   const [pendingFallback, setPendingFallback] =
     useState<PendingFallback | null>(null);
+  const [rangeStart, setRangeStart] = useState("00:00");
+  const [rangeEnd, setRangeEnd] = useState(() => formatChunkTime(duration));
+  const [timelineSelection, setTimelineSelection] = useState<string[]>([]);
+  const [selectedDataViews, setSelectedDataViews] = useState<AssistantDataViewId[]>(
+    () => availableDataViews.map((view) => view.id),
+  );
+  const [confirmEmptyDataViews, setConfirmEmptyDataViews] = useState(false);
+
+  useEffect(() => {
+    setRangeStart("00:00");
+    setRangeEnd(formatChunkTime(duration));
+  }, [duration]);
+
+  const timeSelection = validateChunkTimeRange(rangeStart, rangeEnd, duration);
 
   useEffect(() => {
     if (!hasAssistantSelection) {
@@ -111,19 +149,34 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
     });
   };
 
-  const handleSendMessage = () => {
-    if (message.trim() !== "") {
+  const submitMessage = (submittedDataViews: AssistantDataViewId[]) => {
+    if (message.trim() !== "" && timeSelection.range) {
       const submittedMessage = message;
+      const submittedRange = timeSelection.range;
+      const submittedTimelineScope = {
+        axisIds: timelineSelection
+          .filter((value) => value !== NEW_TIMELINE_VALUE)
+          .map(Number)
+          .filter(Number.isFinite),
+        allowNew: timelineSelection.includes(NEW_TIMELINE_VALUE),
+      };
       const newMessage: ChatMessage = { sender: "user", text: message };
       setChatHistory([...chatHistory, newMessage]);
 
-      onSendMessage(submittedMessage, assistantRouting).then((assistantResponse) => {
+      onSendMessage(submittedMessage, assistantRouting, {
+        timeRange: submittedRange,
+        timelineScope: submittedTimelineScope,
+        selectedDataViews: submittedDataViews,
+      }).then((assistantResponse) => {
         if (assistantResponse.canFallbackToRemote) {
           setPendingFallback({
             message: submittedMessage,
             reason: assistantResponse.text,
             from: "local",
             to: "remote",
+            timeRange: submittedRange,
+            timelineScope: submittedTimelineScope,
+            selectedDataViews: submittedDataViews,
           });
           return;
         }
@@ -133,6 +186,9 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
             reason: assistantResponse.text,
             from: "remote",
             to: "local",
+            timeRange: submittedRange,
+            timelineScope: submittedTimelineScope,
+            selectedDataViews: submittedDataViews,
           });
           return;
         }
@@ -148,6 +204,15 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
 
       setMessage(""); 
     }
+  };
+
+  const handleSendMessage = () => {
+    if (!message.trim() || !timeSelection.range) return;
+    if (selectedDataViews.length === 0) {
+      setConfirmEmptyDataViews(true);
+      return;
+    }
+    submitMessage(selectedDataViews);
   };
 
   const handleFallback = () => {
@@ -177,6 +242,9 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
         to: fallbackTo,
         userConsented: true,
       },
+      timeRange: pendingFallback.timeRange,
+      timelineScope: pendingFallback.timelineScope,
+      selectedDataViews: pendingFallback.selectedDataViews,
     }).then((assistantResponse) => {
       setChatHistory((history) => [
         ...history,
@@ -226,7 +294,7 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
           <DialogContentText>
             {pendingFallback?.reason}{" "}
             {pendingFallback?.to === "remote"
-              ? "Continuing with Remote will send the current transcript, video frames, codebook, and timeline context to OpenAI."
+              ? "Continuing with Remote will send only the data views selected for this request to OpenAI."
               : "Continuing with Local will retry the same request using the selected local model."}
           </DialogContentText>
         </DialogContent>
@@ -234,6 +302,32 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
           <Button onClick={handleDeclineFallback}>Keep Failed</Button>
           <Button onClick={handleFallback} variant="contained" autoFocus>
             Switch to {formatAssistantMode(pendingFallback?.to)}
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
+        open={confirmEmptyDataViews}
+        onClose={() => setConfirmEmptyDataViews(false)}
+      >
+        <DialogTitle>No data views selected</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            No panel data views or codebook will be sent to the AI. It will
+            receive only your prompt and may be unable to complete the request.
+            Do you want to continue?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmEmptyDataViews(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={() => {
+              setConfirmEmptyDataViews(false);
+              submitMessage([]);
+            }}
+          >
+            Continue without data
           </Button>
         </DialogActions>
       </Dialog>
@@ -354,6 +448,106 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
         </TextField>
       </Box>
 
+      <Box display="flex" gap={1} mb={1} alignItems="flex-start">
+        <TextField
+          size="small"
+          label="Range start"
+          value={rangeStart}
+          onChange={(event) => setRangeStart(event.target.value)}
+          error={Boolean(timeSelection.error)}
+          inputProps={{ "aria-label": "AI range start", inputMode: "numeric" }}
+          sx={{ width: 112 }}
+        />
+        <TextField
+          size="small"
+          label="Range end"
+          value={rangeEnd}
+          onChange={(event) => setRangeEnd(event.target.value)}
+          error={Boolean(timeSelection.error)}
+          inputProps={{ "aria-label": "AI range end", inputMode: "numeric" }}
+          sx={{ width: 112 }}
+        />
+      </Box>
+      <Box color={timeSelection.error ? "error.main" : "text.secondary"} fontSize="0.75rem" mb={1}>
+        {timeSelection.error || `range · 00:00–${formatChunkTime(duration)}`}
+      </Box>
+
+      <TextField
+        select
+        fullWidth
+        size="small"
+        label="AI data views"
+        value={selectedDataViews}
+        onChange={(event) => {
+          const value = event.target.value;
+          setSelectedDataViews(
+            (typeof value === "string" ? value.split(",") : value) as AssistantDataViewId[],
+          );
+        }}
+        SelectProps={{
+          multiple: true,
+          MenuProps: upwardMenuProps,
+          renderValue: (selected) => {
+            const values = selected as AssistantDataViewId[];
+            if (values.length === 0) return "No data views";
+            return availableDataViews
+              .filter((view) => values.includes(view.id))
+              .map((view) => view.label)
+              .join(", ");
+          },
+        }}
+        inputProps={{ "aria-label": "AI data views" }}
+        sx={{ mb: 1 }}
+      >
+        {availableDataViews.map((view) => (
+          <MenuItem key={view.id} value={view.id}>
+            <Checkbox checked={selectedDataViews.includes(view.id)} />
+            <ListItemText primary={view.label} />
+          </MenuItem>
+        ))}
+      </TextField>
+
+      <TextField
+        select
+        fullWidth
+        size="small"
+        label="AI timeline access"
+        value={timelineSelection}
+        onChange={(event) => {
+          const value = event.target.value;
+          setTimelineSelection(typeof value === "string" ? value.split(",") : value);
+        }}
+        SelectProps={{
+          multiple: true,
+          MenuProps: upwardMenuProps,
+          renderValue: (selected) => {
+            const values = selected as string[];
+            if (values.length === 0) return "No timeline";
+            return values.map((value) => {
+              if (value === NEW_TIMELINE_VALUE) return "New timeline";
+              const axis = axes.find((item) => item.id === Number(value));
+              return axis?.axisName || `Timeline ${value}`;
+            }).join(", ");
+          },
+        }}
+        inputProps={{ "aria-label": "AI timeline access" }}
+        sx={{ mb: 1 }}
+      >
+        {axes.map((axis) => {
+          const value = String(axis.id);
+          return (
+            <MenuItem key={value} value={value}>
+              <Checkbox checked={timelineSelection.includes(value)} />
+              <ListItemText primary={axis.axisName || `Timeline ${axis.id}`} />
+            </MenuItem>
+          );
+        })}
+        <MenuItem value={NEW_TIMELINE_VALUE}>
+          <Checkbox checked={timelineSelection.includes(NEW_TIMELINE_VALUE)} />
+          <ListItemText primary="New timeline" />
+        </MenuItem>
+      </TextField>
+
       <Box display="flex" gap={1}>
         <TextField
           value={message}
@@ -362,7 +556,11 @@ const Chatbox = ({ onSendMessage }: ChatboxProps) => {
           variant="outlined"
           placeholder="ROSAnnotator can help you annotate"
         />
-        <Button onClick={handleSendMessage} variant="contained">
+        <Button
+          onClick={handleSendMessage}
+          variant="contained"
+          disabled={!message.trim() || !timeSelection.range}
+        >
           Send
         </Button>
       </Box>

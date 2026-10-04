@@ -15,8 +15,122 @@ type TimelineAxis = {
   blocks: TimelineBlock[];
 };
 
+export type TimelineScope = {
+  axisIds: number[];
+  allowNew: boolean;
+};
+
+const stepAxisId = (step: AIInstruction["steps"][number]) =>
+  Number(step.parameters?.axisId);
+
+export const instructionExceedsTimelineScope = (
+  instruction: AIInstruction,
+  scope: TimelineScope,
+) => {
+  const selectedIds = new Set(scope.axisIds);
+  const proposedNewIds = new Set(
+    instruction.steps
+      .filter((step) => step.action === "addAxi")
+      .map(stepAxisId)
+      .filter(Number.isFinite),
+  );
+  return instruction.steps.some((step) => {
+    const axisId = stepAxisId(step);
+    if (!Number.isFinite(axisId)) return true;
+    if (step.action === "addAxi") return !scope.allowNew;
+    return !selectedIds.has(axisId) && !(scope.allowNew && proposedNewIds.has(axisId));
+  });
+};
+
+export const filterInstructionToTimelineScope = (
+  instruction: AIInstruction,
+  scope: TimelineScope,
+): AIInstruction => {
+  const selectedIds = new Set(scope.axisIds);
+  const permittedNewIds = new Set(
+    scope.allowNew
+      ? instruction.steps
+          .filter((step) => step.action === "addAxi")
+          .map(stepAxisId)
+          .filter(Number.isFinite)
+      : [],
+  );
+  return {
+    ...instruction,
+    steps: instruction.steps.filter((step) => {
+      const axisId = stepAxisId(step);
+      if (!Number.isFinite(axisId)) return false;
+      if (step.action === "addAxi") return permittedNewIds.has(axisId);
+      return selectedIds.has(axisId) || permittedNewIds.has(axisId);
+    }),
+  };
+};
+
 const cloneAxes = (axes: TimelineAxis[]) =>
   JSON.parse(JSON.stringify(axes)) as TimelineAxis[];
+
+const normalizedAxisName = (name: string) => name.trim().toLocaleLowerCase();
+
+export const isDuplicateAxisName = (
+  axes: Array<{ id: number; axisName?: string }>,
+  axisId: number,
+  proposedName: string,
+) => {
+  const normalizedName = normalizedAxisName(proposedName);
+  return Boolean(normalizedName) && axes.some(
+    (axis) =>
+      axis.id !== axisId &&
+      normalizedAxisName(axis.axisName || "") === normalizedName,
+  );
+};
+
+const nextUniqueAxisName = (baseName: string, usedNames: Set<string>) => {
+  let suffix = 1;
+  let candidate = `${baseName} ${suffix}`;
+  while (usedNames.has(normalizedAxisName(candidate))) {
+    suffix += 1;
+    candidate = `${baseName} ${suffix}`;
+  }
+  return candidate;
+};
+
+export const remapAIInstructionAxisIds = (
+  currentAxes: Array<{ id: number }>,
+  instruction: AIInstruction,
+): AIInstruction => {
+  const usedIds = new Set(
+    currentAxes.map((axis) => Number(axis.id)).filter(Number.isFinite),
+  );
+  let nextId = Math.max(0, ...usedIds) + 1;
+  const remappedIds = new Map<number, number>();
+
+  instruction.steps.forEach((step) => {
+    if (step.action !== "addAxi") return;
+    const proposedId = Number(step.parameters?.axisId);
+    if (!Number.isFinite(proposedId) || remappedIds.has(proposedId)) return;
+
+    let assignedId = proposedId;
+    if (usedIds.has(assignedId)) {
+      while (usedIds.has(nextId)) nextId += 1;
+      assignedId = nextId;
+      nextId += 1;
+    }
+    usedIds.add(assignedId);
+    remappedIds.set(proposedId, assignedId);
+  });
+
+  return {
+    ...instruction,
+    steps: instruction.steps.map((step) => {
+      const parameters = step.parameters ?? {};
+      const proposedId = Number(parameters.axisId);
+      const assignedId = remappedIds.get(proposedId);
+      return assignedId === undefined
+        ? { ...step, parameters: { ...parameters } }
+        : { ...step, parameters: { ...parameters, axisId: assignedId } };
+    }),
+  };
+};
 
 export const requiresAIChangeConfirmation = (
   instruction: AIInstruction,
@@ -50,7 +164,21 @@ export const applyAIInstruction = (
   duration: number,
 ) => {
   const nextAxes = cloneAxes(currentAxes);
-  instruction.steps.forEach((step) => {
+  const safeInstruction = remapAIInstructionAxisIds(currentAxes, instruction);
+  const usedAxisNames = new Set(
+    nextAxes
+      .map((axis) => normalizedAxisName(axis.axisName || ""))
+      .filter(Boolean),
+  );
+  const proposedNameCounts = safeInstruction.steps.reduce((counts, step) => {
+    if (step.action !== "addAxi") return counts;
+    const baseName = String(step.parameters?.axisName || "").trim();
+    if (!baseName) return counts;
+    const normalizedName = normalizedAxisName(baseName);
+    counts.set(normalizedName, (counts.get(normalizedName) || 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+  safeInstruction.steps.forEach((step) => {
     const parameters = step.parameters ?? {};
     const axisId = Number(parameters.axisId);
 
@@ -58,10 +186,19 @@ export const applyAIInstruction = (
       if (!Number.isFinite(axisId) || nextAxes.some((axis) => axis.id === axisId)) {
         return;
       }
+      const baseName = String(parameters.axisName || `Axis ${axisId}`).trim();
+      const normalizedName = normalizedAxisName(baseName);
+      const needsSuffix =
+        usedAxisNames.has(normalizedName) ||
+        (proposedNameCounts.get(normalizedName) || 0) > 1;
+      const axisName = needsSuffix
+        ? nextUniqueAxisName(baseName, usedAxisNames)
+        : baseName;
+      usedAxisNames.add(normalizedAxisName(axisName));
       nextAxes.push({
         id: axisId,
         type: "Type-in",
-        axisName: String(parameters.axisName || `Axis ${axisId}`),
+        axisName,
         blocks: [],
         typeName: "",
         shortcutKey: "",

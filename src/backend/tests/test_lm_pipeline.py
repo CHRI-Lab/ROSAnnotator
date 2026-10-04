@@ -85,6 +85,168 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
             "Annotate the greeting", ""
         )
 
+    def test_selected_data_view_subset_is_the_only_context_given_to_model(self):
+        from rosbag_processing import views
+
+        views.cache.set('chat:test-context', {'history': "", 'frames': ["private-frame"]})
+        request = self.make_request(selected_data_views=["transcript"])
+
+        with patch.object(views, "create_local_ai") as local_ai:
+            local_ai.return_value.respond.return_value = "local result"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        context = local_ai.call_args.kwargs
+        self.assertEqual(context["transcriptContext"], "Speaker 1: Hello")
+        self.assertEqual(context["frameContext"], [])
+        self.assertEqual(context["codebookContext"], {})
+        self.assertEqual(context["timelineContext"], [])
+        self.assertEqual(context["selectedDataViews"], ["transcript"])
+
+    def test_zero_selected_data_views_still_calls_model_with_no_context(self):
+        from rosbag_processing import views
+
+        views.cache.set('chat:test-context', {'history': "", 'frames': ["private-frame"]})
+        request = self.make_request(
+            selected_data_views=[],
+            audio_transcript=None,
+            Axeinfo=None,
+            Codebook=None,
+        )
+
+        with patch.object(views, "create_local_ai") as local_ai:
+            local_ai.return_value.respond.return_value = "INSUFFICIENT_DATA"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        context = local_ai.call_args.kwargs
+        self.assertEqual(context["transcriptContext"], "")
+        self.assertEqual(context["frameContext"], [])
+        self.assertEqual(context["codebookContext"], {})
+        self.assertEqual(context["timelineContext"], [])
+        self.assertEqual(context["selectedDataViews"], [])
+        local_ai.return_value.respond.assert_called_once_with(
+            "Annotate the greeting", ""
+        )
+
+    def test_selected_axis_is_available_without_annotations_data_view(self):
+        from rosbag_processing import views
+
+        views.cache.set('chat:test-context', {'history': "earlier", 'frames': []})
+        request = self.make_request(
+            message="Delete all annotation blocks",
+            selected_data_views=[],
+            Axeinfo=[
+                {"id": 1, "axisName": "Selected", "blocks": [{"start": 1, "end": 2}]},
+                {"id": 2, "axisName": "Private", "blocks": [{"start": 3, "end": 4}]},
+            ],
+            timeline_scope={"axis_ids": [1], "allow_new": False},
+        )
+
+        with patch.object(views, "create_local_ai") as local_ai:
+            local_ai.return_value.respond.return_value = '{"instructions": []}'
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        context = local_ai.call_args.kwargs
+        self.assertEqual(context["timelineContext"], [
+            {"id": 1, "axisName": "Selected", "blocks": [{"start": 1, "end": 2}]},
+        ])
+        self.assertEqual(context["timelineScope"], {"axis_ids": [1], "allow_new": False})
+        local_ai.return_value.respond.assert_called_once_with(
+            "Delete all annotation blocks", "earlier"
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_selected_axis_satisfies_delete_context_policy(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"instructions": []}'))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="",
+            frameContext=[],
+            codebookContext={},
+            timelineContext=[{"id": 1, "axisName": "Selected", "blocks": []}],
+            timelineScope={"axis_ids": [1], "allow_new": False},
+            selectedDataViews=[],
+        )
+
+        self.assertEqual(
+            assistant._missing_required_data_views("Delete all annotation blocks"),
+            [],
+        )
+        self.assertIn("Separately selected timeline axes: 1", assistant._data_view_policy_prompt())
+        assistant._request_completion("Delete all annotation blocks")
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertIn('"axisName": "Selected"', request["messages"][0]["content"])
+        self.assertNotIn("CURRENT TIMELINE:\n                    Not selected.", request["messages"][0]["content"])
+
+    def test_ai_record_contains_selected_options_and_both_time_references(self):
+        from rosbag_processing import views
+
+        views.cache.set('chat:test-context', {'history': "", 'frames': []})
+        request = self.make_request(
+            selected_data_views=["transcript", "annotations"],
+            audio_transcript="[00:10] Speaker 1: Hello",
+            time_range={"start": 10, "end": 20},
+            context_duration=300,
+            current_chunk={
+                "index": 2,
+                "start_seconds": 600,
+                "end_seconds": 900,
+                "is_chunked": True,
+            },
+            Axeinfo=[{"id": 1, "axisName": "Topics", "blocks": []}],
+            timeline_scope={"axis_ids": [1], "allow_new": False},
+        )
+
+        with patch.object(views, "create_local_ai") as local_ai:
+            local_ai.return_value.respond.return_value = "Done"
+            response = views.gpt_chat(request)
+
+        self.assertEqual(response.status_code, 200)
+        options = json.loads(response.content)["ai_record"]["request_options"]
+        self.assertEqual(options["selected_data_types"], ["transcript", "annotations"])
+        self.assertEqual(options["selected_timelines"], [
+            {"axis_id": 1, "axis_name": "Topics"},
+        ])
+        self.assertEqual(options["current_chunk"], {
+            "index": 2,
+            "start_seconds": 600.0,
+            "end_seconds": 900.0,
+            "is_chunked": True,
+        })
+        self.assertEqual(options["selected_time_range"], {
+            "chunk_relative_seconds": {"start": 10.0, "end": 20.0},
+            "whole_video_seconds": {"start": 610.0, "end": 620.0},
+        })
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_missing_video_policy_uses_plain_text_and_sends_no_frames(
+        self, openai_class
+    ):
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="INSUFFICIENT_DATA"))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: waves",
+            frameContext=["private-frame"],
+            codebookContext={},
+            timelineContext=[],
+            selectedDataViews=["transcript"],
+        )
+
+        assistant.respond("Annotate visible gestures")
+
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertNotIn("response_format", request)
+        self.assertIn("Missing data views", request["messages"][0]["content"])
+        self.assertNotIn("private-frame", str(request["messages"]))
+
     def test_local_failure_preserves_history_and_does_not_call_remote(self):
         '''local mode fails when remote fall back is available: failure message shown, with remote fallback. fallback does not start automatically'''
         '''if user reject local to remote fall back, no remote request is made'''
@@ -295,3 +457,341 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
                 self.assertEqual(
                     openai_class.return_value.chat.completions.create.call_count, 2
                 )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_remote_label_on_time_axis_requests_timeline_json(self, openai_class):
+        """Codebook labels on a time axis are timeline actions, not chat prose."""
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addAxi",
+                        "parameters": {
+                            "axisId": 1,
+                            "axisName": "User attitude",
+                            "axistype": "Type-in",
+                        },
+                    },
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 1,
+                            "start": 15,
+                            "end": 19,
+                            "text": "ATTITUDE_COOPERATIVE",
+                        },
+                    },
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="00:15 - 00:19 Can you please turn it around?",
+            frameContext=[],
+            codebookContext={"Attitude": ["ATTITUDE_COOPERATIVE"]},
+            timelineContext=[],
+        )
+
+        result = assistant.respond(
+            "Label user's attitude according to codebook on time axis"
+        )
+
+        self.assertEqual(result, response_text)
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["response_format"], {"type": "json_object"})
+        self.assertIn(
+            "json",
+            " ".join(str(item["content"]) for item in request["messages"]).casefold(),
+        )
+        self.assertIn("one block per applicable utterance", request["messages"][0]["content"])
+
+    def test_label_without_time_axis_remains_a_text_classification(self):
+        self.assertFalse(
+            RemoteAPI._requests_timeline_change(
+                "Label the user's attitude according to the codebook"
+            )
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_remote_rejects_summary_text_for_codebook_blocks(self, openai_class):
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 1,
+                            "start": 15,
+                            "end": 57,
+                            "text": "The user is generally cooperative and neutral.",
+                        },
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="00:15 - 00:19 Please turn it around.",
+            frameContext=[],
+            codebookContext={
+                "Speech attitude": ["ATTITUDE_COOPERATIVE", "ATTITUDE_NEUTRAL"],
+                "Visible gesture": ["GESTURE_WAVING"],
+            },
+            timelineContext=[],
+        )
+
+        with self.assertRaisesRegex(RemoteResponseError, "not in the selected codebook"):
+            assistant.respond(
+                "Annotate user's attitude according to codebook on time axis"
+            )
+
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        system_prompt = request["messages"][0]["content"]
+        self.assertIn("ATTITUDE_COOPERATIVE", system_prompt)
+        self.assertNotIn("GESTURE_WAVING", system_prompt)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_no_timeline_scope_allows_conversational_reply(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="I can explain the labels."))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: Hello",
+            frameContext=[],
+            codebookContext={"Attitude": ["ATTITUDE_NEUTRAL"]},
+            timelineContext=[{"id": 4, "axisName": "Attitude", "blocks": []}],
+            timelineScope={"axis_ids": [], "allow_new": False},
+        )
+
+        result = assistant.respond("Annotate attitude on the timeline")
+
+        self.assertEqual(result, "I can explain the labels.")
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertNotIn("response_format", request)
+        self.assertIn("Timeline scope: none", request["messages"][0]["content"])
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_selected_timeline_scope_is_in_remote_prompt(self, openai_class):
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 4,
+                            "start": 1,
+                            "end": 2,
+                            "text": "ATTITUDE_NEUTRAL",
+                        },
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: Hello",
+            frameContext=[],
+            codebookContext={"Attitude": ["ATTITUDE_NEUTRAL"]},
+            timelineContext=[{"id": 4, "axisName": "Attitude", "blocks": []}],
+            timelineScope={"axis_ids": [4], "allow_new": False},
+        )
+
+        assistant.respond("Annotate attitude on the timeline")
+
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        system_prompt = request["messages"][0]["content"]
+        self.assertIn("existing axis IDs [4]", system_prompt)
+        self.assertIn("permission to create a new axis: False", system_prompt)
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_remote_codebook_deletion_does_not_require_add_block(self, openai_class):
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "deleteBlock",
+                        "parameters": {"axisId": 4, "blockIndex": 0},
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: Hello",
+            frameContext=[],
+            codebookContext={"Attitude": ["ATTITUDE_NEUTRAL"]},
+            timelineContext=[{"id": 4, "axisName": "Attitude", "blocks": []}],
+            timelineScope={"axis_ids": [4], "allow_new": False},
+        )
+
+        result = assistant.respond(
+            "Delete the first attitude annotation block from the timeline"
+        )
+
+        self.assertEqual(result, response_text)
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertIn(
+            "delete all annotations\" means delete",
+            request["messages"][0]["content"],
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_new_timeline_selection_makes_implicit_annotation_a_timeline_request(
+        self, openai_class
+    ):
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addAxi",
+                        "parameters": {
+                            "axisId": 1,
+                            "axisName": "Speakers' attitude",
+                            "axistype": "Type-in",
+                        },
+                    },
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 1,
+                            "start": 0,
+                            "end": 4,
+                            "text": "ATTITUDE_NEUTRAL",
+                        },
+                    },
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="00:00 - 00:04 Hello",
+            frameContext=[],
+            codebookContext={"Speech attitude": ["ATTITUDE_NEUTRAL"]},
+            timelineContext=[],
+            timelineScope={"axis_ids": [], "allow_new": True},
+        )
+
+        result = assistant.respond("Annotate all speakers' attitude according to codebook")
+
+        self.assertEqual(result, response_text)
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["response_format"], {"type": "json_object"})
+        self.assertIn("Timeline scope: create one new axis", request["messages"][0]["content"])
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_new_only_scope_repairs_blocks_that_target_existing_axes(self, openai_class):
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 2,
+                            "start": 15.4,
+                            "end": 19.56,
+                            "text": "ATTITUDE_COOPERATIVE",
+                        },
+                    },
+                    {
+                        "action": "addBlock",
+                        "parameters": {
+                            "axisId": 3,
+                            "start": 19.56,
+                            "end": 20.56,
+                            "text": "ATTITUDE_NEUTRAL",
+                        },
+                    },
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: Hello",
+            frameContext=[],
+            codebookContext={
+                "Speech attitude": ["ATTITUDE_COOPERATIVE", "ATTITUDE_NEUTRAL"]
+            },
+            timelineContext=[
+                {"id": 1, "axisName": "Transcript", "blocks": []},
+                {"id": 2, "axisName": "SPEAKER_00", "blocks": []},
+                {"id": 3, "axisName": "SPEAKER_01", "blocks": []},
+            ],
+            timelineScope={"axis_ids": [], "allow_new": True},
+        )
+
+        result = json.loads(
+            assistant.respond("Annotate all speakers' attitude according to codebook")
+        )
+
+        self.assertEqual(result["steps"][0]["action"], "addAxi")
+        self.assertEqual(result["steps"][0]["parameters"]["axisId"], 4)
+        self.assertEqual(result["steps"][0]["parameters"]["axisName"], "Speaker Attitudes")
+        self.assertTrue(
+            all(step["parameters"]["axisId"] == 4 for step in result["steps"][1:])
+        )
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_selected_axis_makes_implicit_deletion_a_timeline_request(
+        self, openai_class
+    ):
+        response_text = json.dumps(
+            {
+                "type": "instruction",
+                "steps": [
+                    {
+                        "action": "deleteBlock",
+                        "parameters": {"axisId": 4, "blockIndex": 0},
+                    }
+                ],
+            }
+        )
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content=response_text))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="Speaker 1: Hello",
+            frameContext=[],
+            codebookContext={"Speech attitude": ["ATTITUDE_NEUTRAL"]},
+            timelineContext=[{"id": 4, "axisName": "Attitude", "blocks": []}],
+            timelineScope={"axis_ids": [4], "allow_new": False},
+        )
+
+        result = assistant.respond("Delete them")
+
+        self.assertEqual(result, response_text)
+        request = openai_class.return_value.chat.completions.create.call_args.kwargs
+        self.assertEqual(request["response_format"], {"type": "json_object"})

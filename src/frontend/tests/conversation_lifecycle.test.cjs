@@ -59,8 +59,36 @@ test('confirmed clear succeeds in the backend before the chat is remounted', () 
   assert.ok(remountIndex > responseCheckIndex);
   assert.match(
     annotatorSource,
-    /<Chatbox key=\{conversationKey\} onSendMessage=\{handleSendMessageToGPT\}/,
+    /<Chatbox[\s\S]*?key=\{conversationKey\}[\s\S]*?onSendMessage=\{handleSendMessageToGPT\}/,
   );
+});
+
+test('empty data-view selection requires confirmation before any request', () => {
+  const sendHandler = between(
+    chatboxSource,
+    'const handleSendMessage = () => {',
+    'const handleFallback',
+  );
+  assert.match(sendHandler, /selectedDataViews\.length === 0/);
+  assert.match(sendHandler, /setConfirmEmptyDataViews\(true\)/);
+  assert.doesNotMatch(sendHandler, /onSendMessage\(/);
+  assert.match(chatboxSource, /<DialogTitle>No data views selected<\/DialogTitle>/);
+  assert.match(chatboxSource, /Continue without data/);
+  assert.match(chatboxSource, /submitMessage\(\[\]\)/);
+});
+
+test('selected data views are the only contexts serialized for the backend', () => {
+  assert.match(annotatorSource, /selectedDataViews\.has\("transcript"\) \? data\.audio_transcript : undefined/);
+  assert.match(annotatorSource, /selectedDataViews\.has\("video"\) \? data\.video_path : undefined/);
+  assert.match(annotatorSource, /const scopedAxesData = axesData\.filter\(\(axis\) => selectedAxisIds\.has\(axis\.id\)\)/);
+  assert.match(annotatorSource, /Axeinfo: timelineContext/);
+  assert.match(annotatorSource, /selectedDataViews\.has\("codebook"\) \? bookList : undefined/);
+  assert.match(annotatorSource, /selected_data_views: options\?\.selectedDataViews \?\? \[\]/);
+  assert.match(annotatorSource, /\.\.\.availableViews/);
+  assert.match(annotatorSource, /data_view_contexts: selectedDataViewContexts/);
+  assert.match(annotatorSource, /current_chunk: \{/);
+  assert.match(annotatorSource, /start_seconds: currentChunk\?\.start_seconds \?\? 0/);
+  assert.match(annotatorSource, /end_seconds: currentChunk\?\.end_seconds \?\? duration/);
 });
 
 test('a refreshed or remounted chat starts without cleared messages', () => {

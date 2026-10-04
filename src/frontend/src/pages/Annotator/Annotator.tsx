@@ -27,11 +27,16 @@ import Booklist from "../../components/Booklist/Booklist";
 import Chatbox from "../../components/Chatbox";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
 import FrontEndWorkspace from "../../components/FrontEndWorkspace";
+import { availableViews } from "../../components/FrontEndWorkspace/viewRegistry";
 import RightAssistantPanel from "../../components/RightAssistantPanel";
 import Timeline from "../../components/Timeline";
 import {
   applyAIInstruction,
+  filterInstructionToTimelineScope,
+  instructionExceedsTimelineScope,
+  remapAIInstructionAxisIds,
   requiresAIChangeConfirmation,
+  type TimelineScope,
 } from "../../components/Timeline/aiInstruction";
 import {
   AssistantMode,
@@ -41,6 +46,8 @@ import {
 import {
   AIInstruction,
   AIRecord,
+  AssistantDataViewId,
+  AssistantDataViewOption,
   AssistantRequestOptions,
   buildAIRecordAnnotationName,
 } from "../../types/aiRecords";
@@ -89,6 +96,9 @@ const Annotator = ({
   const [pendingAIChange, setPendingAIChange] = useState<{
     instruction: AIInstruction;
     resolve: (accepted: boolean) => void;
+  } | null>(null);
+  const [pendingScopeAnomaly, setPendingScopeAnomaly] = useState<{
+    resolve: (decision: "all" | "selected" | "reject") => void;
   } | null>(null);
   const [aiRecords, setAIRecords] = useState<AIRecord[]>(data.ai_records ?? []);
   const [conversationKey, setConversationKey] = useState(0);
@@ -208,12 +218,84 @@ const Annotator = ({
     setPendingAIChange(null);
   };
 
+  const requestScopeAnomalyDecision = () =>
+    new Promise<"all" | "selected" | "reject">((resolve) => {
+      setPendingScopeAnomaly({ resolve });
+    });
+
+  const resolveScopeAnomaly = (decision: "all" | "selected" | "reject") => {
+    pendingScopeAnomaly?.resolve(decision);
+    setPendingScopeAnomaly(null);
+  };
+
+  const handleSaveAnnotations = async () => {
+    if (processingPending) return;
+    const annotationData = axesData.map((axis) => ({
+      id: axis.id,
+      axisType: axis.type,
+      axisName: axis.axisName || "",
+      axisBooklistName: axis.typeName || "",
+      annotationBlocks: (axis.blocks || []).map((block) => ({
+        start: block.start,
+        end: block.end,
+        text: block.text,
+      })),
+    }));
+    
+    try {
+      const response = await fetch("http://localhost:8000/api/save_annotation/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          annotation_name: buildAIRecordAnnotationName(
+            rosBagFileName,
+            bookListFileName,
+          ),
+          annotation_data: annotationData,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Save failed (${response.status})`);
+      }
+      alert("Data saved successfully.");
+    } catch (error) {
+      alert(`Failed to save data. Please try again.\n${error}`);
+    }
+  };
+
   const handleSendMessageToGPT = (
     message: string,
     assistantRouting: AssistantRouting,
     options?: AssistantRequestOptions,
   ) => {
     if (processingPending) return Promise.resolve({ text: "Please wait for annotation data to finish loading.", isError: true } as AssistantReply);
+    const selectedDataViews = new Set(options?.selectedDataViews ?? []);
+    const timelineViewIds: AssistantDataViewId[] = [
+      "annotations",
+      "statistics-annotations",
+      "statistics-tiers",
+    ];
+    const timelineSelected = timelineViewIds.some((viewId) =>
+      selectedDataViews.has(viewId)
+    );
+    const selectedAxisIds = new Set(options?.timelineScope?.axisIds ?? []);
+    const scopedAxesData = axesData.filter((axis) => selectedAxisIds.has(axis.id));
+    const timelineContext = timelineSelected
+      ? axesData
+      : scopedAxesData.length > 0
+        ? scopedAxesData
+        : undefined;
+    const selectedDataViewContexts = Object.fromEntries(
+      (options?.selectedDataViews ?? [])
+        .filter((viewId) => viewId !== "codebook")
+        .map((viewId) => [
+          viewId,
+          viewId === "annotations"
+            ? { axes: axesData }
+            : data.views?.[viewId]?.processed_data ?? {},
+        ]),
+    );
     return fetch("http://localhost:8000/api/gpt_chat/", {
       method: "POST",
       headers: {
@@ -221,13 +303,31 @@ const Annotator = ({
       },
       body: JSON.stringify({
         message: message, 
-        audio_transcript: data.audio_transcript, 
-        video_path: data.video_path,
-        Axeinfo: axesData,
-        Codebook: bookList,
+        audio_transcript: selectedDataViews.has("transcript") ? data.audio_transcript : undefined,
+        video_path: selectedDataViews.has("video") ? data.video_path : undefined,
+        // Axis selection is an independent, narrow action context. This lets
+        // the model edit selected axes without disclosing the whole timeline.
+        Axeinfo: timelineContext,
+        Codebook: selectedDataViews.has("codebook") ? bookList : undefined,
+        selected_data_views: options?.selectedDataViews ?? [],
+        data_view_contexts: selectedDataViewContexts,
         chat_context_id: data.chat_context_id,
         assistant_mode: assistantRouting.mode,
         context_routes: assistantRouting.contextRoutes,
+        context_duration: duration,
+        time_range: options?.timeRange,
+        current_chunk: {
+          index: currentChunk?.index ?? 0,
+          start_seconds: currentChunk?.start_seconds ?? 0,
+          end_seconds: currentChunk?.end_seconds ?? duration,
+          is_chunked: Boolean(chunkManifest),
+        },
+        timeline_scope: options?.timelineScope
+          ? {
+              axis_ids: options.timelineScope.axisIds,
+              allow_new: options.timelineScope.allowNew,
+            }
+          : undefined,
         fallback_consent: options?.fallbackConsent
           ? {
               from: options.fallbackConsent.from,
@@ -282,8 +382,58 @@ const Annotator = ({
             "steps" in parsedObject && Array.isArray(parsedObject.steps)
           ) {
               console.log("This is an instruction:", parsedObject);
-              const parsedInstruction = parsedObject as AIInstruction;
+              let parsedInstruction = parsedObject as AIInstruction;
+              const timelineScope: TimelineScope = options?.timelineScope ?? {
+                axisIds: axesData.map((axis) => axis.id),
+                allowNew: true,
+              };
+              const hasTimelineAccess =
+                timelineScope.axisIds.length > 0 || timelineScope.allowNew;
+              if (!hasTimelineAccess) {
+                await persistCompletedAIRecord(aiRecord, "not_applied");
+                return {
+                  text: "No timeline was selected, so no annotation changes were applied.",
+                  assistantMode,
+                  aiRecord,
+                };
+              }
+              const requestsDeleteAllAnnotations =
+                /\b(?:delete|remove|clear)\s+(?:all\s+)?(?:the\s+)?(?:annotations?|blocks?)\b/i.test(message);
+              if (requestsDeleteAllAnnotations) {
+                const targetAxisIds = new Set(timelineScope.axisIds);
+                parsedInstruction = {
+                  type: "instruction",
+                  steps: axesData
+                    .filter((axis) => targetAxisIds.has(axis.id))
+                    .flatMap((axis) =>
+                      axis.blocks.map((_, blockIndex) => ({
+                        action: "deleteBlock",
+                        parameters: { axisId: axis.id, blockIndex },
+                      })).reverse(),
+                    ),
+                };
+              }
+              let scopeDecisionMade = false;
+              if (instructionExceedsTimelineScope(parsedInstruction, timelineScope)) {
+                const decision = await requestScopeAnomalyDecision();
+                scopeDecisionMade = true;
+                if (decision === "reject") {
+                  await persistCompletedAIRecord(aiRecord, "rejected");
+                  return {
+                    text: "AI timeline changes were rejected. No annotation changes were applied.",
+                    assistantMode,
+                    aiRecord,
+                  };
+                }
+                if (decision === "selected") {
+                  parsedInstruction = filterInstructionToTimelineScope(
+                    parsedInstruction,
+                    timelineScope,
+                  );
+                }
+              }
               if (
+                !scopeDecisionMade &&
                 requiresAIChangeConfirmation(parsedInstruction, axesData) &&
                 !(await requestAIChangeConfirmation(parsedInstruction))
               ) {
@@ -295,8 +445,15 @@ const Annotator = ({
                   isError: true,
                 };
               }
+              parsedInstruction = remapAIInstructionAxisIds(
+                axesData,
+                parsedInstruction,
+              );
               const updatedAxes = applyAIInstruction(axesData, parsedInstruction, duration);
-              const requestedAnnotation = /\bannotat(?:e|ion|ions|ing)\b/i.test(message);
+              const requestsDeletion = /\b(?:delete|remove|clear)\b/i.test(message);
+              const requestedAnnotationBlocks =
+                !requestsDeletion &&
+                /\b(?:annotat(?:e|ion|ions|ing)|label(?:s|ed|ing)?|classif(?:y|ies|ied|ication)|categoriz(?:e|es|ed|ing|ation)|tag(?:s|ged|ging)?)\b/i.test(message);
               const addedBlockApplied = parsedInstruction.steps.some((step) => {
                 if (step.action !== "addBlock") return false;
                 const axisId = Number(step.parameters?.axisId);
@@ -311,7 +468,7 @@ const Annotator = ({
                 );
                 return Boolean(isPresent && !wasPresent);
               });
-              if (requestedAnnotation && !addedBlockApplied) {
+              if (requestedAnnotationBlocks && !addedBlockApplied) {
                 await persistCompletedAIRecord(aiRecord, "not_applied");
                 return {
                   text: "The model did not provide any usable annotation blocks. No empty axis was created. Please try again with a specific time range or annotation target.",
@@ -361,6 +518,22 @@ const Annotator = ({
         } as AssistantReply;
       });
   };
+
+  const availableAssistantDataViews: AssistantDataViewOption[] = [
+    ...availableViews
+      .filter((view) => {
+        const backendView = data.views?.[view.id];
+        return Boolean(
+          backendView?.status === "ready" &&
+          backendView.available &&
+          backendView.processed_data != null
+        );
+      })
+      .map((view) => ({ id: view.id as AssistantDataViewOption["id"], label: view.label })),
+    ...(bookList && (Array.isArray(bookList) ? bookList.length : Object.keys(bookList).length)
+      ? [{ id: "codebook", label: "Codebook" } as const]
+      : []),
+  ];
   
 
 
@@ -493,6 +666,26 @@ const Annotator = ({
         variant="contained"
       >
         Apply changes
+      </Button>
+    </DialogActions>
+  </Dialog>
+  <Dialog
+    open={pendingScopeAnomaly !== null}
+    onClose={() => resolveScopeAnomaly("reject")}
+  >
+    <DialogTitle>AI targeted other timelines</DialogTitle>
+    <DialogContent>
+      <DialogContentText>
+        The AI response includes changes outside the timelines you selected.
+      </DialogContentText>
+    </DialogContent>
+    <DialogActions>
+      <Button onClick={() => resolveScopeAnomaly("reject")}>Reject all</Button>
+      <Button onClick={() => resolveScopeAnomaly("selected")}>
+        Apply selected timelines only
+      </Button>
+      <Button onClick={() => resolveScopeAnomaly("all")} variant="contained" color="warning">
+        Apply all changes
       </Button>
     </DialogActions>
   </Dialog>
@@ -653,7 +846,15 @@ const Annotator = ({
               </Box>
             )
           }
-          assistant={<Chatbox key={conversationKey} onSendMessage={handleSendMessageToGPT} />}
+          assistant={
+            <Chatbox
+              key={conversationKey}
+              duration={duration}
+              axes={axesData}
+              availableDataViews={availableAssistantDataViews}
+              onSendMessage={handleSendMessageToGPT}
+            />
+          }
         />
         </Box>
       </Box>
