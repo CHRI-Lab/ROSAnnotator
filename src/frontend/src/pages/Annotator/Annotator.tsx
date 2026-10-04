@@ -226,8 +226,7 @@ const Annotator = ({
         text: block.text,
       })),
     }));
-
-    setIsSaving(true);
+    
     try {
       const response = await fetch("http://localhost:8000/api/save_annotation/", {
         method: "POST",
@@ -247,8 +246,6 @@ const Annotator = ({
       alert("Data saved successfully.");
     } catch (error) {
       alert(`Failed to save data. Please try again.\n${error}`);
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -422,7 +419,6 @@ const Annotator = ({
               }
               if (
                 !scopeDecisionMade &&
-                options?.timelineScope === undefined &&
                 requiresAIChangeConfirmation(parsedInstruction, axesData) &&
                 !(await requestAIChangeConfirmation(parsedInstruction))
               ) {
