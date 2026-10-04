@@ -48,7 +48,23 @@ class AssistantTimeRangeTests(SimpleTestCase):
         self.assertNotIn('Before', context['transcriptContext'])
         self.assertNotIn('After', context['transcriptContext'])
         self.assertEqual(context['timelineContext'][0]['blocks'], [
-            {'start': 12, 'end': 14, 'text': 'selected'},
+            {'start': 12, 'end': 14, 'text': 'selected', 'blockIndex': 1},
+        ])
+
+    def test_filtered_timeline_keeps_full_annotation_block_index(self):
+        timeline = [{
+            'id': 1,
+            'annotationBlocks': [
+                {'start': 2, 'end': 4, 'text': 'before'},
+                {'start': 12, 'end': 14, 'text': 'selected'},
+                {'start': 22, 'end': 24, 'text': 'after'},
+            ],
+        }]
+
+        filtered = views.timeline_for_time_range(timeline, 10, 20)
+
+        self.assertEqual(filtered[0]['annotationBlocks'], [
+            {'start': 12, 'end': 14, 'text': 'selected', 'blockIndex': 1},
         ])
 
     def test_invalid_ranges_are_rejected_before_lm_call(self):

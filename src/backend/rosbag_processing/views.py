@@ -132,10 +132,16 @@ def timeline_for_time_range(timeline, start, end):
             continue
         block_key = 'blocks' if isinstance(axis.get('blocks'), list) else 'annotationBlocks'
         blocks = axis.get(block_key, [])
-        selected = [block for block in blocks if isinstance(block, dict)
-                    and type(block.get('start')) in (int, float)
-                    and type(block.get('end')) in (int, float)
-                    and block['start'] < end and block['end'] > start]
+        # Deletion instructions are applied to the full client-side block array.
+        # Keep that position when exposing only the selected range to the model.
+        selected = [
+            {**block, 'blockIndex': block_index}
+            for block_index, block in enumerate(blocks)
+            if isinstance(block, dict)
+            and type(block.get('start')) in (int, float)
+            and type(block.get('end')) in (int, float)
+            and block['start'] < end and block['end'] > start
+        ]
         filtered.append({**axis, block_key: selected})
     return filtered
 

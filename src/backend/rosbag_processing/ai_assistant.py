@@ -487,6 +487,9 @@ class RemoteAPI(AIAssistant):
                     2. Add a new `block`: Method: `addBlock`, Parameters: `axisId` (integer), `start` (float), `end` (float), `text` (string).
                     3. Delete a old 'block':Mthod:'deleteBlock', Parameters: `axisId` (integer), 'blockIndex' (integer).
                     4. Delete a old 'axi':Mthod:'deleteAxi', Parameters: `axisId` (integer).
+                    When a timeline block includes blockIndex, copy that exact
+                    value into deleteBlock. It is the block's position in the
+                    full timeline, even if only a selected time range is shown.
                     "Delete annotations" or "delete all annotations" means delete
                     blocks with deleteBlock while preserving their axes. Use deleteAxi
                     only when the user explicitly asks to delete an axis or timeline.
@@ -1436,7 +1439,11 @@ TIMESTAMPED SEGMENTS:
                 matches_axis = False
             if not matches_axis:
                 continue
-            for block_index, block in enumerate(axis.get("blocks", [])):
+            block_key = (
+                "blocks" if isinstance(axis.get("blocks"), list)
+                else "annotationBlocks"
+            )
+            for block_index, block in enumerate(axis.get(block_key, [])):
                 if not isinstance(block, dict):
                     continue
                 try:
@@ -1445,7 +1452,12 @@ TIMESTAMPED SEGMENTS:
                 except (TypeError, ValueError):
                     continue
                 if start <= point_time <= end:
-                    return block_index
+                    original_index = block.get("blockIndex")
+                    return (
+                        original_index
+                        if type(original_index) is int and original_index >= 0
+                        else block_index
+                    )
         return None
 
     @staticmethod
@@ -1829,6 +1841,10 @@ The object must have type "instruction" and a steps array. Allowed steps are:
   exact codebook label.
 - deleteBlock with integer axisId and integer blockIndex.
 - deleteAxi with integer axisId.
+
+When a CURRENT TIMELINE block includes blockIndex, copy that exact value into
+deleteBlock. It is the block's position in the full timeline, even when the
+current context contains only a selected time range.
 
 "Delete annotations" or "delete all annotations" means return deleteBlock steps
 for the matching blocks and preserve the axes. Return deleteAxi only when the user
