@@ -8,6 +8,8 @@
 // needs the state back exactly as it was, so collectAutosaveState() keeps
 // everything.
 
+import type { AxisData } from "../../types/annotations";
+
 const API_BASE = "http://localhost:8000";
 
 export const AUTOSAVE_SCHEMA_VERSION = 1; //ensures if schema updates, alt versions are NOT accepted
@@ -68,14 +70,14 @@ export interface AutosavePayload extends AutosaveMeta {
 
 // Captures the full editing state, including axes with no blocks and any
 // shortcut keys the user has assigned. Nothing here is allowed to drop data.
-export const collectAutosaveState = (axes: any[]): AutosaveAxis[] =>
+export const collectAutosaveState = (axes: AxisData[]): AutosaveAxis[] =>
     (axes || []).map((axis) => ({
         id: axis.id,
         type: axis.type ?? "type-in",
         axisName: axis.axisName ?? "",
         typeName: axis.typeName ?? "",
         shortcutKey: axis.shortcutKey ?? "",
-        blocks: (axis.blocks ?? []).map((block: any) => ({
+        blocks: (axis.blocks ?? []).map((block) => ({
             start: block.start,
             end: block.end,
             text: block.text ?? "",
@@ -91,7 +93,7 @@ export const buildAutosaveRequestBody = (options: {
     bookListFileName?: string;
     annotationFileName?: string;
     annotationName?: string;
-    axes: any[];
+    axes: AxisData[];
 }): AutosaveRequestBody => ({
     ...options.scope,
     bag_filename: options.bagFileName,
@@ -194,7 +196,7 @@ export const formatAutosaveTimestamp = (isoTimestamp?: string): string => {
 
 // Converts a stored autosave back into the axis shape Timeline holds in state.
 // The shapes already match, so this is mostly a defensive copy with defaults.
-export const hydrateAutosaveAxes = (axes: AutosaveAxis[]): any[] =>
+export const hydrateAutosaveAxes = (axes: AutosaveAxis[]): AxisData[] =>
     (axes || []).map((axis) => ({
         id: axis.id,
         type: axis.type ?? "type-in",
@@ -207,7 +209,7 @@ export const hydrateAutosaveAxes = (axes: AutosaveAxis[]): any[] =>
 // Timeline's globalAxisId counter must resume above every restored id, or the
 // next "Add New Axis" produces a duplicate id and every handler that matches
 // axes by id starts hitting the wrong axis.
-export const highestAxisId = (axes: any[]): number =>
+export const highestAxisId = (axes: AxisData[]): number =>
     (axes || []).reduce(
         (max, axis) =>
             Number.isFinite(axis?.id) && axis.id > max ? axis.id : max,

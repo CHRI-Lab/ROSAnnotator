@@ -1,5 +1,10 @@
 // saveUtils.ts
 
+import type {
+    AnnotationAxisPayload,
+    AxisData,
+} from "../../types/annotations";
+
 //strips file ext from filename string (recording.bag -> recording)
 export const stripExtension = (filename: string) => filename.replace(/\.[^/.]+$/, "");
 
@@ -35,7 +40,7 @@ export const isValidAnnotationName = (name: string): { valid: boolean; reason?: 
 };
 
 //Collects the current annotation state into the JSON shape the backend expects
-export const collectAnnotationData = (axes: any[]) => { 
+export const collectAnnotationData = (axes: AxisData[]): AnnotationAxisPayload[] => {
     const data = axes.map((axis) => ({
         id: axis.id,
         axisType: axis.type,
@@ -106,7 +111,7 @@ export interface AnnotationSource {
 
 export const postAnnotation = async (
     annotationName: string,
-    annotationData: any,
+    annotationData: AnnotationAxisPayload[],
     options?: {
         confirmOverwrite?: boolean;
         scope?: AnnotationSaveScope;

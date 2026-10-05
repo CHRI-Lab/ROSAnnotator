@@ -1,7 +1,25 @@
-import { dataViewDefinitions } from "./dataViews";
+import {
+  AnnotationDataView,
+  AnnotationStatisticsDataView,
+  AudioDataView,
+  TierStatisticsDataView,
+  TranscriptDataView,
+  VideoDataView,
+  WaveformDataView,
+  WrenchDataView,
+} from "./dataViews";
 import type { BackendDataView, DataViewDefinition } from "./viewTypes";
 
-export const availableViews: DataViewDefinition[] = dataViewDefinitions;
+export const availableViews: DataViewDefinition[] = [
+  new VideoDataView().toDefinition(),
+  new TranscriptDataView().toDefinition(),
+  new AnnotationDataView().toDefinition(),
+  new AnnotationStatisticsDataView().toDefinition(),
+  new TierStatisticsDataView().toDefinition(),
+  new AudioDataView().toDefinition(),
+  new WaveformDataView().toDefinition(),
+  new WrenchDataView().toDefinition(),
+];
 
 export function viewsWithAvailability(views?: Record<string, BackendDataView>) {
   return availableViews.map(view => ({

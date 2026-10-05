@@ -10,22 +10,16 @@ import {
   getChunkManifest,
 } from "../../api/chunks";
 
-import type { BackendDataView } from "../../components/FrontEndWorkspace/viewTypes";
-
-import { loadDataViews, ViewPayload, AnnotationSourceCheck} from "../../api/dataViews";
+import {
+  loadDataViews,
+  type AnnotationSourceCheck,
+  type ViewPayload,
+} from "../../api/dataViews";
+import type { AxisData, BookList } from "../../types/annotations";
 
 import { stripExtension, formatSeconds } from "../../components/Timeline/saveUtils";
 
-interface ChunkPageData {
-  views?: Record<string, BackendDataView>;
-  duration_seconds?: number;
-  annotation_source_check?: AnnotationSourceCheck | null;
-  video_path: string;
-  audio_transcript: string;
-  booklist_data: unknown;
-  annotation_data: unknown;
-  speaker_data?: Array<unknown>;
-}
+type ChunkPageData = ViewPayload;
 
 import {
   AutosaveMeta,
@@ -87,11 +81,11 @@ const MainPage = () => {
   const [loading, setLoading] = useState(true);
   const [switchingChunk, setSwitchingChunk] = useState(false);
   const [data, setData] = useState<ChunkPageData | null>(null);
-  const [bookListData, setBookListData] = useState<unknown>(null);
+  const [bookListData, setBookListData] = useState<BookList>({});
   const [chunkManifest, setChunkManifest] = useState<ChunkManifest | null>(null);
   const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const shouldRestore = searchParams.get("restore") === "autosave";
-  const [restoredAxes, setRestoredAxes] = useState<any[] | null>(null);
+  const [restoredAxes, setRestoredAxes] = useState<AxisData[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [errorDisplay, setErrorDisplay] = useState(false);
   const [pendingRecovery, setPendingRecovery] = useState<PendingRecovery | null>(null);
@@ -129,9 +123,8 @@ const MainPage = () => {
     const fetchData = async () => {
       try {
         if (!rosBagFile) throw new Error("A ROSBag file must be selected.");
-        let loadedData: ChunkPageData;
         let manifest: ChunkManifest | null = null;
-        let recoveredAxes: any[] | null = null;
+        let recoveredAxes: AxisData[] | null = null;
         let pending: PendingRecovery | null = null;
 
         if (manifestId) {
@@ -162,7 +155,7 @@ const MainPage = () => {
           setBookListData(payload.booklist_data);
           setLoading(false);
         };
-        loadedData = await loadDataViews(
+        const loadedData = await loadDataViews(
           manifestId ? `http://localhost:8000/api/chunks/${manifestId}/0/process/`
             : 'http://localhost:8000/api/process_rosbag/',
           { bag_filename: rosBagFile, booklist_filename: bookListFile, annotation_filename: annotationFile },
@@ -192,7 +185,7 @@ const MainPage = () => {
     void fetchData();
     return () => {
       cancelled = true;
-      requestGeneration.current++;
+      requestGeneration.current = generation + 1;
     };
   }, [annotationFile, bookListFile, manifestId, rosBagFile, shouldRestore]);
 

@@ -14,6 +14,7 @@
 // Send Data" does that. An autosave is recovery data, not a completed save.
 
 import { useCallback, useEffect, useRef } from "react";
+import type { AxisData } from "../../types/annotations";
 import {
     buildAutosaveRequestBody,
     postAutosave,
@@ -25,7 +26,7 @@ interface UseAutosaveOptions {
     scope?: AutosaveScope;
     enabled: boolean;
     bagFileName: string;
-    axes: any[];
+    axes: AxisData[];
     hasUnsavedEdits: boolean;
     bookListFileName?: string;
     annotationFileName?: string;
@@ -39,7 +40,7 @@ interface UseAutosaveOptions {
 export interface AutosaveController {
     // Call after a restore so the hook does not immediately rewrite the file it
     // just read, and after a real save so the next edit is treated as new.
-    markSynced: (axes: any[]) => void;
+    markSynced: (axes: AxisData[]) => void;
     // Fire an autosave now, ignoring both timers.
     flush: () => Promise<void>;
 }
@@ -185,7 +186,7 @@ export const useAutosave = (
         };
     }, [clearTimers]);
 
-    const markSynced = useCallback((axes: any[]) => {
+    const markSynced = useCallback((axes: AxisData[]) => {
         lastSavedSnapshot.current = JSON.stringify(
             buildAutosaveRequestBody({
                 bagFileName: latest.current.bagFileName,

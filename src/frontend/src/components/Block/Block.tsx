@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TextField, styled, IconButton, MenuItem, Tooltip, Select as MuiSelect } from '@mui/material';
+import type { SelectChangeEvent } from '@mui/material/Select';
 
 const CustomSelect = styled(MuiSelect)(({ theme }) => ({
   '& .MuiOutlinedInput-notchedOutline': {
@@ -85,8 +86,8 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
     setIsEditing(false);
   };
 
-  const handleSelectChange = (event: any) => {
-    setSelectedAnnotation(event.target.value as string);
+  const handleSelectChange = (event: SelectChangeEvent<unknown>) => {
+    setSelectedAnnotation(String(event.target.value));
   };
 
   const handleBlur = (e: React.FocusEvent<HTMLDivElement>) => {
