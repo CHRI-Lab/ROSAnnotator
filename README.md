@@ -36,7 +36,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 ```
 
-## Installation
+## Installation and Set up
 
 1. **General System Requirements**
 
@@ -70,13 +70,13 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    Do not commit this file. For gated Pyannote models, the Hugging Face account
    associated with the token must have accepted the model terms.
 
-4. **Download a Local AI Model**
+4. **Download a example Local AI Model**
 
    Before starting Docker, create the local model directory and download **one**
    of the following model options. Model files are intentionally excluded from
    Git because they are large, so every new clone needs this step.
 
-   **Option A — Qwen (text only)**
+   **Example A — Qwen (text only)**
 
    Use Qwen based on text files (e.g. request-utterance and speech-attitude annotation based on transcript). It does not
    accept video frames and therefore cannot perform actions such as gesture annotation.
@@ -88,7 +88,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
      https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
    ```
 
-   **Option B — SmolVLM2 (text and visual input)**
+   **Example B — SmolVLM2 (text and visual input)**
 
    Use SmolVLM2 when annotation from video frames is required (e.g. gesture annotation). This
    option needs both the model and its multimodal projector.
@@ -197,17 +197,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    We provided a sample ROSBag and a sample codebook in the folder `/data-samples`. The codebook needs to be in JSON format and put in the `/datas/booklist` folder. Please put the .bag file in the `/datas/rosbag-data` folder.
 
-10. **Customised Data**
-
-   The topics for video and audio data must be configured to match the corresponding topics in the ROSBag. In the sample ROSBag, the topic for video is `/xtion/rgb/image_raw_throttled`, and the topic for audio is `/audio`. Topic names can be modified in the `/src/backend/rosbag_processing/data_utils.py` file. If additional message types need to be extracted, they should also be defined within this file.
-
-   For any custom tools, users should add the necessary functions in the `/src/backend/rosbag_processing/views.py` file. If users wish to customize prompts for the vision language model (VLM), they can modify them in the same file.
-
-## Usage Guide
-
-[Overview Video](https://www.youtube.com/watch?v=cCD-JclDxLM)
-
-1. **Import Data**
+10. **Adding your own data**
     Put files in the correct folder.
 
     ```
@@ -217,6 +207,37 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
         ├── annotation/  # Retrieve your annotation output here
         └── processed/   # Store all the processed data, e.g. extracted videos and transcriptions
     ```
+
+    Select your bag files, codebook (optional), and annotation file (if you need to retrieve your work) on the import page.
+
+   ![](instruction_imgs/import_page.png)
+
+   The transcription may take several minutes, depending on the audio length.
+
+   **Windows Docker workaround:** After each chunk finishes processing for the
+   first time, restart the frontend so Docker can see the generated video:
+
+   ```bash
+   docker compose restart frontend
+   ```
+   
+   ![](instruction_imgs/transcripting.png)
+
+   **Customised Data**
+
+   The topics for video and audio data must be configured to match the corresponding topics in the ROSBag. In the sample ROSBag, the topic for video is `/xtion/rgb/image_raw_throttled`, and the topic for audio is `/audio`. Topic names can be modified in the `/src/backend/rosbag_processing/data_utils.py` file. If additional message types need to be extracted, they should also be defined within this file.
+
+   For any custom tools, users should add the necessary functions in the `/src/backend/rosbag_processing/views.py` file. If users wish to customize prompts for the vision language model (VLM), they can modify them in the same file.
+
+---
+
+## Usage Guide
+
+[Overview Video](https://www.youtube.com/watch?v=cCD-JclDxLM)
+
+1. **Import Data**
+    all rosbag data, booklist and annotations added to the datas/ folder will be available for selection in the data loading page.
+    **Note**: reload might be needed when opening localhost the first time after the service is up. 
 
     Select your bag files, codebook (optional), and annotation file (if you need to retrieve your work) on the import page.
 
@@ -256,7 +277,7 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    ![](instruction_imgs/codebook.png)   
 
-4. **Auto Annotation**
+3. **AI-assisted Auto Annotation**
 
    Users can provide instructions in the chatbox, and the VLM can provide help after several minutes of processing. Instruction examples are:
    
@@ -278,17 +299,21 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
    ![](instruction_imgs/auto_annotation.png) 
 
-6. **Statistic Summary**
+4. **Statistic Summary**
    
-    In the toolbar panel, there are two statistic summary functions. Users can check both the summary of all annotations and the summary of annotations in different tiers.
+    In addition to different data-views available, in the toolbar panel, there are two statistic summary functions. Users can check both the summary of all annotations and the summary of annotations in different tiers.
 
-7. **Save Data**
+5. **Save Data**
 
     **It is very important to click "Save and Send Data" before exiting ROSAnnotator.** The saved file will be in the `/datas/annotation` folder in CSV format so that users can retrieve their process by loading that file next time.
 
-8. **Others**
+    **autosave note**: progress are auto-saved locally, in response for unexpected webapp quit. Autosaved does not write to the exported annotation file, and will be automatically detected upon entering the webapp with unsaved
+
+6. **Others**
 
    The transcription will be saved in `/datas/processed`. Users can generate the annotation for transcription again by deleting that file.
+
+---
 
 ## Maintenance
 
