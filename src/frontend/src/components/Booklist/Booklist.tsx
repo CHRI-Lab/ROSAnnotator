@@ -1,8 +1,9 @@
 import React from "react";
 import { Grid } from "@mui/material";
+import type { BookList } from "../../types/annotations";
 
 interface BooklistProps {
-  bookListData: Record<string, string[]>;
+  bookListData: BookList;
 }
 
 const Booklist: React.FC<BooklistProps> = ({ bookListData }) => {

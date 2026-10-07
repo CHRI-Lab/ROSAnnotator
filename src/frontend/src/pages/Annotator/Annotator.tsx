@@ -18,11 +18,9 @@ import {
 } from "@mui/material";
 
 import type { ChunkManifest } from "../../api/chunks";
+import type { ViewPayload } from "../../api/dataViews";
 import AppHeader from "../../components/AppHeader";
-import {
-  AxesProvider,
-  type AxisData,
-} from "../../components/AxesProvider/AxesContext";
+import { AxesProvider } from "../../components/AxesProvider/AxesContext";
 import Booklist from "../../components/Booklist/Booklist";
 import Chatbox from "../../components/Chatbox";
 import EditBooklistForm from "../../components/EditBooklistForm/EditBooklistForm";
@@ -53,17 +51,18 @@ import {
 } from "../../types/aiRecords";
 
 import type { BackendDataView } from "../../components/FrontEndWorkspace/viewTypes";
+import type { AxisData, BookList } from "../../types/annotations";
 
 interface AnnotatorProps {
   rosBagFileName?: string;
   bookListFileName?: string;
-  data: any;
-  bookListData: any;
+  data: ViewPayload;
+  bookListData: BookList;
   chunkManifest?: ChunkManifest | null;
   currentChunkIndex?: number;
   switchingChunk?: boolean;
   onChunkChange?: (index: number) => void | Promise<void>;
-  restoredAxes?: any[] | null;
+  restoredAxes?: AxisData[] | null;
   autosaveEnabled?: boolean;
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
   savedAnnotationName?: string;
@@ -137,7 +136,7 @@ const Annotator = ({
     if (bookListData) {
       setBookList(bookListData);
     } else {
-      setBookList([]);
+      setBookList({});
     }
     setAIRecords(data.ai_records ?? []);
   }, [data, bookListData]);
@@ -226,42 +225,6 @@ const Annotator = ({
   const resolveScopeAnomaly = (decision: "all" | "selected" | "reject") => {
     pendingScopeAnomaly?.resolve(decision);
     setPendingScopeAnomaly(null);
-  };
-
-  const handleSaveAnnotations = async () => {
-    if (processingPending) return;
-    const annotationData = axesData.map((axis) => ({
-      id: axis.id,
-      axisType: axis.type,
-      axisName: axis.axisName || "",
-      axisBooklistName: axis.typeName || "",
-      annotationBlocks: (axis.blocks || []).map((block) => ({
-        start: block.start,
-        end: block.end,
-        text: block.text,
-      })),
-    }));
-    
-    try {
-      const response = await fetch("http://localhost:8000/api/save_annotation/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          annotation_name: buildAIRecordAnnotationName(
-            rosBagFileName,
-            bookListFileName,
-          ),
-          annotation_data: annotationData,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Save failed (${response.status})`);
-      }
-      alert("Data saved successfully.");
-    } catch (error) {
-      alert(`Failed to save data. Please try again.\n${error}`);
-    }
   };
 
   const handleSendMessageToGPT = (
@@ -538,7 +501,7 @@ const Annotator = ({
 
 
 
-  const handleSaveBooklist = (jsonData) => {
+  const handleSaveBooklist = (jsonData: BookList) => {
     
     if (!bookListFileName) {
       bookListFileName = `booklist_${new Date().getTime()}.json`;

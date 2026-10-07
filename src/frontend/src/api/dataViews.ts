@@ -1,4 +1,10 @@
 import type { BackendDataView } from '../components/FrontEndWorkspace/viewTypes';
+import type { AIRecord } from '../types/aiRecords';
+import type {
+  AnnotationAxisPayload,
+  BookList,
+  SpeakerSegment,
+} from '../types/annotations';
 
 export type AnnotationSourceCheck = {
   status: "ok" | "mismatch" | "unknown";
@@ -21,9 +27,11 @@ export type ViewPayload = {
   audio_path: string | null;
   audio_transcript: string;
   waveform_image_path: string | null;
-  speaker_data: unknown[];
-  booklist_data: unknown;
-  annotation_data: unknown;
+  speaker_data: SpeakerSegment[];
+  booklist_data: BookList;
+  annotation_data: AnnotationAxisPayload[] | null;
+  ai_records?: AIRecord[];
+  chat_context_id?: string;
   views: Record<string, BackendDataView>;
   [key: string]: unknown;
 };

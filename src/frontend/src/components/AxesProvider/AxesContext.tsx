@@ -1,19 +1,7 @@
 import React, { useState, createContext, ReactNode } from "react";
+import type { AxisData } from "../../types/annotations";
 
-export interface BlockProps {
-  start: number;
-  end: number;
-  text?: string;
-}
-
-export interface AxisData {
-  id: number;
-  type: string;
-  typeName?: string;
-  axisName?: string;
-  shortcutKey?: string;
-  blocks: BlockProps[];
-}
+export type { AxisData } from "../../types/annotations";
 
 interface AxesContextType {
   axes: AxisData[];

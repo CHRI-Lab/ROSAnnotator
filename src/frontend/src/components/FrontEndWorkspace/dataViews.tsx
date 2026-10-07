@@ -123,7 +123,7 @@ export class TranscriptDataView extends BaseDataView {
 export class AnnotationDataView extends BaseDataView {
   readonly id = "annotations";
   readonly label = "Annotations";
-  render(_context: ViewPanelContext): React.ReactElement {
+  render(): React.ReactElement {
     return <AnnotationTable />;
   }
 }
@@ -131,7 +131,7 @@ export class AnnotationDataView extends BaseDataView {
 export class AnnotationStatisticsDataView extends BaseDataView {
   readonly id = "statistics-annotations";
   readonly label = "Statistics (Annotations)";
-  render(_context: ViewPanelContext): React.ReactElement {
+  render(): React.ReactElement {
     return <StatisticsAnnotation />;
   }
 }
@@ -139,7 +139,7 @@ export class AnnotationStatisticsDataView extends BaseDataView {
 export class TierStatisticsDataView extends BaseDataView {
   readonly id = "statistics-tiers";
   readonly label = "Statistics (Tiers)";
-  render(_context: ViewPanelContext): React.ReactElement {
+  render(): React.ReactElement {
     return <StatisticsTier />;
   }
 }
@@ -150,12 +150,6 @@ const transcript = new TranscriptDataView().toDefinition();
 const annotations = new AnnotationDataView().toDefinition();
 const annotationStatistics = new AnnotationStatisticsDataView().toDefinition();
 const tierStatistics = new TierStatisticsDataView().toDefinition();
-
-export const dataViewDefinitions = [
-  video, transcript, annotations, annotationStatistics, tierStatistics,
-  new AudioDataView().toDefinition(), new WaveformDataView().toDefinition(),
-  new WrenchDataView().toDefinition(),
-];
 
 // Preserve Cassie's existing named component exports.
 export const VideoView = video.component;

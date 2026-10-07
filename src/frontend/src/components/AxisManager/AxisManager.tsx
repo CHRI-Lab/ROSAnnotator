@@ -1,4 +1,5 @@
 import React from "react";
+import type { AxisData, BookList } from "../../types/annotations";
 import {
   Dialog,
   DialogTitle,
@@ -15,26 +16,11 @@ import {
   Box,
 } from "@mui/material";
 
-interface BlockProps {
-  start: number;
-  end: number;
-  text?: string;
-}
-
-interface AxisData {
-  id: number;
-  type: string;
-  typeName?: string;
-  axisName?: string;
-  shortcutKey?: string;
-  blocks: BlockProps[];
-}
-
 interface AxisManagerProps {
   open: boolean;
   onClose: () => void;
   axes: AxisData[];
-  booklist: any;
+  booklist: BookList;
   onDeleteAxis: (axisId: number) => void;
   onTypeChange: (axisId: number, type: string, typeName?: string) => void;
   onShortcutChange: (axisId: number, shortcutKey: string) => void;

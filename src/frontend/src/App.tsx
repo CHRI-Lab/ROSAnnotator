@@ -25,7 +25,24 @@ const App: React.FC = () => {
         />
         {/* Testing Routes */}
         <Route path="/loading" element={<LoadingPage />} />
-        <Route path="/maintest" element={<Annotator data={{ video_path: "", audio_transcript: "" }} bookListData={{}} />} />
+        <Route
+          path="/maintest"
+          element={
+            <Annotator
+              data={{
+                video_path: "",
+                audio_path: null,
+                waveform_image_path: null,
+                audio_transcript: "",
+                speaker_data: [],
+                booklist_data: {},
+                annotation_data: [],
+                views: {},
+              }}
+              bookListData={{}}
+            />
+          }
+        />
       </Routes>
     </Router>
   );

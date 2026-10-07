@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef } from "react";
+import React, { useCallback, useState, useEffect, useContext, useRef } from "react";
 import { DragDropContext, DropResult } from 'react-beautiful-dnd';
 import {
   Button,
@@ -31,6 +31,12 @@ import {
   formatAutosaveTimestamp,
 } from "../Autosave/autosaveUtils";
 import { AIInstruction, AIRecord } from "../../types/aiRecords";
+import type {
+  AnnotationAxisPayload,
+  AxisData,
+  BookList,
+  SpeakerSegment,
+} from "../../types/annotations";
 import { applyAIInstruction, isDuplicateAxisName } from "./aiInstruction";
 
 let globalAxisId = 1;
@@ -42,15 +48,15 @@ interface TimelineProps {
   onSeek: (time: number) => void;
   rosBagFileName: string;
   bookListFileName: string;
-  booklist: any;
-  annotationData: any;
-  speakerData?: Array<any>;
-  restoredAxes?: any[] | null;
+  booklist: BookList;
+  annotationData: AnnotationAxisPayload[] | null;
+  speakerData?: SpeakerSegment[];
+  restoredAxes?: AxisData[] | null;
   autosaveEnabled?: boolean;
   autosaveScope?: AutosaveScope;
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
   switchingChunk?: boolean;
-  onAxesUpdate: (axes: any) => void;
+  onAxesUpdate: (axes: AxisData[]) => void;
   instruction: AIInstruction | null;
   aiRecords: AIRecord[];
   onSaveReady?: (openSaveDialog: (() => void) | null) => void;
@@ -154,7 +160,7 @@ const Timeline: React.FC<TimelineProps> = ({
   // the user either confirms the replacement or picks another name.
   const [pendingOverwrite, setPendingOverwrite] = useState<{
     name: string;
-    data: any;
+    data: AnnotationAxisPayload[];
     conflict: AnnotationSaveConflict;
   } | null>(null);
   const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false);
@@ -235,7 +241,7 @@ const Timeline: React.FC<TimelineProps> = ({
     }
 
     isLoadingData.current = true;
-    const newAxes = (Array.isArray(annotationData) ? annotationData : []).map((axisData: any) => ({
+    const newAxes: AxisData[] = (Array.isArray(annotationData) ? annotationData : []).map((axisData) => ({
       id: globalAxisId++,
       type: axisData.axisType,
       axisName: axisData.axisName,
@@ -243,12 +249,12 @@ const Timeline: React.FC<TimelineProps> = ({
       blocks: axisData.annotationBlocks,
     }));
     if (speakerData) {
-      const speakerAxesMap = new Map<string, any>();
+      const speakerAxesMap = new Map<string, AxisData>();
       speakerData.forEach((segment) => {
         const speakerLabel = segment.speaker_label;
 
         if (speakerAxesMap.has(speakerLabel)) {
-          const existingAxis = speakerAxesMap.get(speakerLabel);
+          const existingAxis = speakerAxesMap.get(speakerLabel)!;
           existingAxis.blocks.push({
             start: segment.start_time,
             end: segment.end_time,
@@ -275,7 +281,40 @@ const Timeline: React.FC<TimelineProps> = ({
       newAxes.push(...speakerAxes);
     }
     setAxes(newAxes);
-  }, [restoredAxes, annotationData, speakerData]);
+  }, [restoredAxes, annotationData, speakerData, setAxes]);
+
+  const handleCreateBlock = useCallback((axisId: number) => {
+    const newBlock = {
+      start: selectedRange[0],
+      end: selectedRange[1],
+      text: "",
+    };
+
+    const axis = axes.find((candidateAxis) => candidateAxis.id === axisId);
+    if (axis) {
+      const hasOverlap = axis.blocks.some(
+        (block) => newBlock.start <= block.end && newBlock.end >= block.start
+      );
+
+      if (hasOverlap) {
+        setError(
+          "Error: Block overlaps with an existing block. Create a new axis or adjust the range."
+        );
+        setIsErrorDialogOpen(true);
+        return;
+      }
+    }
+
+    setError("");
+    setIsErrorDialogOpen(false);
+    setAxes((currentAxes) =>
+      currentAxes.map((currentAxis) =>
+        currentAxis.id === axisId
+          ? { ...currentAxis, blocks: [...currentAxis.blocks, newBlock] }
+          : currentAxis
+      )
+    );
+  }, [axes, selectedRange, setAxes]);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
@@ -300,7 +339,7 @@ const Timeline: React.FC<TimelineProps> = ({
     return () => {
       window.removeEventListener("keydown", handleKeyPress);
     };
-  }, [axes, selectedRange, switchingChunk]);
+  }, [axes, handleCreateBlock, switchingChunk]);
 
   useEffect(() => {
     setSeekTime(played);
@@ -339,7 +378,7 @@ const Timeline: React.FC<TimelineProps> = ({
 
   const attemptSave = async (
     name: string,
-    data: any,
+    data: AnnotationAxisPayload[],
     confirmOverwrite: boolean,
   ) => {
     try {
@@ -443,41 +482,6 @@ const Timeline: React.FC<TimelineProps> = ({
       ...prev,
       { id: globalAxisId++, type: "type-in", axisName:String(globalAxisId-1) ,blocks: [] },
     ]);
-  };
-  const handleCreateBlock = (axisId: number) => {
-    const newBlock = {
-      start: selectedRange[0],
-      end: selectedRange[1],
-      text: "",
-    };
-
-    const axis = axes.find((axis) => axis.id === axisId);
-    if (axis) {
-      const overlap = axis.blocks.some(
-        (block) => newBlock.start <= block.end && newBlock.end >= block.start
-      );
-
-      if (overlap) {
-        setError(
-          "Error: Block overlaps with an existing block. Create a new axis or adjust the range."
-        );
-        setIsErrorDialogOpen(true);
-        return;
-      }
-    }
-
-
-    setError("");
-    setIsErrorDialogOpen(false);
-    setAxes((prevAxes) =>
-      prevAxes.map((axis) => {
-        if (axis.id === axisId) {
-          const updatedBlocks = [...axis.blocks, newBlock];
-          return { ...axis, blocks: updatedBlocks };
-        }
-        return axis;
-      })
-    );
   };
   const handleDeleteBlock = (axisId: number, blockIndex: number) => {
     setPendingDeletion({ kind: "block", axisId, blockIndex });
