@@ -4,14 +4,11 @@ FROM node:20.11.1-alpine
 # Set the working directory inside the container
 WORKDIR /app
 
-# Copy the package.json file to /app
-COPY package.json ./
+# Copy dependency manifests to /app
+COPY package.json package-lock.json ./
 
-# Remove node_modules and package-lock.json if they exist
-RUN rm -rf node_modules package-lock.json
-
-# Install dependencies
-RUN npm install
+# Install the exact dependency versions from package-lock.json
+RUN npm ci
 
 # Copy the rest of the frontend code to /app
 COPY . .
