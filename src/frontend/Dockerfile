@@ -5,13 +5,10 @@ FROM node:20.11.1-alpine
 WORKDIR /app
 
 # Copy the package.json file to /app
-COPY package.json ./
-
-# Remove node_modules and package-lock.json if they exist
-RUN rm -rf node_modules package-lock.json
+COPY package.json package-lock.json ./
 
 # Install dependencies
-RUN npm install
+RUN npm ci
 
 # Copy the rest of the frontend code to /app
 COPY . .
