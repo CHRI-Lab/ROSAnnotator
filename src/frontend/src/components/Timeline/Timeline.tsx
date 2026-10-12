@@ -352,7 +352,7 @@ const Timeline: React.FC<TimelineProps> = ({
     setSeekTime(played);
   }, [played]);
 
-  const handleOpenSaveDialog = () => {
+  const handleOpenSaveDialog = useCallback(() => {
     // Prefer the file this session is working in, so a save goes back to the
     // file it came from. The merge in a chunk save depends on this: a
     // different name merges into a file that does not exist.
@@ -361,12 +361,12 @@ const Timeline: React.FC<TimelineProps> = ({
       buildDefaultAnnotationName(rosBagFileName, bookListFileName);
     setAnnotationName(defaultName);
     setIsSaveDialogOpen(true);
-  };
+  }, [savedAnnotationName, rosBagFileName, bookListFileName]);
 
   useEffect(() => {
     onSaveReady?.(handleOpenSaveDialog);
     return () => onSaveReady?.(null);
-  });
+  }, [onSaveReady, handleOpenSaveDialog]);
 
 
   const finishSave = (name: string) => {
