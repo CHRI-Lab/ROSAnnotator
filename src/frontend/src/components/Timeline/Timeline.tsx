@@ -249,9 +249,16 @@ const Timeline: React.FC<TimelineProps> = ({
       blocks: axisData.annotationBlocks,
     }));
     if (speakerData) {
+      // An annotation file saved from a previous session already contains its
+      // speaker tiers. Rebuilding them from speakerData appends a second copy,
+      // and the save merge matches axes on (axisName, axisType), so the two
+      // collapse into one axis holding both sets of blocks. Every save after
+      // that doubles them again.
+      const loadedAxisNames = new Set(newAxes.map((axis) => axis.axisName));
       const speakerAxesMap = new Map<string, AxisData>();
       speakerData.forEach((segment) => {
         const speakerLabel = segment.speaker_label;
+        if (loadedAxisNames.has(speakerLabel)) return;
 
         if (speakerAxesMap.has(speakerLabel)) {
           const existingAxis = speakerAxesMap.get(speakerLabel)!;
