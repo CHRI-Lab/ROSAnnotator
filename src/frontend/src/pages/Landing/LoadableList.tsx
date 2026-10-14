@@ -157,12 +157,23 @@ function LoadableList() {
     autosaveCheckRef.current = check;
   };
 
+  const goToRestoredSession = async () => {
+    const manifest = await createChunkManifest({
+      bagFilename: rosBagFile,
+      booklistFilename: bookListFile,
+      annotationFilename: annotationFile,
+      chunkingEnabled: false,
+    });
+    navigate(
+      `${destinationPath()}?manifestId=${encodeURIComponent(manifest.id)}&restore=autosave`
+    );
+  };
+
   const goToMainPage = (restore: boolean) => {
     if (restore) {
-      navigate(`${destinationPath()}?restore=autosave`);
-    } else {
-      return prepareChunking();
+      return goToRestoredSession();
     }
+    return prepareChunking();
   };
 
   const handleLoadData = async () => {
@@ -191,10 +202,22 @@ function LoadableList() {
     }
   };
 
-  const handleRestoreAutosave = () => {
+  const handleRestoreAutosave = async () => {
     if (operationInProgress.current) return;
-    setIsRestoreDialogOpen(false);
-    goToMainPage(true);
+    operationInProgress.current = true;
+    setPreparing(true);
+    setRecoveryError("");
+    try {
+      await goToMainPage(true);
+      setIsRestoreDialogOpen(false);
+    } catch (error) {
+      setRecoveryError(
+        "Could not prepare the saved session. Please try again, or discard the saved work to start fresh."
+      );
+    } finally {
+      operationInProgress.current = false;
+      setPreparing(false);
+    }
   };
 
   const handleDiscardAutosave = async () => {

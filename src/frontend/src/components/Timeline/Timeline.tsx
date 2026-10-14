@@ -249,9 +249,16 @@ const Timeline: React.FC<TimelineProps> = ({
       blocks: axisData.annotationBlocks,
     }));
     if (speakerData) {
+      // An annotation file saved from a previous session already contains its
+      // speaker tiers. Rebuilding them from speakerData appends a second copy,
+      // and the save merge matches axes on (axisName, axisType), so the two
+      // collapse into one axis holding both sets of blocks. Every save after
+      // that doubles them again.
+      const loadedAxisNames = new Set(newAxes.map((axis) => axis.axisName));
       const speakerAxesMap = new Map<string, AxisData>();
       speakerData.forEach((segment) => {
         const speakerLabel = segment.speaker_label;
+        if (loadedAxisNames.has(speakerLabel)) return;
 
         if (speakerAxesMap.has(speakerLabel)) {
           const existingAxis = speakerAxesMap.get(speakerLabel)!;
@@ -345,7 +352,7 @@ const Timeline: React.FC<TimelineProps> = ({
     setSeekTime(played);
   }, [played]);
 
-  const handleOpenSaveDialog = () => {
+  const handleOpenSaveDialog = useCallback(() => {
     // Prefer the file this session is working in, so a save goes back to the
     // file it came from. The merge in a chunk save depends on this: a
     // different name merges into a file that does not exist.
@@ -354,12 +361,12 @@ const Timeline: React.FC<TimelineProps> = ({
       buildDefaultAnnotationName(rosBagFileName, bookListFileName);
     setAnnotationName(defaultName);
     setIsSaveDialogOpen(true);
-  };
+  }, [savedAnnotationName, rosBagFileName, bookListFileName]);
 
   useEffect(() => {
     onSaveReady?.(handleOpenSaveDialog);
     return () => onSaveReady?.(null);
-  });
+  }, [onSaveReady, handleOpenSaveDialog]);
 
 
   const finishSave = (name: string) => {
