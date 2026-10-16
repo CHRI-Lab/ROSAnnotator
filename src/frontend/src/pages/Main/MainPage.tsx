@@ -95,7 +95,8 @@ const MainPage = () => {
   const [savedAnnotationName, setSavedAnnotationName] = useState("");
   const requestGeneration = useRef(0);
   const chunkChangeInProgress = useRef(false);
-  const sourceCheckAsked = useRef(false);            // Asked at most once per load.                     
+  const sourceCheckAsked = useRef(false);            // Asked at most once per load.
+  const recoveryAsked = useRef(false);               // Same, for the recovery prompt.          // Asked at most once per load.                     
   const autosaveFlush = useRef<(() => Promise<void>) | null>(null);
   const registerAutosave = useCallback((flush: (() => Promise<void>) | null) => {
     autosaveFlush.current = flush;
@@ -118,6 +119,7 @@ const MainPage = () => {
     setPendingRecovery(null);
     setPendingSourceCheck(null);      
     sourceCheckAsked.current = false;
+    recoveryAsked.current = false;
     setSavedAnnotationName(annotationFile ? stripExtension(annotationFile) : "");
 
     const fetchData = async () => {
@@ -145,7 +147,10 @@ const MainPage = () => {
           if (!isCurrent() || !Object.values(payload.views).some(view => view.available)) return;
           setChunkManifest(manifest);
           setRestoredAxes(recoveredAxes);
-          setPendingRecovery(pending);
+          if (!recoveryAsked.current && pending) {
+            recoveryAsked.current = true;
+            setPendingRecovery(pending);
+          }
           if (!sourceCheckAsked.current                                  
               && needsSourceConfirmation(payload.annotation_source_check)) {
             sourceCheckAsked.current = true;
@@ -165,7 +170,10 @@ const MainPage = () => {
         if (!isCurrent()) return;
         setChunkManifest(manifest);
         setRestoredAxes(recoveredAxes);
-        setPendingRecovery(pending);
+          if (!recoveryAsked.current && pending) {
+            recoveryAsked.current = true;
+            setPendingRecovery(pending);
+          }
         if (!sourceCheckAsked.current                                    
             && needsSourceConfirmation(loadedData.annotation_source_check)) {
           sourceCheckAsked.current = true;
