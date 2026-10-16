@@ -144,7 +144,13 @@ def annotations_for_chunk(annotation_data, chunk):
         for block in axis.get('annotationBlocks', []):
             clipped = clip_to_chunk(block, chunk)
             if clipped is not None:
-                blocks.append({**block, 'start': clipped[0], 'end': clipped[1]})
+                clipped_block = {**block, 'start': clipped[0], 'end': clipped[1]}
+                if block['start'] < chunk['start_seconds'] or block['end'] > chunk['end_seconds']:
+                    clipped_block.update({
+                        'sourceStart': block['start'],
+                        'sourceEnd': block['end'],
+                    })
+                blocks.append(clipped_block)
         result.append({**axis, 'annotationBlocks': blocks})
     return result
 
