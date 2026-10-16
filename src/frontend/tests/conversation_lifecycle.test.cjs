@@ -96,6 +96,25 @@ test('a refreshed or remounted chat starts without cleared messages', () => {
   assert.doesNotMatch(chatboxSource, /localStorage\.(?:getItem|setItem)\([^\n]*chatHistory/);
 });
 
+test('assistant selections survive conversation clears and chunk remounts', () => {
+  assert.match(
+    chatboxSource,
+    /ASSISTANT_CONTROLS_STORAGE_KEY = "rosannotator-assistant-controls"/,
+  );
+  assert.match(chatboxSource, /const \[initialAssistantControls\] = useState\(loadAssistantControls\)/);
+  assert.match(chatboxSource, /initialAssistantControls\?\.rangeStart \?\? "00:00"/);
+  assert.match(chatboxSource, /initialAssistantControls\?\.rangeEnd \?\? formatChunkTime\(duration\)/);
+  assert.match(chatboxSource, /initialAssistantControls\?\.timelineSelection \?\? \[]/);
+  assert.match(
+    chatboxSource,
+    /initialAssistantControls\?\.selectedDataViews \?\?[\s\S]*?availableDataViews\.map/,
+  );
+  assert.doesNotMatch(
+    chatboxSource,
+    /useEffect\(\(\) => \{\s*setRangeStart\("00:00"\);\s*setRangeEnd\(formatChunkTime\(duration\)\)/,
+  );
+});
+
 test('chunk selection warns before switching and cancel keeps the current chunk', () => {
   assert.match(
     annotatorSource,

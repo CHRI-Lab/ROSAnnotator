@@ -59,6 +59,25 @@ type PendingFallback = {
 };
 
 const ASSISTANT_ROUTING_STORAGE_KEY = "rosannotator-assistant-routing";
+const ASSISTANT_CONTROLS_STORAGE_KEY = "rosannotator-assistant-controls";
+
+type AssistantControls = {
+  rangeStart: string;
+  rangeEnd: string;
+  timelineSelection: string[];
+  selectedDataViews: AssistantDataViewId[];
+};
+
+const ASSISTANT_DATA_VIEW_IDS = new Set<AssistantDataViewId>([
+  "audio",
+  "video",
+  "transcript",
+  "waveform",
+  "annotations",
+  "statistics-annotations",
+  "statistics-tiers",
+  "codebook",
+]);
 
 const loadAssistantRouting = (): AssistantRouting | null => {
   try {
@@ -75,6 +94,41 @@ const loadAssistantRouting = (): AssistantRouting | null => {
   }
 
   return null;
+};
+
+const loadAssistantControls = (): AssistantControls | null => {
+  try {
+    const storedControls = localStorage.getItem(ASSISTANT_CONTROLS_STORAGE_KEY);
+    if (!storedControls) {
+      return null;
+    }
+
+    const parsedControls: unknown = JSON.parse(storedControls);
+    if (!parsedControls || typeof parsedControls !== "object") {
+      return null;
+    }
+
+    const controls = parsedControls as Partial<AssistantControls>;
+    if (
+      typeof controls.rangeStart !== "string" ||
+      typeof controls.rangeEnd !== "string" ||
+      !Array.isArray(controls.timelineSelection) ||
+      !controls.timelineSelection.every((value) => typeof value === "string") ||
+      !Array.isArray(controls.selectedDataViews) ||
+      !controls.selectedDataViews.every(
+        (value) =>
+          typeof value === "string" &&
+          ASSISTANT_DATA_VIEW_IDS.has(value as AssistantDataViewId),
+      )
+    ) {
+      return null;
+    }
+
+    return controls as AssistantControls;
+  } catch {
+    // Ignore unavailable storage or invalid previous values and use defaults.
+    return null;
+  }
 };
 
 const upwardMenuProps = {
@@ -98,6 +152,7 @@ const Chatbox = ({
   const [message, setMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [initialAssistantRouting] = useState(loadAssistantRouting);
+  const [initialAssistantControls] = useState(loadAssistantControls);
   const [assistantRouting, setAssistantRouting] = useState<AssistantRouting>(
     initialAssistantRouting ?? DEFAULT_ASSISTANT_ROUTING,
   );
@@ -106,18 +161,20 @@ const Chatbox = ({
   );
   const [pendingFallback, setPendingFallback] =
     useState<PendingFallback | null>(null);
-  const [rangeStart, setRangeStart] = useState("00:00");
-  const [rangeEnd, setRangeEnd] = useState(() => formatChunkTime(duration));
-  const [timelineSelection, setTimelineSelection] = useState<string[]>([]);
+  const [rangeStart, setRangeStart] = useState(
+    initialAssistantControls?.rangeStart ?? "00:00",
+  );
+  const [rangeEnd, setRangeEnd] = useState(
+    initialAssistantControls?.rangeEnd ?? formatChunkTime(duration),
+  );
+  const [timelineSelection, setTimelineSelection] = useState<string[]>(
+    initialAssistantControls?.timelineSelection ?? [],
+  );
   const [selectedDataViews, setSelectedDataViews] = useState<AssistantDataViewId[]>(
-    () => availableDataViews.map((view) => view.id),
+    initialAssistantControls?.selectedDataViews ??
+      availableDataViews.map((view) => view.id),
   );
   const [confirmEmptyDataViews, setConfirmEmptyDataViews] = useState(false);
-
-  useEffect(() => {
-    setRangeStart("00:00");
-    setRangeEnd(formatChunkTime(duration));
-  }, [duration]);
 
   const timeSelection = validateChunkTimeRange(rangeStart, rangeEnd, duration);
 
@@ -135,6 +192,22 @@ const Chatbox = ({
       // The in-memory selection still remains stable when storage is blocked.
     }
   }, [assistantRouting, hasAssistantSelection]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        ASSISTANT_CONTROLS_STORAGE_KEY,
+        JSON.stringify({
+          rangeStart,
+          rangeEnd,
+          timelineSelection,
+          selectedDataViews,
+        } satisfies AssistantControls),
+      );
+    } catch {
+      // The current selections still remain stable when storage is blocked.
+    }
+  }, [rangeStart, rangeEnd, timelineSelection, selectedDataViews]);
 
   const handleModeChange = (mode: AssistantRouting["mode"]) => {
     setHasAssistantSelection(true);
