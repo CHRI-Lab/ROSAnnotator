@@ -45,8 +45,6 @@ let globalAxisId = 1;
 interface TimelineProps {
   duration: number;
   sourceDuration?: number;
-  played: number;
-  onSeek: (time: number) => void;
   rosBagFileName: string;
   bookListFileName: string;
   booklist: BookList;
@@ -101,7 +99,20 @@ const ButtonsContainer = styled("div")({
   flexDirection: "column",
   padding: "10px",
   alignItems: "flex-start",
+  position: "relative",
+  minWidth: "170px",
 });
+
+const DurationLabel = styled("div")(({ theme }) => ({
+  position: "absolute",
+  top: "40px",
+  left: "10px",
+  width: "150px",
+  color: theme.palette.text.primary,
+  fontSize: "0.875rem",
+  fontWeight: 600,
+  textAlign: "center",
+}));
 
 const TimelineMarks = styled("div")({
   position: "relative",
@@ -121,8 +132,6 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
 const Timeline: React.FC<TimelineProps> = ({
   duration,
   sourceDuration,
-  played,
-  onSeek,
   rosBagFileName,
   bookListFileName,
   booklist,
@@ -139,7 +148,6 @@ const Timeline: React.FC<TimelineProps> = ({
   savedAnnotationName,
   onAnnotationSaved
 }) => {
-  const [seekTime, setSeekTime] = useState(played);
   const [markInterval] = useState(1);
   const [selectedRange, setSelectedRange] = useState<number[]>([
     0,
@@ -351,10 +359,6 @@ const Timeline: React.FC<TimelineProps> = ({
     };
   }, [axes, handleCreateBlock, switchingChunk]);
 
-  useEffect(() => {
-    setSeekTime(played);
-  }, [played]);
-
   const handleOpenSaveDialog = useCallback(() => {
     // Prefer the file this session is working in, so a save goes back to the
     // file it came from. The merge in a chunk save depends on this: a
@@ -441,11 +445,6 @@ const Timeline: React.FC<TimelineProps> = ({
   };
 
 
-
-  const handleSliderChange = (_event: Event, newValue: number | number[]) => {
-    setSeekTime(newValue as number);
-    onSeek(newValue as number);
-  };
 
   const handleDragEnd = (result: DropResult) => {
     const { source, destination } = result;
@@ -778,6 +777,7 @@ const Timeline: React.FC<TimelineProps> = ({
       </ControlsContainer>
       <div style={{ display: "flex", width: "100%" }}>
         <ButtonsContainer>
+          <DurationLabel>Annotation duration</DurationLabel>
           {axes.map((axis, index) => (
             <Button
               key={index}
@@ -796,24 +796,6 @@ const Timeline: React.FC<TimelineProps> = ({
         </ButtonsContainer>
         <ScrollableTimelineContainer>
           <div style={{ width: `${totalWidth}px`, padding: "10px" }}>
-            <Slider
-              value={seekTime}
-              min={0}
-              max={duration}
-              step={markInterval}
-              onChange={handleSliderChange}
-              valueLabelDisplay="off"
-              marks={marks.map((mark) => ({ value: mark.value, label: "" }))}
-              sx={{
-                "& .MuiSlider-track": { backgroundColor: "transparent" },
-                "& .MuiSlider-thumb": {
-                  width: "20px",
-                  height: "20px",
-                  "&:before": { boxShadow: "0 4px 8px rgba(0,0,0,0.4)" },
-                },
-                "& .MuiSlider-rail": { height: "8px", opacity: 0.5 },
-              }}
-            />
             <AxisManager
               open={isDialogOpen}
               onClose={() => setIsDialogOpen(false)}
