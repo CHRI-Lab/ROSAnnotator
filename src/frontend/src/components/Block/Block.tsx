@@ -1,35 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { TextField, styled, IconButton, MenuItem, Tooltip, Select as MuiSelect } from '@mui/material';
-import type { SelectChangeEvent } from '@mui/material/Select';
+import React, { useState, useEffect } from 'react';
+import { Box, Button, TextField, styled, IconButton, MenuItem, Popover, Tooltip } from '@mui/material';
 import { clampTimeToDuration } from '../Timeline/blockBounds';
-
-const CustomSelect = styled(MuiSelect)(({ theme }) => ({
-  flex: '1 1 auto',
-  minWidth: 0,
-  '& .MuiOutlinedInput-notchedOutline': {
-    border: 'none',
-  },
-  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-    border: 'none',
-  },
-  '& .MuiSelect-select': {
-    padding: theme.spacing(1),
-    whiteSpace: 'normal',
-    overflowWrap: 'anywhere',
-    wordBreak: 'break-word',
-    lineHeight: 1.2,
-    maxHeight: '100%',
-    overflow: 'hidden',
-  },
-  '& .MuiInputBase-root': {
-    '&:hover:not(.Mui-disabled):before': {
-      borderBottom: 'none',
-    },
-    '&:before': {
-      borderBottom: 'none',
-    },
-  },
-}));
 
 interface BlockProps {
   block: {
@@ -81,7 +52,8 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
   const [selectedAnnotation, setSelectedAnnotation] = useState(block.text || '');
   const [start, setStart] = useState(block.start);
   const [end, setEnd] = useState(block.end);
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [editorAnchor, setEditorAnchor] = useState<HTMLElement | null>(null);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const [updatedBooklist, setUpdatedBooklist] = useState<string[]>([]);
 
   useEffect(() => {
@@ -100,108 +72,139 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
     setEnd(block.end);
   }, [block.text, block.start, block.end]);
 
-  const handleClick = () => {
+  const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    setTooltipOpen(false);
+    setEditorAnchor(event.currentTarget);
     setIsEditing(true);
   };
 
   const handleSave = () => {
     onSave(selectedAnnotation, start, end);
     setIsEditing(false);
+    setEditorAnchor(null);
   };
 
-  const handleSelectChange = (event: SelectChangeEvent<unknown>) => {
-    setSelectedAnnotation(String(event.target.value));
+  const handleCancel = () => {
+    setSelectedAnnotation(block.text || '');
+    setStart(block.start);
+    setEnd(block.end);
+    setIsEditing(false);
+    setEditorAnchor(null);
   };
 
-  const handleBlur = (e: React.FocusEvent<HTMLDivElement>) => {
-    if (!containerRef.current?.contains(e.relatedTarget)) {
-      handleSave();
-    }
-  };
+  const invalidRange = !Number.isFinite(start)
+    || !Number.isFinite(end)
+    || start < 0
+    || end < start
+    || end > duration;
 
   return (
-    <Tooltip title={`${selectedAnnotation} (${start} - ${end})`} placement="top" arrow>
-      <BlockDisplay
-        start={start}  // Use state start here
-        end={end}      // Use state end here
-        duration={duration}
-        onClick={handleClick}  // Use click instead of double click
+    <>
+      <Tooltip
+        title={`${selectedAnnotation} (${start} - ${end})`}
+        placement="top"
+        arrow
+        open={tooltipOpen && !isEditing}
+        onOpen={() => {
+          if (!isEditing) setTooltipOpen(true);
+        }}
+        onClose={() => setTooltipOpen(false)}
+        disableHoverListener={isEditing}
       >
-        {isEditing ? (
-          <div 
-          ref={containerRef} 
-          tabIndex={-1} 
-          onBlur={handleBlur} 
-          style={{ display: 'flex', alignItems: 'center', gap: '10px' }}  // Added flexbox layout
+        <BlockDisplay
+          start={start}
+          end={end}
+          duration={duration}
+          onClick={handleClick}
         >
+          <BlockText>{`${selectedAnnotation} (${start} - ${end})`}</BlockText>
+          <IconButton
+            onClick={(event) => {
+              event.stopPropagation();
+              onDelete();
+            }}
+            size="small"
+            aria-label="Delete annotation block"
+            sx={{ flexShrink: 0 }}
+          >
+            x
+          </IconButton>
+        </BlockDisplay>
+      </Tooltip>
+
+      <Popover
+        open={isEditing}
+        anchorEl={editorAnchor}
+        onClose={handleCancel}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Box
+          display="flex"
+          flexDirection="column"
+          gap={1.5}
+          width="min(400px, calc(100vw - 24px))"
+          p={1.5}
+          boxSizing="border-box"
+        >
+          <Box component="strong">Edit annotation block</Box>
+          {axisType === 'selected' ? (
             <TextField
+              select
+              label="Annotation"
               value={selectedAnnotation}
-              onChange={(e) => setSelectedAnnotation(e.target.value)}
+              onChange={(event) => setSelectedAnnotation(event.target.value)}
               autoFocus
+              fullWidth
+            >
+              {updatedBooklist.map((annotation) => (
+                <MenuItem key={annotation} value={annotation}>
+                  {annotation}
+                </MenuItem>
+              ))}
+            </TextField>
+          ) : (
+            <TextField
+              label="Annotation"
+              value={selectedAnnotation}
+              onChange={(event) => setSelectedAnnotation(event.target.value)}
+              autoFocus
+              multiline
+              minRows={2}
+              fullWidth
+            />
+          )}
+          <Box display="flex" gap={1.5}>
+            <TextField
+              label="Start time (seconds)"
+              type="number"
+              value={start}
+              onChange={(event) => setStart(
+                clampTimeToDuration(parseFloat(event.target.value), duration)
+              )}
+              inputProps={{ min: 0, max: duration, step: 0.001 }}
               fullWidth
             />
             <TextField
-              label="Start"
-              type="number"
-              value={start}
-              onChange={(e) => setStart(clampTimeToDuration(parseFloat(e.target.value), duration))}
-              inputProps={{
-                size: start.toString().length || 1, // Dynamically adjust size based on length
-                min: 0,  // Ensure valid input
-                max: duration,
-                style: { minWidth: '50px' },  // Set a minimum width
-                step:0.001
-              }}
-            />
-            <TextField
-              label="End"
+              label="End time (seconds)"
               type="number"
               value={end}
-              onChange={(e) => setEnd(clampTimeToDuration(parseFloat(e.target.value), duration))}
-              inputProps={{
-                size: end.toString().length || 1, // Dynamically adjust size based on length
-                min: 0,  // Ensure valid input
-                max: duration,
-                style: { minWidth: '50px' },  // Set a minimum width
-                step:0.001
-              }}
+              onChange={(event) => setEnd(
+                clampTimeToDuration(parseFloat(event.target.value), duration)
+              )}
+              inputProps={{ min: 0, max: duration, step: 0.001 }}
+              fullWidth
             />
-          </div>
-        ) : axisType === 'selected' ? (
-<CustomSelect
-  value={selectedAnnotation}
-  onChange={handleSelectChange}
-  displayEmpty
-  fullWidth
->
-  {(updatedBooklist && updatedBooklist.length > 0) ? (
-    updatedBooklist.map((annotation) => (
-      <MenuItem key={annotation} value={annotation}>
-        {annotation}
-      </MenuItem>
-    ))
-  ) : (
-    <MenuItem disabled value="">
-      No Annotations Available
-    </MenuItem>
-  )}
-</CustomSelect>
-        ) : (
-          <BlockText>{`${selectedAnnotation} (${start} - ${end})`}</BlockText>
-        )}
-        <IconButton
-          onClick={(event) => {
-            event.stopPropagation();
-            onDelete();
-          }}
-          size="small"
-          aria-label="Delete annotation block"
-          sx={{ flexShrink: 0 }}
-        >
-          x
-        </IconButton>
-      </BlockDisplay>
-    </Tooltip>
+          </Box>
+          <Box display="flex" justifyContent="flex-end" gap={1}>
+            <Button onClick={handleCancel}>Cancel</Button>
+            <Button onClick={handleSave} disabled={invalidRange} variant="contained">
+              Save
+            </Button>
+          </Box>
+        </Box>
+      </Popover>
+    </>
   );
 };
 
