@@ -4,6 +4,8 @@ import type { SelectChangeEvent } from '@mui/material/Select';
 import { clampTimeToDuration } from '../Timeline/blockBounds';
 
 const CustomSelect = styled(MuiSelect)(({ theme }) => ({
+  flex: '1 1 auto',
+  minWidth: 0,
   '& .MuiOutlinedInput-notchedOutline': {
     border: 'none',
   },
@@ -12,6 +14,12 @@ const CustomSelect = styled(MuiSelect)(({ theme }) => ({
   },
   '& .MuiSelect-select': {
     padding: theme.spacing(1),
+    whiteSpace: 'normal',
+    overflowWrap: 'anywhere',
+    wordBreak: 'break-word',
+    lineHeight: 1.2,
+    maxHeight: '100%',
+    overflow: 'hidden',
   },
   '& .MuiInputBase-root': {
     '&:hover:not(.Mui-disabled):before': {
@@ -40,6 +48,8 @@ const BlockDisplay = styled('div')<{ start: number; end: number; duration: numbe
   ({ theme, start, end, duration }) => ({
     position: 'absolute',
     left: `${(start / duration) * 100}%`,
+    top: '50%',
+    transform: 'translateY(-50%)',
     width: `${((end - start) / duration) * 100}%`,
     height: '80%',
     backgroundColor: theme.palette.action.selected,
@@ -50,8 +60,20 @@ const BlockDisplay = styled('div')<{ start: number; end: number; duration: numbe
     border: '1px solid black',
     boxSizing: 'border-box',
     padding: '0 10px',
+    overflow: 'hidden',
   })
 );
+
+const BlockText = styled('span')({
+  flex: '1 1 auto',
+  minWidth: 0,
+  maxHeight: '100%',
+  overflow: 'hidden',
+  whiteSpace: 'normal',
+  overflowWrap: 'anywhere',
+  wordBreak: 'break-word',
+  lineHeight: 1.2,
+});
 
 const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSave, onDelete }) => {
   
@@ -165,7 +187,7 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
   )}
 </CustomSelect>
         ) : (
-          <span>{`${selectedAnnotation} (${start} - ${end})`}</span>
+          <BlockText>{`${selectedAnnotation} (${start} - ${end})`}</BlockText>
         )}
         <IconButton
           onClick={(event) => {
@@ -174,6 +196,7 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
           }}
           size="small"
           aria-label="Delete annotation block"
+          sx={{ flexShrink: 0 }}
         >
           x
         </IconButton>

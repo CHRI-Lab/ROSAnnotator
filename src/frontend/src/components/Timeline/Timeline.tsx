@@ -82,7 +82,7 @@ const ControlsContainer = styled("div")({
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  marginBottom: "20px",
+  marginBottom: "8px",
   width: "100%",
 });
 
@@ -90,29 +90,52 @@ const ScrollableTimelineContainer = styled("div")({
   overflowX: "scroll",
   overflowY: "hidden",
   width: "100%",
-  padding: "10px 0",
+  padding: "0 0 10px",
   position: "relative",
 });
 
-const ButtonsContainer = styled("div")({
+const TimelineGrid = styled("div")({
+  display: "grid",
+  gridTemplateColumns: "170px minmax(0, 1fr)",
+  alignItems: "stretch",
+});
+
+const TimelineControlCell = styled("div")(({ theme }) => ({
+  position: "sticky",
+  left: 0,
+  zIndex: 2,
   display: "flex",
-  flexDirection: "column",
-  padding: "10px",
-  alignItems: "flex-start",
-  position: "relative",
-  minWidth: "170px",
-});
+  alignItems: "center",
+  justifyContent: "center",
+  width: "170px",
+  boxSizing: "border-box",
+  padding: "0 10px",
+  backgroundColor: theme.palette.background.paper,
+}));
 
-const DurationLabel = styled("div")(({ theme }) => ({
-  position: "absolute",
-  top: "40px",
-  left: "10px",
-  width: "150px",
+const DurationLabel = styled(TimelineControlCell)(({ theme }) => ({
   color: theme.palette.text.primary,
   fontSize: "0.875rem",
   fontWeight: 600,
   textAlign: "center",
 }));
+
+const AxisControlCell = styled(TimelineControlCell)({
+  // Axis has a 10px top margin. Matching that space here centres the button
+  // on the visible axis box instead of the entire grid row.
+  paddingTop: "10px",
+});
+
+const DurationTimelineCell = styled("div")({
+  height: "60px",
+  padding: "15px 10px",
+  boxSizing: "border-box",
+});
+
+const TimelineMarksCell = styled("div")({
+  padding: "0 10px",
+  boxSizing: "border-box",
+});
 
 const TimelineMarks = styled("div")({
   position: "relative",
@@ -775,27 +798,10 @@ const Timeline: React.FC<TimelineProps> = ({
           Manage Axes
         </Button>
       </ControlsContainer>
-      <div style={{ display: "flex", width: "100%" }}>
-        <ButtonsContainer>
-          <DurationLabel>Annotation duration</DurationLabel>
-          {axes.map((axis, index) => (
-            <Button
-              key={index}
-              onClick={() => handleCreateBlock(axis.id)}
-              variant="contained"
-              sx={{
-                mb: 2.25,
-                top: "145px",
-                width: "150px",
-                height: "42px",
-              }}
-            >
-              Create
-            </Button>
-          ))}
-        </ButtonsContainer>
-        <ScrollableTimelineContainer>
-          <div style={{ width: `${totalWidth}px`, padding: "10px" }}>
+      <ScrollableTimelineContainer>
+        <TimelineGrid style={{ width: `${totalWidth + 170}px` }}>
+          <DurationLabel>Annotation Duration</DurationLabel>
+          <DurationTimelineCell>
             <AxisManager
               open={isDialogOpen}
               onClose={() => setIsDialogOpen(false)}
@@ -813,9 +819,12 @@ const Timeline: React.FC<TimelineProps> = ({
               step={markInterval} // Ensure the step is the same as markInterval
               onChange={handleRangeChange}
               valueLabelDisplay="auto"
-              sx={{ marginTop: "20px", marginBottom: "20px" }}
+              sx={{ margin: 0 }}
               marks={marks.map((mark) => ({ value: mark.value, label: "" }))}
             />
+          </DurationTimelineCell>
+          <TimelineControlCell aria-hidden="true" />
+          <TimelineMarksCell>
             <TimelineMarks>
               {marks.map((mark, index) => (
                 <TimelineMarkLabel
@@ -826,28 +835,38 @@ const Timeline: React.FC<TimelineProps> = ({
                 </TimelineMarkLabel>
               ))}
             </TimelineMarks>
-            {axes.map((axis) => (
+          </TimelineMarksCell>
+          {axes.map((axis) => (
+            <React.Fragment key={axis.id}>
+              <AxisControlCell>
+                <Button
+                  onClick={() => handleCreateBlock(axis.id)}
+                  variant="contained"
+                  sx={{ width: "150px", height: "42px" }}
+                >
+                  Create
+                </Button>
+              </AxisControlCell>
               <Axis
-                key={axis.id}
-                id = {axis.id}
+                id={axis.id}
                 duration={duration}
                 selectedRange={selectedRange}
                 blocks={axis.blocks}
                 axisType={axis.type}
                 axisName={axis.axisName || "No Axis Name"}
                 booklist={axis.typeName ? booklist[axis.typeName] || [] : []}
-                onSave={(blockIndex, text,start,end) =>
-                  handleSave(axis.id, blockIndex, text,start,end)
+                onSave={(blockIndex, text, start, end) =>
+                  handleSave(axis.id, blockIndex, text, start, end)
                 }
                 onDeleteBlock={(blockIndex) =>
                   handleDeleteBlock(axis.id, blockIndex)
                 }
                 onDoubleClickCreateBlock={handleDoubleClickCreateBlock}
               />
-            ))}
-          </div>
-        </ScrollableTimelineContainer>
-      </div>
+            </React.Fragment>
+          ))}
+        </TimelineGrid>
+      </ScrollableTimelineContainer>
     </MainContainer>
     </DragDropContext>
   );
