@@ -38,7 +38,6 @@ import type {
   SpeakerSegment,
 } from "../../types/annotations";
 import { applyAIInstruction, isDuplicateAxisName } from "./aiInstruction";
-import { clampAxesToDuration, clampBlockToDuration } from "./blockBounds";
 
 let globalAxisId = 1;
 
@@ -268,7 +267,7 @@ const Timeline: React.FC<TimelineProps> = ({
     if (restoredAxes) {
       isLoadingData.current = true;
       globalAxisId = highestAxisId(restoredAxes) + 1;
-      setAxes(clampAxesToDuration(restoredAxes, duration));
+      setAxes(restoredAxes);
       return;
     }
 
@@ -278,9 +277,7 @@ const Timeline: React.FC<TimelineProps> = ({
       type: axisData.axisType,
       axisName: axisData.axisName,
       typeName: axisData.axisBooklistName,
-      blocks: axisData.annotationBlocks.map((block) =>
-        clampBlockToDuration(block, duration)
-      ),
+      blocks: axisData.annotationBlocks,
     }));
     if (speakerData) {
       // An annotation file saved from a previous session already contains its
@@ -296,22 +293,22 @@ const Timeline: React.FC<TimelineProps> = ({
 
         if (speakerAxesMap.has(speakerLabel)) {
           const existingAxis = speakerAxesMap.get(speakerLabel)!;
-          existingAxis.blocks.push(clampBlockToDuration({
+          existingAxis.blocks.push({
             start: segment.start_time,
             end: segment.end_time,
             text: segment.text,
-          }, duration));
+          });
         } else {
           speakerAxesMap.set(speakerLabel, {
             id: globalAxisId++,
             type: "Type-in",
             axisName: speakerLabel,
             blocks: [
-              clampBlockToDuration({
+              {
                 start: segment.start_time,
                 end: segment.end_time,
                 text: segment.text,
-              }, duration),
+              },
             ],
             shortcutKey: speakerLabel.charAt(0).toUpperCase(),
           });
@@ -322,14 +319,14 @@ const Timeline: React.FC<TimelineProps> = ({
       newAxes.push(...speakerAxes);
     }
     setAxes(newAxes);
-  }, [restoredAxes, annotationData, speakerData, setAxes, duration]);
+  }, [restoredAxes, annotationData, speakerData, setAxes]);
 
   const handleCreateBlock = useCallback((axisId: number) => {
-    const newBlock = clampBlockToDuration({
+    const newBlock = {
       start: selectedRange[0],
       end: selectedRange[1],
       text: "",
-    }, duration);
+    };
 
     const axis = axes.find((candidateAxis) => candidateAxis.id === axisId);
     if (axis) {
@@ -355,7 +352,7 @@ const Timeline: React.FC<TimelineProps> = ({
           : currentAxis
       )
     );
-  }, [axes, selectedRange, setAxes, duration]);
+  }, [axes, selectedRange, setAxes]);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
@@ -586,10 +583,7 @@ const Timeline: React.FC<TimelineProps> = ({
         if (axis.id === axisId) {
           const newBlocks = axis.blocks.map((block, index) => {
             if (index === blockIndex) {
-              return clampBlockToDuration(
-                { ...block, text: newText, start: newstart, end: newend },
-                duration,
-              );
+              return { ...block, text: newText, start:newstart, end:newend };
             }
             return block;
           });
@@ -622,11 +616,11 @@ const Timeline: React.FC<TimelineProps> = ({
     );
   };
   const handleDoubleClickCreateBlock = (axisId: number, startTime: number) => {
-    const newBlock = clampBlockToDuration({
+    const newBlock = {
       start: startTime,
       end: startTime + 5,
       text: "New Block",
-    }, duration);
+    };
 
     const axis = axes.find((axis) => axis.id === axisId);
     if (axis) {

@@ -27,8 +27,6 @@ export interface AutosaveBlock {
     start: number;
     end: number;
     text: string;
-    sourceStart?: number;
-    sourceEnd?: number;
 }
 
 export interface AutosaveAxis {
@@ -83,8 +81,6 @@ export const collectAutosaveState = (axes: AxisData[]): AutosaveAxis[] =>
             start: block.start,
             end: block.end,
             text: block.text ?? "",
-            ...(block.sourceStart !== undefined ? { sourceStart: block.sourceStart } : {}),
-            ...(block.sourceEnd !== undefined ? { sourceEnd: block.sourceEnd } : {}),
         })),
     }));
 

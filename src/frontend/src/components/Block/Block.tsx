@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TextField, styled, IconButton, MenuItem, Tooltip, Select as MuiSelect } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material/Select';
-import { clampTimeToDuration } from '../Timeline/blockBounds';
 
 const CustomSelect = styled(MuiSelect)(({ theme }) => ({
   flex: '1 1 auto',
@@ -144,11 +143,10 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
               label="Start"
               type="number"
               value={start}
-              onChange={(e) => setStart(clampTimeToDuration(parseFloat(e.target.value), duration))}
+              onChange={(e) => setStart(parseFloat(e.target.value))}
               inputProps={{
                 size: start.toString().length || 1, // Dynamically adjust size based on length
                 min: 0,  // Ensure valid input
-                max: duration,
                 style: { minWidth: '50px' },  // Set a minimum width
                 step:0.001
               }}
@@ -157,11 +155,10 @@ const Block: React.FC<BlockProps> = ({ block, duration, axisType, booklist, onSa
               label="End"
               type="number"
               value={end}
-              onChange={(e) => setEnd(clampTimeToDuration(parseFloat(e.target.value), duration))}
+              onChange={(e) => setEnd(parseFloat(e.target.value))}
               inputProps={{
                 size: end.toString().length || 1, // Dynamically adjust size based on length
                 min: 0,  // Ensure valid input
-                max: duration,
                 style: { minWidth: '50px' },  // Set a minimum width
                 step:0.001
               }}

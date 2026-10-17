@@ -53,22 +53,12 @@ class AnnotationBlockSerializer(serializers.Serializer):
     text = serializers.CharField(
         required=False, allow_blank=True, trim_whitespace=False, default='',
     )
-    # Absolute bounds of a source block clipped for chunk-local editing. They
-    # are transient merge metadata and are not written to the CSV.
-    sourceStart = serializers.FloatField(required=False)
-    sourceEnd = serializers.FloatField(required=False)
 
     def validate_start(self, value):
         return _finite(value, 'start')
 
     def validate_end(self, value):
         return _finite(value, 'end')
-
-    def validate_sourceStart(self, value):
-        return _finite(value, 'sourceStart')
-
-    def validate_sourceEnd(self, value):
-        return _finite(value, 'sourceEnd')
 
 
 def _finite(value, field):

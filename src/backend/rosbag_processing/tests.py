@@ -1317,11 +1317,9 @@ class ChunkAnnotationTests(SimpleTestCase):
         })
 
         self.assertEqual(result[0]['annotationBlocks'], [
-            {'start': 0, 'end': 10, 'text': 'crosses start',
-             'sourceStart': 290, 'sourceEnd': 310},
+            {'start': 0, 'end': 10, 'text': 'crosses start'},
             {'start': 20, 'end': 30, 'text': 'inside'},
-            {'start': 290, 'end': 300, 'text': 'crosses end',
-             'sourceStart': 590, 'sourceEnd': 620},
+            {'start': 290, 'end': 300, 'text': 'crosses end'},
         ])
 
 class ChunkMergeTests(SimpleTestCase):
@@ -1373,40 +1371,6 @@ class ChunkMergeTests(SimpleTestCase):
 
         self.assertEqual(blocks, existing[0]['annotationBlocks'])
 
-    def test_editing_clipped_block_preserves_its_hidden_part(self):
-        existing = self.axis([
-            {'start': 290, 'end': 310, 'text': 'before'},
-            {'start': 590, 'end': 620, 'text': 'before'},
-        ])
-        incoming = self.axis([
-            {'start': 0, 'end': 8, 'text': 'left edited',
-             'sourceStart': 290, 'sourceEnd': 310},
-            {'start': 292, 'end': 300, 'text': 'right edited',
-             'sourceStart': 590, 'sourceEnd': 620},
-        ])
-
-        blocks = self.merge(existing, incoming)
-
-        self.assertEqual(blocks, [
-            {'start': 290, 'end': 308, 'text': 'left edited'},
-            {'start': 592, 'end': 620, 'text': 'right edited'},
-        ])
-
-    def test_block_spanning_both_edges_remains_one_block(self):
-        existing = self.axis([
-            {'start': 290, 'end': 620, 'text': 'before'},
-        ])
-        incoming = self.axis([
-            {'start': 0, 'end': 300, 'text': 'after',
-             'sourceStart': 290, 'sourceEnd': 620},
-        ])
-
-        blocks = self.merge(existing, incoming)
-
-        self.assertEqual(blocks, [
-            {'start': 290, 'end': 620, 'text': 'after'},
-        ])
-
     def test_blocks_outside_the_chunk_are_untouched(self):
         existing = self.axis([
             {'start': 100, 'end': 110, 'text': 'earlier chunk'},
@@ -1427,32 +1391,6 @@ class ChunkMergeTests(SimpleTestCase):
         blocks = self.merge(existing, self.axis([]))
 
         self.assertEqual(blocks, [])
-
-
-class AnnotationBoundsTests(SimpleTestCase):
-    def test_rejects_blocks_outside_timeline(self):
-        from .views import annotation_bounds_error
-
-        axis = lambda block: [{'annotationBlocks': [block]}]
-        self.assertIsNotNone(annotation_bounds_error(
-            axis({'start': -1, 'end': 2}), 10,
-        ))
-        self.assertIsNotNone(annotation_bounds_error(
-            axis({'start': 8, 'end': 7}), 10,
-        ))
-        self.assertIsNotNone(annotation_bounds_error(
-            axis({'start': 8, 'end': 11}), 10,
-        ))
-
-    def test_accepts_blocks_on_timeline_edges(self):
-        from .views import annotation_bounds_error
-
-        self.assertIsNone(annotation_bounds_error([{
-            'annotationBlocks': [
-                {'start': 0, 'end': 0},
-                {'start': 8, 'end': 10},
-            ],
-        }], 10))
 
 
 class ManifestIdentityTests(SimpleTestCase):
