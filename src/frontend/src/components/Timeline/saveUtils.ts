@@ -51,6 +51,8 @@ export const collectAnnotationData = (axes: AxisData[]): AnnotationAxisPayload[]
             start: block.start,
             end: block.end,
             text: block.text,
+            ...(block.sourceStart !== undefined ? { sourceStart: block.sourceStart } : {}),
+            ...(block.sourceEnd !== undefined ? { sourceEnd: block.sourceEnd } : {}),
             }))
         : [],
     }));
