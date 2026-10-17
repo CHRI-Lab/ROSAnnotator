@@ -45,6 +45,7 @@ let globalAxisId = 1;
 interface TimelineProps {
   duration: number;
   sourceDuration?: number;
+  chunkCount?: number;
   rosBagFileName: string;
   bookListFileName: string;
   booklist: BookList;
@@ -155,6 +156,7 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
 const Timeline: React.FC<TimelineProps> = ({
   duration,
   sourceDuration,
+  chunkCount = 1,
   rosBagFileName,
   bookListFileName,
   booklist,
@@ -708,6 +710,26 @@ const Timeline: React.FC<TimelineProps> = ({
     };
   })();
 
+  const pendingBlock = pendingDeletion?.kind === "block"
+    ? axes
+        .find((axis) => axis.id === pendingDeletion.axisId)
+        ?.blocks[pendingDeletion.blockIndex]
+    : undefined;
+  const boundaryToleranceSeconds = 0.001;
+  const touchesPreviousChunk = Boolean(
+    pendingBlock &&
+    autosaveScope &&
+    autosaveScope.chunk_index > 0 &&
+    Math.abs(pendingBlock.start) <= boundaryToleranceSeconds
+  );
+  const touchesNextChunk = Boolean(
+    pendingBlock &&
+    autosaveScope &&
+    autosaveScope.chunk_index < chunkCount - 1 &&
+    Math.abs(pendingBlock.end - duration) <= boundaryToleranceSeconds
+  );
+  const isBoundaryBlockDeletion = touchesPreviousChunk || touchesNextChunk;
+
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
     <MainContainer>
@@ -770,14 +792,18 @@ const Timeline: React.FC<TimelineProps> = ({
   open={pendingDeletion !== null}
   onClose={() => setPendingDeletion(null)}
 >
-  <DialogTitle>
+  <DialogTitle sx={{ color: isBoundaryBlockDeletion ? "error.main" : undefined }}>
     {pendingDeletion?.kind === "axis"
       ? "Delete annotation timeline?"
+      : isBoundaryBlockDeletion
+      ? "Delete annotation block at chunk boundary?"
       : "Delete annotation block?"}
   </DialogTitle>
   <DialogContent>
     <DialogContentText>
-      This action cannot be undone. Are you sure you want to continue?
+      {isBoundaryBlockDeletion
+        ? "This annotation touches a chunk boundary. Deleting this part only removes it from the current chunk; the corresponding part in the adjacent chunk will not be deleted. This action cannot be undone."
+        : "This action cannot be undone. Are you sure you want to continue?"}
     </DialogContentText>
   </DialogContent>
   <DialogActions>

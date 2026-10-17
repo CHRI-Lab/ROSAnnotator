@@ -791,6 +791,7 @@ const Annotator = ({
               bookListFileName={bookListFileName}
               duration={duration}
               sourceDuration={sourceDuration}
+              chunkCount={chunkManifest?.chunk_count}
               booklist={bookList}
               annotationData={data.annotation_data}
               speakerData={data.speaker_data}
