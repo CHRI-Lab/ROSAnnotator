@@ -173,7 +173,7 @@ const Timeline: React.FC<TimelineProps> = ({
     bagFileName: rosBagFileName,
     scope: autosaveScope,
     axes,
-    hasUnsavedEdits: hasUnsavedEdits || Boolean(autosaveScope),
+    hasUnsavedEdits,
     bookListFileName,
     annotationName,
     onAutosaved: (savedAt) => {
@@ -390,8 +390,8 @@ const Timeline: React.FC<TimelineProps> = ({
     // Later saves in this session default to the file just written, including
     // after a chunk switch.
     onAnnotationSaved?.(name);
-    if (autosaveEnabled && !autosaveScope) {
-      deleteAutosave(rosBagFileName).catch((err) =>
+    if (autosaveEnabled) {
+      deleteAutosave(rosBagFileName, autosaveScope).catch((err) =>
         console.warn(" [autosave] Could not clear autosave after save.", err)
       );
     }
@@ -415,7 +415,6 @@ const Timeline: React.FC<TimelineProps> = ({
         setPendingOverwrite({ name, data, conflict: result.conflict });
         return;
       }
-      if (autosaveScope) await autosave.flush();
       finishSave(name);
     } catch (error) {
       setError("Failed to save data. Please try again.\n" + error);
