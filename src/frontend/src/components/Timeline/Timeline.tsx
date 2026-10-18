@@ -52,6 +52,7 @@ interface TimelineProps {
   annotationData: AnnotationAxisPayload[] | null;
   speakerData?: SpeakerSegment[];
   restoredAxes?: AxisData[] | null;
+  carriedAxes?: AxisData[] | null;
   autosaveEnabled?: boolean;
   autosaveScope?: AutosaveScope;
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
@@ -130,6 +131,7 @@ const Timeline: React.FC<TimelineProps> = ({
   onAxesUpdate,
   instruction,
   restoredAxes,
+  carriedAxes,
   autosaveEnabled = true,
   autosaveScope,
   onAutosaveReady,
@@ -195,8 +197,10 @@ const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => {
     if (restoredAxes) {
       markSynced(restoredAxes);
+    } else if (carriedAxes) {
+      markSynced(carriedAxes);
     }
-  }, [restoredAxes, markSynced]);
+  }, [restoredAxes, carriedAxes, markSynced]);
 
   useEffect(() => {
     if (instruction && lastExecutedInstruction.current !== instruction) {
@@ -237,6 +241,16 @@ const Timeline: React.FC<TimelineProps> = ({
       isLoadingData.current = true;
       globalAxisId = highestAxisId(restoredAxes) + 1;
       setAxes(restoredAxes);
+      return;
+    }
+
+    // Edits carried from the last time this chunk was open in this session.
+    // Session state rather than recovery, so it applies silently: as far as the
+    // user is concerned they never left.
+    if (carriedAxes) {
+      isLoadingData.current = true;
+      globalAxisId = highestAxisId(carriedAxes) + 1;
+      setAxes(carriedAxes);
       return;
     }
 
@@ -288,7 +302,7 @@ const Timeline: React.FC<TimelineProps> = ({
       newAxes.push(...speakerAxes);
     }
     setAxes(newAxes);
-  }, [restoredAxes, annotationData, speakerData, setAxes]);
+  }, [restoredAxes, carriedAxes, annotationData, speakerData, setAxes]);
 
   const handleCreateBlock = useCallback((axisId: number) => {
     const newBlock = {

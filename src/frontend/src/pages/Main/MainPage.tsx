@@ -101,7 +101,18 @@ const MainPage = () => {
   const registerAutosave = useCallback((flush: (() => Promise<void>) | null) => {
     autosaveFlush.current = flush;
   }, []);
-  
+
+  // Annotator and everything under it are keyed on the chunk index (ln 411), so
+  // a switch unmounts them and their axes go with them. This store sits above
+  // that key and holds a chunk's edits while the user is looking at another one.
+  // In memory only: it is session state, and autosave goes back to being what it
+  // was meant to be, which is crash recovery.
+  const chunkEdits = useRef(new Map<number, AxisData[]>());
+  const currentAxes = useRef<AxisData[]>([]);
+  const registerAxes = useCallback((axes: AxisData[]) => {
+    currentAxes.current = axes;
+  }, []);
+  const [carriedAxes, setCarriedAxes] = useState<AxisData[] | null>(null);
 
   useEffect(() => {
     const generation = ++requestGeneration.current;
@@ -116,6 +127,8 @@ const MainPage = () => {
     setChunkManifest(null);
     setCurrentChunkIndex(0);
     setRestoredAxes(null);
+    setCarriedAxes(null);
+    chunkEdits.current.clear();
     setPendingRecovery(null);
     setPendingSourceCheck(null);      
     sourceCheckAsked.current = false;
@@ -209,6 +222,8 @@ const MainPage = () => {
     setError(null);
     setErrorDisplay(false);
     try {
+      // Before the fetch: currentAxes still holds the chunk being left.
+      chunkEdits.current.set(currentChunkIndex, currentAxes.current);
       if (!autosaveFlush.current) throw new Error("The editor is not ready to save. Please retry.");
       await autosaveFlush.current();
       if (generation !== requestGeneration.current) return;
@@ -219,12 +234,24 @@ const MainPage = () => {
       if (generation !== requestGeneration.current) return;
       const refreshedManifest = await getChunkManifest(manifestId);
       if (generation !== requestGeneration.current) return;
-      const pending = await checkChunkRecovery(rosBagFile!, manifestId, targetIndex);
+      
+      // Carried edits are this session's own work and need no question. The
+      // recovery prompt still fires for a chunk this session has not visited,
+      // which is the only route to a crashed session's work for any chunk other
+      // than the first (the initial load at ln 137 only checks chunk 0).
+      const carried = chunkEdits.current.get(targetIndex) ?? null;
+      const pending = carried
+        ? null
+        : await checkChunkRecovery(rosBagFile!, manifestId, targetIndex);
+
       if (generation !== requestGeneration.current) return;
       setData(nextChunk);
       setBookListData(nextChunk.booklist_data);
       setChunkManifest(refreshedManifest);
       setRestoredAxes(null);
+      setCarriedAxes(carried);
+      setPendingRecovery(pending);
+      setCurrentChunkIndex(targetIndex);
       setPendingRecovery(pending);
       setCurrentChunkIndex(targetIndex);
     } catch (error) {
@@ -418,6 +445,8 @@ const MainPage = () => {
         switchingChunk={switchingChunk}
         onChunkChange={handleChunkChange}
         restoredAxes={restoredAxes}
+        carriedAxes={carriedAxes}
+        onAxesChange={registerAxes}
         autosaveEnabled={pendingRecovery === null && pendingSourceCheck === null}
         onAutosaveReady={registerAutosave}
         savedAnnotationName={savedAnnotationName}
