@@ -102,7 +102,7 @@ const MainPage = () => {
     autosaveFlush.current = flush;
   }, []);
 
-  // Annotator and everything under it are keyed on the chunk index (ln 411), so
+  // Annotator and everything under it are keyed on the chunk index, so
   // a switch unmounts them and their axes go with them. This store sits above
   // that key and holds a chunk's edits while the user is looking at another one.
   // In memory only: it is session state, and autosave goes back to being what it
@@ -155,11 +155,12 @@ const MainPage = () => {
             throw new Error('The autosave does not contain valid data for this ROSBag.');
           }
           recoveredAxes = hydrateAutosaveAxes(payload.axes);
+          if (!isCurrent()) return;
+          setRestoredAxes(recoveredAxes);
         }
         const showProgress = (payload: ViewPayload) => {
           if (!isCurrent() || !Object.values(payload.views).some(view => view.available)) return;
           setChunkManifest(manifest);
-          setRestoredAxes(recoveredAxes);
           if (!recoveryAsked.current && pending) {
             recoveryAsked.current = true;
             setPendingRecovery(pending);
@@ -182,7 +183,6 @@ const MainPage = () => {
         requireAvailableViews(loadedData);
         if (!isCurrent()) return;
         setChunkManifest(manifest);
-        setRestoredAxes(recoveredAxes);
           if (!recoveryAsked.current && pending) {
             recoveryAsked.current = true;
             setPendingRecovery(pending);
@@ -238,7 +238,7 @@ const MainPage = () => {
       // Carried edits are this session's own work and need no question. The
       // recovery prompt still fires for a chunk this session has not visited,
       // which is the only route to a crashed session's work for any chunk other
-      // than the first (the initial load at ln 137 only checks chunk 0).
+      // than the first (the initial load only checks chunk 0).
       const carried = chunkEdits.current.get(targetIndex) ?? null;
       const pending = carried
         ? null
@@ -250,8 +250,6 @@ const MainPage = () => {
       setChunkManifest(refreshedManifest);
       setRestoredAxes(null);
       setCarriedAxes(carried);
-      setPendingRecovery(pending);
-      setCurrentChunkIndex(targetIndex);
       setPendingRecovery(pending);
       setCurrentChunkIndex(targetIndex);
     } catch (error) {
