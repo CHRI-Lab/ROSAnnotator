@@ -116,13 +116,17 @@ processor's `cache_version` when its processing semantics change.
 OS file locks serialize identical work and release on worker termination. Unique
 temporary files plus atomic replacement publish results. Per-manifest chunk
 `result.json` files now summarize status; reusable media is stored under
-`views/<cache-key>/`. A different manifest ID can reuse the same processed views.
+`views/<uuid6>/`. The UUID6 is the internal processed data-view identity; clients
+treat any returned media path as opaque. A different manifest ID can reuse the
+same processed views without changing playback behavior.
 Manifest generation uses a UUID5 derived from the bag, chunk size, and source
 identity, so the same input reuses one manifest and its recovery files. See
 [chunked annotation saving](chunk-annotation-saving.md).
 
-Legacy caches lack source/topic/options identity and are left on disk but are
-not reused automatically. The first load regenerates data into the new cache.
+The former SHA-256 directories are checked only as a compatibility fallback, so
+existing valid media remains playable and is not regenerated. New processed
+data views are written exclusively to UUID6 directories. Older caches that lack
+source/topic/options identity are left on disk and are not reused automatically.
 Existing annotation exports and autosave files retain their layouts and scopes.
 
 Chat frames/history are keyed by a returned `chat_context_id` in Django's cache,

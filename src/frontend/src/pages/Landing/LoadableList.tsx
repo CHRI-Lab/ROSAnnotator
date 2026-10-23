@@ -437,16 +437,26 @@ function LoadableList() {
             <FormControlLabel value="whole" control={<Radio />} label="Use the whole input" />
           </RadioGroup>
           {chunkingEnabled && (
-            <TextField
-              autoFocus
-              fullWidth
-              type="number"
-              label="Chunk length (minutes)"
-              value={chunkMinutes}
-              onChange={(event) => setChunkMinutes(event.target.value)}
-              inputProps={{ min: 0.1, step: 0.5 }}
-              sx={{ mt: 2 }}
-            />
+            <>
+              <TextField
+                autoFocus
+                fullWidth
+                type="number"
+                label="Chunk length (minutes)"
+                value={chunkMinutes}
+                onChange={(event) => setChunkMinutes(event.target.value)}
+                inputProps={{ min: 0.1, step: 0.5 }}
+                sx={{ mt: 2 }}
+              />
+              <Typography
+                role="alert"
+                color="error.main"
+                sx={{ mt: 1.5, fontWeight: 400 }}
+              >
+                Warning: An annotation block that crosses a chunk boundary will
+                be automatically split into separate blocks permanently. 
+              </Typography>
+            </>
           )}
           {(['wrench'] as const).filter(id => sensorTopics[id].length > 0).map(id => (
             <TextField key={id} select fullWidth sx={{ mt: 2 }} label="Force / Torque topics"
