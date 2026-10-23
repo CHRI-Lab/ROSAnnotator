@@ -4,6 +4,7 @@ from .rosbag_reader import RosbagReader
 from .view_cache import ViewCache, atomic_json
 from .view_processor import ViewContext, ViewUnavailable
 from .view_registry import PROCESSORS
+from .transcript_edits import load_transcript_view
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,9 @@ def process_views(request, processors=None, reader_factory=RosbagReader):
                             data = processor.preprocess(context, extracted)
                             result = processor.serialize(context, topics, data, reader.warnings)
                             atomic_json(context.directory / 'result.json', result)
+                        if processor.view_id == 'transcript':
+                            result = load_transcript_view(context.directory,
+                                                          'chunks' if request.chunk else 'whole', result)
                     legacy.update(processor.legacy_fields(result['processed_data']))
                 except Exception as exc:
                     if not isinstance(exc, ViewUnavailable):

@@ -66,12 +66,14 @@ const VideoContent = (context: ViewPanelContext & { audioOnly?: boolean }) => {
 
 const TranscriptContent = ({
   transcript,
+  onEditTranscript,
   played,
   isPlaying,
   onSeek,
 }: ViewPanelContext) => (
   <Transcript
     LRC={transcript}
+    onEdit={onEditTranscript}
     played={played}
     {...{ isPlaying }}
     setPlayed={onSeek}

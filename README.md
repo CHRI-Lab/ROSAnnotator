@@ -257,7 +257,11 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 2. **Manual Annotation**
 
-   The transcription and codebook will appear at the top of the annotation page. The transcription will be automatically annotated in time axes.
+   The transcription and codebook will appear at the top of the annotation page. Loading a transcript does not automatically create annotation axes or blocks. Saved annotations can still be loaded, and new annotations can be created manually. When splitting an input into chunks, speaker labels may refer to different people across chunks; check speaker identities before combining annotations.
+
+   Click `Convert Transcript to Annotations` to create one axis per speaker with the transcript text and timestamps for the current timeline. Empty type-in axes with matching names are reused, including speaker axes saved in another chunk. Matching axes that already contain annotations, have another type, or have duplicate names are skipped to preserve existing work. The result message reports any skipped speakers or invalid timestamps. The button is available once transcript speaker segments have loaded.
+
+   In the Transcript panel, click `Edit transcript` to correct speaker labels, text, and start/end times, or add and remove segments. `Rename all matching segments` changes a speaker label throughout the current transcript. Click `Save transcript` to persist corrections for the current input and chunk; they are restored when the same processed transcript is loaded again. Corrections are stored separately from the generated transcript in `transcript.edits.json` in its processed-view directory, so keep that directory when preserving your work. Saved corrections update the transcript display, AI context, and future annotation conversion. Existing annotation blocks are not rewritten. Cancel discards unsaved edits; a failed save keeps the draft open for retry.
 
    ![](instruction_imgs/annotation_page.png)
 
