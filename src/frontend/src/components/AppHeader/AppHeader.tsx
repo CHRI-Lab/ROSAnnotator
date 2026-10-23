@@ -59,13 +59,6 @@ const AppHeader = ({
         </IconButton>
       </span>
     </Tooltip>
-    <Tooltip title="Settings (coming soon)">
-      <span>
-        <IconButton aria-label="Settings (coming soon)" disabled>
-          <SettingsOutlinedIcon />
-        </IconButton>
-      </span>
-    </Tooltip>
   </Box>
 );
 

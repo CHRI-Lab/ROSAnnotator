@@ -877,6 +877,39 @@ def _same_block(incoming, original, clipped):
     )
 
 
+def _source_block(incoming, displayed):
+    """Find the absolute block represented by a chunk-clipped UI block."""
+    source_start = incoming.get('sourceStart')
+    source_end = incoming.get('sourceEnd')
+    if source_start is None or source_end is None:
+        return None
+    return next(
+        ((original, clipped) for original, clipped in displayed
+         if math.isclose(original['start'], source_start, abs_tol=1e-6)
+         and math.isclose(original['end'], source_end, abs_tol=1e-6)),
+        None,
+    )
+
+
+def _merge_source_block(incoming, original, clipped, chunk):
+    """Apply visible edits without discarding an unchanged hidden edge."""
+    chunk_start = chunk['start_seconds']
+    chunk_end = chunk['end_seconds']
+    start = (
+        original['start']
+        if original['start'] < chunk_start
+        and math.isclose(incoming['start'], clipped[0], abs_tol=1e-6)
+        else incoming['start'] + chunk_start
+    )
+    end = (
+        original['end']
+        if original['end'] > chunk_end
+        and math.isclose(incoming['end'], clipped[1], abs_tol=1e-6)
+        else incoming['end'] + chunk_start
+    )
+    return {'start': start, 'end': end, 'text': incoming.get('text', '')}
+
+
 def merge_chunk_annotations(existing, incoming, chunk):
     """Replace one chunk's contribution to an absolute-time annotation set.
 
@@ -923,6 +956,16 @@ def merge_chunk_annotations(existing, incoming, chunk):
             if name not in ('annotationBlocks', 'id')
         })
         for block in axis.get('annotationBlocks', []):
+            source = _source_block(block, target['_displayed'])
+            if source is not None:
+                original, clipped = source
+                target['_displayed'] = [
+                    pair for pair in target['_displayed'] if pair[0] is not original
+                ]
+                target['annotationBlocks'].append(
+                    _merge_source_block(block, original, clipped, chunk)
+                )
+                continue
             match = next(
                 (original for original, clipped in target['_displayed']
                  if _same_block(block, original, clipped)),
@@ -937,7 +980,8 @@ def merge_chunk_annotations(existing, incoming, chunk):
                 target['annotationBlocks'].append(match)
             else:
                 target['annotationBlocks'].append({
-                    **block,
+                    **{name: value for name, value in block.items()
+                       if name not in ('sourceStart', 'sourceEnd')},
                     'start': block['start'] + start,
                     'end': block['end'] + start,
                 })
@@ -953,6 +997,25 @@ def merge_chunk_annotations(existing, incoming, chunk):
         axis['id'] = index
         result.append(axis)
     return result
+
+
+def annotation_bounds_error(annotation_list, duration=None):
+    """Return an error when a submitted block escapes its editing timeline."""
+    for axis_index, axis in enumerate(annotation_list or []):
+        for block_index, block in enumerate(axis.get('annotationBlocks', [])):
+            start = block['start']
+            end = block['end']
+            if start < 0 or end < start:
+                return (
+                    f'annotation_data[{axis_index}].annotationBlocks[{block_index}] '
+                    'must satisfy 0 <= start <= end.'
+                )
+            if duration is not None and end > duration + 1e-6:
+                return (
+                    f'annotation_data[{axis_index}].annotationBlocks[{block_index}] '
+                    f'must end at or before the timeline duration ({duration:g}s).'
+                )
+    return None
 
 def resolve_chunk(manifest_id, chunk_index):
     """Return (manifest, chunk) for a manifest id and index, or raise."""
@@ -1039,6 +1102,14 @@ def save_annotation(request):
             return JsonResponse({'error': 'Chunk manifest not found.'}, status=404)
         except (OSError, ValueError) as error:
             return JsonResponse({'error': str(error)}, status=400)
+
+    editing_duration = (
+        chunk['end_seconds'] - chunk['start_seconds']
+        if chunk is not None else source_duration
+    )
+    bounds_error = annotation_bounds_error(annotation_list, editing_duration)
+    if bounds_error:
+        return JsonResponse({'annotation_data': [bounds_error]}, status=400)
 
     if chunk is None:
         if not confirm_overwrite:

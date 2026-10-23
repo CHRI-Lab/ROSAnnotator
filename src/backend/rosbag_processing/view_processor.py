@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 
 class ViewUnavailable(ValueError):
@@ -14,6 +15,7 @@ class ViewContext:
     directory: Path
     options: dict = field(default_factory=dict)
     results: dict = field(default_factory=dict)
+    cache_id: Optional[str] = None
 
 
 class DataViewProcessor(ABC):

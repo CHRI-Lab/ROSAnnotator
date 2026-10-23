@@ -38,14 +38,14 @@ import type {
   SpeakerSegment,
 } from "../../types/annotations";
 import { applyAIInstruction, isDuplicateAxisName } from "./aiInstruction";
+import { clampAxesToDuration, clampBlockToDuration } from "./blockBounds";
 
 let globalAxisId = 1;
 
 interface TimelineProps {
   duration: number;
   sourceDuration?: number;
-  played: number;
-  onSeek: (time: number) => void;
+  chunkCount?: number;
   rosBagFileName: string;
   bookListFileName: string;
   booklist: BookList;
@@ -83,7 +83,7 @@ const ControlsContainer = styled("div")({
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  marginBottom: "20px",
+  marginBottom: "8px",
   width: "100%",
 });
 
@@ -91,15 +91,51 @@ const ScrollableTimelineContainer = styled("div")({
   overflowX: "scroll",
   overflowY: "hidden",
   width: "100%",
-  padding: "10px 0",
+  padding: "0 0 10px",
   position: "relative",
 });
 
-const ButtonsContainer = styled("div")({
+const TimelineGrid = styled("div")({
+  display: "grid",
+  gridTemplateColumns: "170px minmax(0, 1fr)",
+  alignItems: "stretch",
+});
+
+const TimelineControlCell = styled("div")(({ theme }) => ({
+  position: "sticky",
+  left: 0,
+  zIndex: 2,
   display: "flex",
-  flexDirection: "column",
-  padding: "10px",
-  alignItems: "flex-start",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "170px",
+  boxSizing: "border-box",
+  padding: "0 10px",
+  backgroundColor: theme.palette.background.paper,
+}));
+
+const DurationLabel = styled(TimelineControlCell)(({ theme }) => ({
+  color: theme.palette.text.primary,
+  fontSize: "0.875rem",
+  fontWeight: 600,
+  textAlign: "center",
+}));
+
+const AxisControlCell = styled(TimelineControlCell)({
+  // Axis has a 10px top margin. Matching that space here centres the button
+  // on the visible axis box instead of the entire grid row.
+  paddingTop: "10px",
+});
+
+const DurationTimelineCell = styled("div")({
+  height: "60px",
+  padding: "15px 10px",
+  boxSizing: "border-box",
+});
+
+const TimelineMarksCell = styled("div")({
+  padding: "0 10px",
+  boxSizing: "border-box",
 });
 
 const TimelineMarks = styled("div")({
@@ -120,8 +156,7 @@ const TimelineMarkLabel = styled("div")(({ theme }) => ({
 const Timeline: React.FC<TimelineProps> = ({
   duration,
   sourceDuration,
-  played,
-  onSeek,
+  chunkCount = 1,
   rosBagFileName,
   bookListFileName,
   booklist,
@@ -138,7 +173,6 @@ const Timeline: React.FC<TimelineProps> = ({
   savedAnnotationName,
   onAnnotationSaved
 }) => {
-  const [seekTime, setSeekTime] = useState(played);
   const [markInterval] = useState(1);
   const [selectedRange, setSelectedRange] = useState<number[]>([
     0,
@@ -236,7 +270,7 @@ const Timeline: React.FC<TimelineProps> = ({
     if (restoredAxes) {
       isLoadingData.current = true;
       globalAxisId = highestAxisId(restoredAxes) + 1;
-      setAxes(restoredAxes);
+      setAxes(clampAxesToDuration(restoredAxes, duration));
       return;
     }
 
@@ -246,7 +280,9 @@ const Timeline: React.FC<TimelineProps> = ({
       type: axisData.axisType,
       axisName: axisData.axisName,
       typeName: axisData.axisBooklistName,
-      blocks: axisData.annotationBlocks,
+      blocks: axisData.annotationBlocks.map((block) =>
+        clampBlockToDuration(block, duration)
+      ),
     }));
     if (speakerData) {
       // An annotation file saved from a previous session already contains its
@@ -262,22 +298,22 @@ const Timeline: React.FC<TimelineProps> = ({
 
         if (speakerAxesMap.has(speakerLabel)) {
           const existingAxis = speakerAxesMap.get(speakerLabel)!;
-          existingAxis.blocks.push({
+          existingAxis.blocks.push(clampBlockToDuration({
             start: segment.start_time,
             end: segment.end_time,
             text: segment.text,
-          });
+          }, duration));
         } else {
           speakerAxesMap.set(speakerLabel, {
             id: globalAxisId++,
             type: "Type-in",
             axisName: speakerLabel,
             blocks: [
-              {
+              clampBlockToDuration({
                 start: segment.start_time,
                 end: segment.end_time,
                 text: segment.text,
-              },
+              }, duration),
             ],
             shortcutKey: speakerLabel.charAt(0).toUpperCase(),
           });
@@ -288,14 +324,14 @@ const Timeline: React.FC<TimelineProps> = ({
       newAxes.push(...speakerAxes);
     }
     setAxes(newAxes);
-  }, [restoredAxes, annotationData, speakerData, setAxes]);
+  }, [restoredAxes, annotationData, speakerData, setAxes, duration]);
 
   const handleCreateBlock = useCallback((axisId: number) => {
-    const newBlock = {
+    const newBlock = clampBlockToDuration({
       start: selectedRange[0],
       end: selectedRange[1],
       text: "",
-    };
+    }, duration);
 
     const axis = axes.find((candidateAxis) => candidateAxis.id === axisId);
     if (axis) {
@@ -321,7 +357,7 @@ const Timeline: React.FC<TimelineProps> = ({
           : currentAxis
       )
     );
-  }, [axes, selectedRange, setAxes]);
+  }, [axes, selectedRange, setAxes, duration]);
 
   useEffect(() => {
     const handleKeyPress = (event: KeyboardEvent) => {
@@ -347,10 +383,6 @@ const Timeline: React.FC<TimelineProps> = ({
       window.removeEventListener("keydown", handleKeyPress);
     };
   }, [axes, handleCreateBlock, switchingChunk]);
-
-  useEffect(() => {
-    setSeekTime(played);
-  }, [played]);
 
   const handleOpenSaveDialog = useCallback(() => {
     // Prefer the file this session is working in, so a save goes back to the
@@ -438,11 +470,6 @@ const Timeline: React.FC<TimelineProps> = ({
   };
 
 
-
-  const handleSliderChange = (_event: Event, newValue: number | number[]) => {
-    setSeekTime(newValue as number);
-    onSeek(newValue as number);
-  };
 
   const handleDragEnd = (result: DropResult) => {
     const { source, destination } = result;
@@ -561,7 +588,10 @@ const Timeline: React.FC<TimelineProps> = ({
         if (axis.id === axisId) {
           const newBlocks = axis.blocks.map((block, index) => {
             if (index === blockIndex) {
-              return { ...block, text: newText, start:newstart, end:newend };
+              return clampBlockToDuration(
+                { ...block, text: newText, start: newstart, end: newend },
+                duration,
+              );
             }
             return block;
           });
@@ -594,11 +624,11 @@ const Timeline: React.FC<TimelineProps> = ({
     );
   };
   const handleDoubleClickCreateBlock = (axisId: number, startTime: number) => {
-    const newBlock = {
+    const newBlock = clampBlockToDuration({
       start: startTime,
       end: startTime + 5,
       text: "New Block",
-    };
+    }, duration);
 
     const axis = axes.find((axis) => axis.id === axisId);
     if (axis) {
@@ -680,6 +710,26 @@ const Timeline: React.FC<TimelineProps> = ({
     };
   })();
 
+  const pendingBlock = pendingDeletion?.kind === "block"
+    ? axes
+        .find((axis) => axis.id === pendingDeletion.axisId)
+        ?.blocks[pendingDeletion.blockIndex]
+    : undefined;
+  const boundaryToleranceSeconds = 0.001;
+  const touchesPreviousChunk = Boolean(
+    pendingBlock &&
+    autosaveScope &&
+    autosaveScope.chunk_index > 0 &&
+    Math.abs(pendingBlock.start) <= boundaryToleranceSeconds
+  );
+  const touchesNextChunk = Boolean(
+    pendingBlock &&
+    autosaveScope &&
+    autosaveScope.chunk_index < chunkCount - 1 &&
+    Math.abs(pendingBlock.end - duration) <= boundaryToleranceSeconds
+  );
+  const isBoundaryBlockDeletion = touchesPreviousChunk || touchesNextChunk;
+
   return (
     <DragDropContext onDragEnd={handleDragEnd}>
     <MainContainer>
@@ -742,14 +792,18 @@ const Timeline: React.FC<TimelineProps> = ({
   open={pendingDeletion !== null}
   onClose={() => setPendingDeletion(null)}
 >
-  <DialogTitle>
+  <DialogTitle sx={{ color: isBoundaryBlockDeletion ? "error.main" : undefined }}>
     {pendingDeletion?.kind === "axis"
       ? "Delete annotation timeline?"
+      : isBoundaryBlockDeletion
+      ? "Delete annotation block at chunk boundary?"
       : "Delete annotation block?"}
   </DialogTitle>
   <DialogContent>
     <DialogContentText>
-      This action cannot be undone. Are you sure you want to continue?
+      {isBoundaryBlockDeletion
+        ? "This annotation touches a chunk boundary. Deleting this part only removes it from the current chunk; the corresponding part in the adjacent chunk will not be deleted. This action cannot be undone."
+        : "This action cannot be undone. Are you sure you want to continue?"}
     </DialogContentText>
   </DialogContent>
   <DialogActions>
@@ -770,44 +824,10 @@ const Timeline: React.FC<TimelineProps> = ({
           Manage Axes
         </Button>
       </ControlsContainer>
-      <div style={{ display: "flex", width: "100%" }}>
-        <ButtonsContainer>
-          {axes.map((axis, index) => (
-            <Button
-              key={index}
-              onClick={() => handleCreateBlock(axis.id)}
-              variant="contained"
-              sx={{
-                mb: 2.25,
-                top: "145px",
-                width: "150px",
-                height: "42px",
-              }}
-            >
-              Create
-            </Button>
-          ))}
-        </ButtonsContainer>
-        <ScrollableTimelineContainer>
-          <div style={{ width: `${totalWidth}px`, padding: "10px" }}>
-            <Slider
-              value={seekTime}
-              min={0}
-              max={duration}
-              step={markInterval}
-              onChange={handleSliderChange}
-              valueLabelDisplay="off"
-              marks={marks.map((mark) => ({ value: mark.value, label: "" }))}
-              sx={{
-                "& .MuiSlider-track": { backgroundColor: "transparent" },
-                "& .MuiSlider-thumb": {
-                  width: "20px",
-                  height: "20px",
-                  "&:before": { boxShadow: "0 4px 8px rgba(0,0,0,0.4)" },
-                },
-                "& .MuiSlider-rail": { height: "8px", opacity: 0.5 },
-              }}
-            />
+      <ScrollableTimelineContainer>
+        <TimelineGrid style={{ width: `${totalWidth + 170}px` }}>
+          <DurationLabel>Annotation Duration</DurationLabel>
+          <DurationTimelineCell>
             <AxisManager
               open={isDialogOpen}
               onClose={() => setIsDialogOpen(false)}
@@ -825,9 +845,12 @@ const Timeline: React.FC<TimelineProps> = ({
               step={markInterval} // Ensure the step is the same as markInterval
               onChange={handleRangeChange}
               valueLabelDisplay="auto"
-              sx={{ marginTop: "20px", marginBottom: "20px" }}
+              sx={{ margin: 0 }}
               marks={marks.map((mark) => ({ value: mark.value, label: "" }))}
             />
+          </DurationTimelineCell>
+          <TimelineControlCell aria-hidden="true" />
+          <TimelineMarksCell>
             <TimelineMarks>
               {marks.map((mark, index) => (
                 <TimelineMarkLabel
@@ -838,28 +861,38 @@ const Timeline: React.FC<TimelineProps> = ({
                 </TimelineMarkLabel>
               ))}
             </TimelineMarks>
-            {axes.map((axis) => (
+          </TimelineMarksCell>
+          {axes.map((axis) => (
+            <React.Fragment key={axis.id}>
+              <AxisControlCell>
+                <Button
+                  onClick={() => handleCreateBlock(axis.id)}
+                  variant="contained"
+                  sx={{ width: "150px", height: "42px" }}
+                >
+                  Create
+                </Button>
+              </AxisControlCell>
               <Axis
-                key={axis.id}
-                id = {axis.id}
+                id={axis.id}
                 duration={duration}
                 selectedRange={selectedRange}
                 blocks={axis.blocks}
                 axisType={axis.type}
                 axisName={axis.axisName || "No Axis Name"}
                 booklist={axis.typeName ? booklist[axis.typeName] || [] : []}
-                onSave={(blockIndex, text,start,end) =>
-                  handleSave(axis.id, blockIndex, text,start,end)
+                onSave={(blockIndex, text, start, end) =>
+                  handleSave(axis.id, blockIndex, text, start, end)
                 }
                 onDeleteBlock={(blockIndex) =>
                   handleDeleteBlock(axis.id, blockIndex)
                 }
                 onDoubleClickCreateBlock={handleDoubleClickCreateBlock}
               />
-            ))}
-          </div>
-        </ScrollableTimelineContainer>
-      </div>
+            </React.Fragment>
+          ))}
+        </TimelineGrid>
+      </ScrollableTimelineContainer>
     </MainContainer>
     </DragDropContext>
   );

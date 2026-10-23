@@ -5,8 +5,33 @@ import os
 import tempfile
 import errno
 import time
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
+
+
+UUID_EPOCH_OFFSET_100NS = 0x01B21DD213814000
+
+
+def uuid6_cache_key(identity, source_mtime_ns):
+    """Return a deterministic UUIDv6 key without sacrificing cache reuse."""
+    serialized = json.dumps(
+        identity, sort_keys=True, allow_nan=False, separators=(',', ':'),
+    ).encode()
+    timestamp = (source_mtime_ns // 100 + UUID_EPOCH_OFFSET_100NS) & ((1 << 60) - 1)
+    entropy = int.from_bytes(
+        hashlib.blake2b(serialized, digest_size=8, person=b'ros-view-cache').digest(),
+        'big',
+    ) & ((1 << 62) - 1)
+    value = (
+        (timestamp >> 28) << 96
+        | ((timestamp >> 12) & 0xffff) << 80
+        | 0x6 << 76
+        | (timestamp & 0xfff) << 64
+        | 0b10 << 62
+        | entropy
+    )
+    return uuid.UUID(int=value)
 
 
 def atomic_json(destination, payload):
@@ -30,12 +55,26 @@ class ViewCache:
         self.source = [str(source), stat.st_size, stat.st_mtime_ns]
         self.chunk = chunk
 
+    def identity(self, processor, topics, options, dependencies):
+        return {'source': self.source, 'view': processor.view_id,
+                'version': processor.cache_version, 'topics': topics, 'options': options,
+                'bounds': [self.chunk['start_seconds'], self.chunk['end_seconds']] if self.chunk else None,
+                'dependencies': dependencies}
+
+    def identifier(self, identity):
+        """Internal data-view ID."""
+        return uuid6_cache_key(identity, self.source[2])
+
     def directory(self, processor, topics, options, dependencies):
-        identity = {'source': self.source, 'view': processor.view_id,
-                    'version': processor.cache_version, 'topics': topics, 'options': options,
-                    'bounds': [self.chunk['start_seconds'], self.chunk['end_seconds']] if self.chunk else None,
-                    'dependencies': dependencies}
-        key = hashlib.sha256(json.dumps(identity, sort_keys=True, allow_nan=False).encode()).hexdigest()
+        identity = self.identity(processor, topics, options, dependencies)
+        return self.root / str(self.identifier(identity))
+
+    def legacy_directory(self, processor, topics, options, dependencies):
+        """Previous SHA-256 location, used only to read existing cache entries."""
+        identity = self.identity(processor, topics, options, dependencies)
+        key = hashlib.sha256(
+            json.dumps(identity, sort_keys=True, allow_nan=False).encode(),
+        ).hexdigest()
         return self.root / key
 
     @staticmethod
