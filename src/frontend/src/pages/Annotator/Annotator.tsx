@@ -10,12 +10,16 @@ import {
   DialogContentText,
   DialogTitle,
   FormControl,
+  IconButton,
   MenuItem,
   Paper,
   Select,
   Slider,
   Typography,
+  Tooltip,
 } from "@mui/material";
+import PauseRoundedIcon from "@mui/icons-material/PauseRounded";
+import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 
 import type { ChunkManifest } from "../../api/chunks";
 import type { ViewPayload } from "../../api/dataViews";
@@ -696,10 +700,29 @@ const Annotator = ({
           overflow="auto"
         >
           <Box display="flex" alignItems="center" gap={2} px={2} width="100%" boxSizing="border-box">
-            <Button disabled={duration <= 0} onClick={() => {
-              if (!isPlaying && played >= duration) handleSeek(0);
-              setIsPlaying(value => !value);
-            }}>{isPlaying ? 'Pause' : 'Play'}</Button>
+            <Tooltip title={isPlaying ? "Pause" : "Play"} arrow>
+              <span>
+                <IconButton
+                  disabled={duration <= 0}
+                  aria-label={isPlaying ? "Pause" : "Play"}
+                  onClick={() => {
+                    if (!isPlaying && played >= duration) handleSeek(0);
+                    setIsPlaying(value => !value);
+                  }}
+                  color="primary"
+                  sx={{
+                    width: 40,
+                    height: 40,
+                    border: 1,
+                    borderColor: "divider",
+                  }}
+                >
+                  {isPlaying
+                    ? <PauseRoundedIcon />
+                    : <PlayArrowRoundedIcon />}
+                </IconButton>
+              </span>
+            </Tooltip>
             <Slider aria-label="Shared playback time" min={0} max={Math.max(duration, 0.001)} step={0.01}
               value={Math.min(played, duration)} onChange={(_, value) => handleSeek(value as number)} />
             <Typography variant="caption" whiteSpace="nowrap">{played.toFixed(2)} / {duration.toFixed(2)}s</Typography>
@@ -792,8 +815,7 @@ const Annotator = ({
               bookListFileName={bookListFileName}
               duration={duration}
               sourceDuration={sourceDuration}
-              played={played}
-              onSeek={handleSeek}
+              chunkCount={chunkManifest?.chunk_count}
               booklist={bookList}
               annotationData={data.annotation_data}
               speakerData={data.speaker_data}

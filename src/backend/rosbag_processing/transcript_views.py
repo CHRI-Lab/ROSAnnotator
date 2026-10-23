@@ -13,7 +13,7 @@ def transcript_directory(scope, cache_key):
         'whole': getattr(settings, 'PROCESSED_DATA_DIR', '/app/processed_data'),
         'chunks': getattr(settings, 'CHUNK_MANIFEST_DIR', '/app/processed_data/chunks'),
     }
-    if scope not in roots or not re.fullmatch(r'[0-9a-f]{64}', cache_key):
+    if scope not in roots or not re.fullmatch(r'(?:[0-9a-f]{64}|[0-9a-f]{8}-[0-9a-f]{4}-6[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})', cache_key):
         raise ValueError('Invalid transcript reference.')
     root = (Path(roots[scope]) / 'views').resolve()
     directory = (root / cache_key).resolve()

@@ -2,6 +2,10 @@ export interface AnnotationBlock {
   start: number;
   end: number;
   text?: string;
+  // Present only while editing a block clipped by a chunk. These absolute
+  // bounds let the backend preserve the unseen part of the original block.
+  sourceStart?: number;
+  sourceEnd?: number;
 }
 
 export interface AxisData {

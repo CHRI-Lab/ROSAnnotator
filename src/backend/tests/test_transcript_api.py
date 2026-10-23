@@ -56,3 +56,11 @@ class TranscriptApiTests(SimpleTestCase):
         with patch('rosbag_processing.transcript_edits.atomic_json', side_effect=OSError('full')):
             self.assertEqual(self.put({'revision': 0, 'speaker_data': []}).status_code, 500)
         self.assertEqual(self.get().data['view']['processed_data']['revision'], 0)
+
+    def test_uuid6_cache_reference_can_be_loaded_and_saved(self):
+        key = '1ef12345-6789-6abc-8def-0123456789ab'
+        atomic_json(self.root / 'chunks' / 'views' / key / 'result.json', generated_transcript())
+        self.assertEqual(self.get(key=key).status_code, 200)
+        saved = self.put({'revision': 0, 'speaker_data': [segment('Alice')]}, key=key)
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(self.get(key=key).data['view']['processed_data']['revision'], 1)

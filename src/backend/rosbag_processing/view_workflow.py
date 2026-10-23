@@ -42,16 +42,27 @@ def process_views(request, processors=None, reader_factory=RosbagReader):
                 try:
                     topics = processor.check_availability(context)
                     dependencies = {d: results.get(d) for d in processor.dependencies}
+                    identity = cache.identity(processor, topics, options, dependencies)
+                    context.cache_id = str(cache.identifier(identity))
                     context.directory = cache.directory(processor, topics, options, dependencies)
+                    legacy_directory = cache.legacy_directory(
+                        processor, topics, options, dependencies,
+                    )
                     with cache.lock(context.directory):
-                        result = cache.load(context.directory)
+                        # Prefer established media during migration. This avoids
+                        # regenerating working artifacts merely to rename their
+                        # internal identity, while all new writes use UUID6.
+                        result = cache.load(legacy_directory)
+                        transcript_directory = legacy_directory if result is not None else context.directory
+                        if result is None:
+                            result = cache.load(context.directory)
                         if result is None:
                             extracted = processor.extract(context, topics)
                             data = processor.preprocess(context, extracted)
                             result = processor.serialize(context, topics, data, reader.warnings)
                             atomic_json(context.directory / 'result.json', result)
                         if processor.view_id == 'transcript':
-                            result = load_transcript_view(context.directory,
+                            result = load_transcript_view(transcript_directory,
                                                           'chunks' if request.chunk else 'whole', result)
                     legacy.update(processor.legacy_fields(result['processed_data']))
                 except Exception as exc:

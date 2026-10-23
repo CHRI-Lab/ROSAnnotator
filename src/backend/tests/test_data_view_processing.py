@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+from uuid import UUID
 
 from rosbag_processing.rosbag_reader import RosbagReader
 from rosbag_processing.processing_sessions import ProcessingRequest
@@ -54,9 +55,11 @@ class SampleProcessor(DataViewProcessor):
 
     def __init__(self):
         self.calls = 0
+        self.cache_id = None
 
     def extract(self, context, topics):
         self.calls += 1
+        self.cache_id = context.cache_id
         values = [(r.seconds, r.frame_id) for r in context.reader.records(topics)]
         if not values:
             raise ViewUnavailable('No records in this range')
@@ -167,6 +170,39 @@ class WorkflowTests(unittest.TestCase):
         os.utime(self.bag_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1000000))
         self.process([processor])
         self.assertEqual(processor.calls, 3)
+
+    def test_internal_cache_id_uses_uuid6_without_changing_media_path(self):
+        processor = SampleProcessor()
+        cache = ViewCache(str(self.root / 'processed'), str(self.bag_path))
+        identity = cache.identity(processor, ['/custom'], {}, {})
+        first = cache.identifier(identity)
+        second = cache.identifier(identity)
+        directory = cache.directory(processor, ['/custom'], {}, {})
+
+        self.assertEqual(UUID(str(first)).version, 6)
+        self.assertEqual(first, second)
+        self.assertEqual(UUID(directory.name).version, 6)
+        self.assertEqual(directory.name, str(first))
+        self.process([processor])
+        self.assertEqual(processor.cache_id, str(first))
+
+    def test_existing_sha_cache_is_reused_without_regenerating_media(self):
+        processor = SampleProcessor()
+        cache = ViewCache(str(self.root / 'processed'), str(self.bag_path))
+        legacy = cache.legacy_directory(processor, ['/custom'], {}, {})
+        legacy.mkdir(parents=True)
+        cached = {
+            'view_id': 'sample', 'status': 'ready', 'available': True,
+            'reason': None, 'selected_topics': ['/custom'], 'duration': 10,
+            'time_origin': {}, 'processed_data': {'samples': [[1, 'camera']]},
+            'warnings': [],
+        }
+        atomic_json(legacy / 'result.json', cached)
+
+        result = self.process([processor])
+
+        self.assertEqual(processor.calls, 0)
+        self.assertEqual(result['views']['sample']['processed_data'], cached['processed_data'])
 
     def test_topics_options_and_chunk_bounds_separate_cache(self):
         processor = SampleProcessor()

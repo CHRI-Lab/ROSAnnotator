@@ -11,7 +11,7 @@ export type SavedTranscript = {
 
 export const transcriptEditRef = (view?: BackendDataView): TranscriptEditRef | null => {
   const ref = view?.processed_data?.edit_ref as Partial<TranscriptEditRef> | undefined;
-  return ref && (ref.scope === "whole" || ref.scope === "chunks") && typeof ref.key === "string" && /^[a-f0-9]{64}$/.test(ref.key)
+  return ref && (ref.scope === "whole" || ref.scope === "chunks") && typeof ref.key === "string" && /^(?:[a-f0-9]{64}|[a-f0-9]{8}-[a-f0-9]{4}-6[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/.test(ref.key)
     ? { scope: ref.scope, key: ref.key } : null;
 };
 

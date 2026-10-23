@@ -134,3 +134,12 @@ class TranscriptWorkflowTests(unittest.TestCase):
                 self.assertEqual(loaded['speaker_data'], edited)
                 self.assertIn('Alice: Edited', loaded['audio_transcript'])
                 self.assertEqual(loaded['views']['transcript']['processed_data']['speaker_data'], edited)
+
+                legacy = directory.parent / (('c' if scope == 'whole' else 'd') * 64)
+                directory.rename(legacy)
+                with patch('rosbag_processing.view_cache.ViewCache.legacy_directory', return_value=legacy):
+                    migrated = process_views(current, [processor], reader)
+                    self.assertEqual(migrated['views']['transcript']['processed_data']['edit_ref']['key'], legacy.name)
+                    self.assertEqual(migrated['speaker_data'], edited)
+                    save_transcript_edits(legacy, scope, [segment('Bob')], 1)
+                    self.assertEqual(process_views(current, [processor], reader)['speaker_data'][0]['speaker_label'], 'Bob')

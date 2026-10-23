@@ -3,7 +3,6 @@ import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
-import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 
 type AppHeaderProps = {
   rosBagFileName: string;
@@ -56,13 +55,6 @@ const AppHeader = ({
           color="inherit"
         >
           <SaveOutlinedIcon />
-        </IconButton>
-      </span>
-    </Tooltip>
-    <Tooltip title="Settings (coming soon)">
-      <span>
-        <IconButton aria-label="Settings (coming soon)" disabled>
-          <SettingsOutlinedIcon />
         </IconButton>
       </span>
     </Tooltip>

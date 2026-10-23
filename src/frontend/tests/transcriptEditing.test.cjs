@@ -148,3 +148,13 @@ test('successful save sends edited segments and closes; cancel does not save', a
   cancelled.render().find(node => node.props?.children === 'Cancel').props.onClick();
   assert.equal(cancelled.closed(), true);
 });
+
+test('transcript references accept UUID6 and legacy keys while rejecting unsafe references', () => {
+  const { transcriptEditRef } = load('api/transcripts.ts');
+  for (const key of ['a'.repeat(64), '1ef12345-6789-6abc-8def-0123456789ab']) {
+    assert.equal(transcriptEditRef({ processed_data: { edit_ref: { scope: 'chunks', key } } }).key, key);
+  }
+  for (const key of ['../result.json', '1ef12345-6789-4abc-8def-0123456789ab', 'bad']) {
+    assert.equal(transcriptEditRef({ processed_data: { edit_ref: { scope: 'whole', key } } }), null);
+  }
+});
