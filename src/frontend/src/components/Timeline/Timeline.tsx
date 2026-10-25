@@ -52,6 +52,7 @@ interface TimelineProps {
   annotationData: AnnotationAxisPayload[] | null;
   speakerData?: SpeakerSegment[];
   restoredAxes?: AxisData[] | null;
+  carriedAxes?: AxisData[] | null;
   autosaveEnabled?: boolean;
   autosaveScope?: AutosaveScope;
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
@@ -165,6 +166,7 @@ const Timeline: React.FC<TimelineProps> = ({
   onAxesUpdate,
   instruction,
   restoredAxes,
+  carriedAxes,
   autosaveEnabled = true,
   autosaveScope,
   onAutosaveReady,
@@ -205,7 +207,7 @@ const Timeline: React.FC<TimelineProps> = ({
     bagFileName: rosBagFileName,
     scope: autosaveScope,
     axes,
-    hasUnsavedEdits: hasUnsavedEdits || Boolean(autosaveScope),
+    hasUnsavedEdits,
     bookListFileName,
     annotationName,
     onAutosaved: (savedAt) => {
@@ -229,8 +231,10 @@ const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => {
     if (restoredAxes) {
       markSynced(restoredAxes);
+    } else if (carriedAxes) {
+      markSynced(carriedAxes);
     }
-  }, [restoredAxes, markSynced]);
+  }, [restoredAxes, carriedAxes, markSynced]);
 
   useEffect(() => {
     if (instruction && lastExecutedInstruction.current !== instruction) {
@@ -271,6 +275,16 @@ const Timeline: React.FC<TimelineProps> = ({
       isLoadingData.current = true;
       globalAxisId = highestAxisId(restoredAxes) + 1;
       setAxes(clampAxesToDuration(restoredAxes, duration));
+      return;
+    }
+
+    // Edits carried from the last time this chunk was open in this session.
+    // Session state rather than recovery, so it applies silently: as far as the
+    // user is concerned they never left.
+    if (carriedAxes) {
+      isLoadingData.current = true;
+      globalAxisId = highestAxisId(carriedAxes) + 1;
+      setAxes(clampAxesToDuration(carriedAxes, duration));
       return;
     }
 
@@ -324,7 +338,7 @@ const Timeline: React.FC<TimelineProps> = ({
       newAxes.push(...speakerAxes);
     }
     setAxes(newAxes);
-  }, [restoredAxes, annotationData, speakerData, setAxes, duration]);
+  }, [restoredAxes, carriedAxes, annotationData, speakerData, setAxes, duration]);
 
   const handleCreateBlock = useCallback((axisId: number) => {
     const newBlock = clampBlockToDuration({
@@ -408,8 +422,8 @@ const Timeline: React.FC<TimelineProps> = ({
     // Later saves in this session default to the file just written, including
     // after a chunk switch.
     onAnnotationSaved?.(name);
-    if (autosaveEnabled && !autosaveScope) {
-      deleteAutosave(rosBagFileName).catch((err) =>
+    if (autosaveEnabled) {
+      deleteAutosave(rosBagFileName, autosaveScope).catch((err) =>
         console.warn(" [autosave] Could not clear autosave after save.", err)
       );
     }
@@ -433,7 +447,6 @@ const Timeline: React.FC<TimelineProps> = ({
         setPendingOverwrite({ name, data, conflict: result.conflict });
         return;
       }
-      if (autosaveScope) await autosave.flush();
       finishSave(name);
     } catch (error) {
       setError("Failed to save data. Please try again.\n" + error);
