@@ -69,6 +69,8 @@ interface AnnotatorProps {
   switchingChunk?: boolean;
   onChunkChange?: (index: number) => void | Promise<void>;
   restoredAxes?: AxisData[] | null;
+  carriedAxes?: AxisData[] | null;
+  onAxesChange?: (axes: AxisData[]) => void;
   autosaveEnabled?: boolean;
   onAutosaveReady?: (flush: (() => Promise<void>) | null) => void;
   savedAnnotationName?: string;
@@ -85,6 +87,8 @@ const Annotator = ({
   switchingChunk = false,
   onChunkChange = () => {},
   restoredAxes = null,
+  carriedAxes = null,
+  onAxesChange,
   autosaveEnabled = true,
   onAutosaveReady,
   savedAnnotationName = "",
@@ -219,10 +223,11 @@ const Annotator = ({
     upsertAIRecord({ ...record, action_outcome: outcome });
   };
 
-  const handleAxesUpdate = useCallback((updatedAxes) => {
+  const handleAxesUpdate = useCallback((updatedAxes: AxisData[]) => {
     setAxesData(updatedAxes);
+    onAxesChange?.(updatedAxes);
     return updatedAxes;
-  }, []);
+  }, [onAxesChange]);
 
   const requestAIChangeConfirmation = (pendingInstruction: AIInstruction) =>
     new Promise<boolean>((resolve) => {
@@ -822,6 +827,7 @@ const Annotator = ({
               onAxesUpdate={handleAxesUpdate}
               instruction={instruction}
               restoredAxes={restoredAxes}
+              carriedAxes={carriedAxes}
               autosaveEnabled={autosaveEnabled}
               autosaveScope={chunkManifest?.chunking_enabled ? {
                 manifest_id: chunkManifest.id,
