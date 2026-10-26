@@ -449,19 +449,17 @@ function LoadableList() {
                 sx={{ mt: 2 }}
               />
               <Alert severity="warning" sx={{ mt: 2 }}>
-                Speaker labels are assigned separately for each chunk. The same
-                speaker may have different labels across chunks, and the same
-                label may refer to different speakers. Check speaker identities
-                before combining annotations.
+                <Typography>
+                  Speaker labels are assigned separately for each chunk. The same
+                  speaker may have different labels across chunks, and the same
+                  label may refer to different speakers. Check speaker identities
+                  before combining annotations.
+                </Typography>
+                <Typography sx={{ mt: 1 }}>
+                  An annotation block that crosses a chunk boundary will be
+                  automatically split into separate blocks permanently.
+                </Typography>
               </Alert>
-              <Typography
-                role="alert"
-                color="error.main"
-                sx={{ mt: 1.5, fontWeight: 400 }}
-              >
-                Warning: An annotation block that crosses a chunk boundary will
-                be automatically split into separate blocks permanently.
-              </Typography>
             </>
           )}
           {(['wrench'] as const).filter(id => sensorTopics[id].length > 0).map(id => (
