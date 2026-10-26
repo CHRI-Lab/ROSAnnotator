@@ -1,13 +1,14 @@
 import { CSSProperties, useCallback, useEffect, useRef } from "react";
 import { styled } from "@mui/system";
 import { Lrc, LrcLine } from "react-lrc";
-import { Box } from "@mui/material";
+import { Box, Button } from "@mui/material";
 
 interface TranscriptProps {
   LRC: string; // LRC string to be displayed
   played: number;
   isPlaying: boolean;
   setPlayed: (time: number) => void; // Function to update the played state
+  onEdit?: () => void;
 }
 
 // Styles for the LRC component
@@ -34,6 +35,7 @@ const Transcript: React.FC<TranscriptProps> = ({
   played,
   isPlaying,
   setPlayed,
+  onEdit,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -85,7 +87,7 @@ const Transcript: React.FC<TranscriptProps> = ({
         data-transcript-active={active ? "true" : undefined}
         onClick={() => setPlayed(startMillisecond / 1000)}
       >
-        {content.slice(0, -7)}
+        {content.replace(/\s*\[\d+:\d{2}\]\s*$/, "")}
       </Line>
     ),
     [setPlayed]
@@ -100,6 +102,9 @@ const Transcript: React.FC<TranscriptProps> = ({
       flexDirection="column"
       overflow="hidden"
     >
+      {onEdit && <Box display="flex" justifyContent="flex-end" px={1} flexShrink={0}>
+        <Button onClick={onEdit}>Edit transcript</Button>
+      </Box>}
       <Lrc
         lrc={LRC}
         lineRenderer={lineRenderer}

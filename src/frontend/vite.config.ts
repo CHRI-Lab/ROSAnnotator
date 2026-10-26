@@ -5,6 +5,11 @@ import { resolve } from "node:path";
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  // Prebundle the styling entry points together so MUI's generated chunks
+  // initialize styled before components such as Popper use it.
+  optimizeDeps: {
+    include: ['@emotion/react', '@emotion/styled', '@mui/material/styles', '@mui/material/Popper'],
+  },
   plugins: [react(), {
     name: 'processed-media',
     configureServer(server) {

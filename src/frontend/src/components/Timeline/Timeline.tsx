@@ -1,6 +1,7 @@
 import React, { useCallback, useState, useEffect, useContext, useRef } from "react";
 import { DragDropContext, DropResult } from 'react-beautiful-dnd';
 import {
+  Alert,
   Button,
   Slider,
   Paper,
@@ -10,6 +11,7 @@ import {
   DialogContent,
   DialogContentText,
   TextField,
+  Tooltip,
 } from "@mui/material";
 import { styled } from "@mui/system";
 import Axis from "../Axis";
@@ -38,6 +40,7 @@ import type {
   SpeakerSegment,
 } from "../../types/annotations";
 import { applyAIInstruction, isDuplicateAxisName } from "./aiInstruction";
+import { convertTranscriptToAnnotations } from "./transcriptAnnotations";
 import { clampAxesToDuration, clampBlockToDuration } from "./blockBounds";
 
 let globalAxisId = 1;
@@ -82,6 +85,8 @@ const MainContainer = styled(Paper)(({ theme }) => ({
 
 const ControlsContainer = styled("div")({
   display: "flex",
+  flexWrap: "wrap",
+  gap: "12px",
   justifyContent: "space-between",
   alignItems: "center",
   marginBottom: "8px",
@@ -183,6 +188,7 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [error, setError] = useState("");
   const [isErrorDialogOpen, setIsErrorDialogOpen] = useState(false);
+  const [transcriptConversionNotice, setTranscriptConversionNotice] = useState<string | null>(null);
   const [pendingDeletion, setPendingDeletion] =
     useState<PendingDeletion | null>(null);
   const lastExecutedInstruction = useRef<AIInstruction | null>(null);
@@ -268,9 +274,8 @@ const Timeline: React.FC<TimelineProps> = ({
 
 
   useEffect(() => {
-    // A restored autosave replaces the loaded state entirely. It already
-    // contains the speaker tiers from the session it was saved in, so the
-    // branches below must not run as well.
+    // A restored autosave replaces the loaded annotation state entirely.
+    setTranscriptConversionNotice(null);
     if (restoredAxes) {
       isLoadingData.current = true;
       globalAxisId = highestAxisId(restoredAxes) + 1;
@@ -298,47 +303,26 @@ const Timeline: React.FC<TimelineProps> = ({
         clampBlockToDuration(block, duration)
       ),
     }));
-    if (speakerData) {
-      // An annotation file saved from a previous session already contains its
-      // speaker tiers. Rebuilding them from speakerData appends a second copy,
-      // and the save merge matches axes on (axisName, axisType), so the two
-      // collapse into one axis holding both sets of blocks. Every save after
-      // that doubles them again.
-      const loadedAxisNames = new Set(newAxes.map((axis) => axis.axisName));
-      const speakerAxesMap = new Map<string, AxisData>();
-      speakerData.forEach((segment) => {
-        const speakerLabel = segment.speaker_label;
-        if (loadedAxisNames.has(speakerLabel)) return;
-
-        if (speakerAxesMap.has(speakerLabel)) {
-          const existingAxis = speakerAxesMap.get(speakerLabel)!;
-          existingAxis.blocks.push(clampBlockToDuration({
-            start: segment.start_time,
-            end: segment.end_time,
-            text: segment.text,
-          }, duration));
-        } else {
-          speakerAxesMap.set(speakerLabel, {
-            id: globalAxisId++,
-            type: "Type-in",
-            axisName: speakerLabel,
-            blocks: [
-              clampBlockToDuration({
-                start: segment.start_time,
-                end: segment.end_time,
-                text: segment.text,
-              }, duration),
-            ],
-            shortcutKey: speakerLabel.charAt(0).toUpperCase(),
-          });
-        }
-      });
-
-      const speakerAxes = Array.from(speakerAxesMap.values());
-      newAxes.push(...speakerAxes);
-    }
     setAxes(newAxes);
-  }, [restoredAxes, carriedAxes, annotationData, speakerData, setAxes, duration]);
+  }, [restoredAxes, carriedAxes, annotationData, setAxes, duration]);
+
+  const handleConvertTranscript = () => {
+    if (!speakerData?.length || switchingChunk) return;
+    const result = convertTranscriptToAnnotations(axes, speakerData, duration, globalAxisId);
+    globalAxisId = result.nextAxisId;
+    if (result.addedBlocks) setAxes(result.axes);
+    const axisCount = result.addedAxes + result.reusedAxes;
+    const messages = [result.addedBlocks
+      ? `Added ${result.addedBlocks} annotation ${result.addedBlocks === 1 ? "block" : "blocks"} on ${axisCount} speaker ${axisCount === 1 ? "axis" : "axes"}.`
+      : "No annotations were added."];
+    if (result.skippedSpeakers) {
+      messages.push(`Skipped ${result.skippedSpeakers} ${result.skippedSpeakers === 1 ? "speaker" : "speakers"} because matching axes contain annotations, use a different type, or have duplicate names.`);
+    }
+    if (result.skippedSegments) {
+      messages.push(`Skipped ${result.skippedSegments} transcript ${result.skippedSegments === 1 ? "segment" : "segments"} with invalid timestamps or times outside the current timeline.`);
+    }
+    setTranscriptConversionNotice(messages.join(" "));
+  };
 
   const handleCreateBlock = useCallback((axisId: number) => {
     const newBlock = clampBlockToDuration({
@@ -833,10 +817,24 @@ const Timeline: React.FC<TimelineProps> = ({
         <Button onClick={handleAddAxis} variant="contained">
           Add New Axis
         </Button>
+        <Tooltip title={speakerData?.length
+          ? "Convert the current transcript by speaker. Empty type-in axes can be reused; populated axes are preserved."
+          : "A transcript with speaker segments is required."}>
+          <span>
+            <Button onClick={handleConvertTranscript} variant="contained" disabled={!speakerData?.length || switchingChunk}>
+              Convert Transcript to Annotations
+            </Button>
+          </span>
+        </Tooltip>
         <Button onClick={() => setIsDialogOpen(true)} variant="contained">
           Manage Axes
         </Button>
       </ControlsContainer>
+      {transcriptConversionNotice && (
+        <Alert severity="info" onClose={() => setTranscriptConversionNotice(null)} sx={{ mb: 2 }}>
+          {transcriptConversionNotice}
+        </Alert>
+      )}
       <ScrollableTimelineContainer>
         <TimelineGrid style={{ width: `${totalWidth + 170}px` }}>
           <DurationLabel>Annotation Duration</DurationLabel>

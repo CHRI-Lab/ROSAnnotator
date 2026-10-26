@@ -448,13 +448,19 @@ function LoadableList() {
                 inputProps={{ min: 0.1, step: 0.5 }}
                 sx={{ mt: 2 }}
               />
+              <Alert severity="warning" sx={{ mt: 2 }}>
+                Speaker labels are assigned separately for each chunk. The same
+                speaker may have different labels across chunks, and the same
+                label may refer to different speakers. Check speaker identities
+                before combining annotations.
+              </Alert>
               <Typography
                 role="alert"
                 color="error.main"
                 sx={{ mt: 1.5, fontWeight: 400 }}
               >
                 Warning: An annotation block that crosses a chunk boundary will
-                be automatically split into separate blocks permanently. 
+                be automatically split into separate blocks permanently.
               </Typography>
             </>
           )}

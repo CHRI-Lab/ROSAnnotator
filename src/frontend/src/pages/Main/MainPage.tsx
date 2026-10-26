@@ -234,7 +234,7 @@ const MainPage = () => {
       if (generation !== requestGeneration.current) return;
       const refreshedManifest = await getChunkManifest(manifestId);
       if (generation !== requestGeneration.current) return;
-      
+
       // Carried edits are this session's own work and need no question. The
       // recovery prompt still fires for a chunk this session has not visited,
       // which is the only route to a crashed session's work for any chunk other

@@ -142,7 +142,7 @@ test('confirmed chunk switch clears conversation before requesting navigation', 
   assert.match(confirmHandler, /The chunk was not changed/);
 });
 
-test('chunk navigation saves current annotations and restores the target chunk', () => {
+test('chunk navigation saves current annotations and offers target chunk recovery', () => {
   const chunkChangeHandler = between(
     mainPageSource,
     'const handleChunkChange = async (targetIndex: number) => {',
@@ -153,7 +153,7 @@ test('chunk navigation saves current annotations and restores the target chunk',
     'await loadDataViews(',
   );
   const restoreIndex = chunkChangeHandler.indexOf(
-    'await restoreChunk(rosBagFile!, manifestId, targetIndex)',
+    'await checkChunkRecovery(rosBagFile!, manifestId, targetIndex)',
   );
   const activateIndex = chunkChangeHandler.indexOf(
     'setCurrentChunkIndex(targetIndex)',
@@ -163,7 +163,9 @@ test('chunk navigation saves current annotations and restores the target chunk',
   assert.ok(processIndex > flushIndex);
   assert.ok(restoreIndex > processIndex);
   assert.ok(activateIndex > restoreIndex);
-  assert.match(chunkChangeHandler, /setRestoredAxes\(recoveredAxes\)/);
+  assert.match(chunkChangeHandler, /setRestoredAxes\(null\)/);
+  assert.match(chunkChangeHandler, /setPendingRecovery\(pending\)/);
+  assert.match(mainPageSource, /setRestoredAxes\(await loadChunkRecovery\(rosBagFile, scope\)\)/);
 });
 
 test('completed AI replies directly invoke the dedicated record endpoint', () => {

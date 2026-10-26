@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactPlayer from "react-player";
 import {
   Box,
@@ -23,6 +23,8 @@ import PlayArrowRoundedIcon from "@mui/icons-material/PlayArrowRounded";
 
 import type { ChunkManifest } from "../../api/chunks";
 import type { ViewPayload } from "../../api/dataViews";
+import { applySavedTranscript, saveTranscript, transcriptEditRef, type SavedTranscript } from "../../api/transcripts";
+import TranscriptEditor from "../../components/Transcript/TranscriptEditor";
 import AppHeader from "../../components/AppHeader";
 import { AxesProvider } from "../../components/AxesProvider/AxesContext";
 import Booklist from "../../components/Booklist/Booklist";
@@ -55,7 +57,7 @@ import {
 } from "../../types/aiRecords";
 
 import type { BackendDataView } from "../../components/FrontEndWorkspace/viewTypes";
-import type { AxisData, BookList } from "../../types/annotations";
+import type { AxisData, BookList, SpeakerSegment } from "../../types/annotations";
 
 interface AnnotatorProps {
   rosBagFileName?: string;
@@ -78,7 +80,7 @@ interface AnnotatorProps {
 const Annotator = ({
   rosBagFileName = "",
   bookListFileName = "",
-  data,
+  data: loadedData,
   bookListData,
   chunkManifest = null,
   currentChunkIndex = 0,
@@ -92,6 +94,10 @@ const Annotator = ({
   savedAnnotationName = "",
   onAnnotationSaved,
 }: AnnotatorProps) => {
+  const [savedTranscript, setSavedTranscript] = useState<SavedTranscript | null>(null);
+  const [transcriptEditorOpen, setTranscriptEditorOpen] = useState(false);
+  const data = useMemo(() => applySavedTranscript(loadedData, savedTranscript), [loadedData, savedTranscript]);
+  const editRef = transcriptEditRef(data.views?.transcript);
   const [player, setPlayer] = useState<ReactPlayer | null>(null);
   const [duration, setDuration] = useState(data.duration_seconds || 0);
   const [played, setPlayed] = useState(0);
@@ -146,8 +152,15 @@ const Annotator = ({
     } else {
       setBookList({});
     }
-    setAIRecords(data.ai_records ?? []);
-  }, [data, bookListData]);
+    setAIRecords(loadedData.ai_records ?? []);
+  }, [loadedData, bookListData]);
+
+  const handleSaveTranscript = async (segments: SpeakerSegment[]) => {
+    if (!editRef) throw new Error("Reload the transcript before editing it.");
+    const revision = Number(data.views.transcript.processed_data?.revision ?? 0);
+    const saved = await saveTranscript(editRef, revision, segments);
+    setSavedTranscript(saved);
+  };
 
   const upsertAIRecord = (record: AIRecord) => {
     setAIRecords((currentRecords) => {
@@ -599,6 +612,13 @@ const Annotator = ({
 <AxesProvider
   key={chunkManifest ? `chunk-${currentChunkIndex}` : "whole-input"}
 >
+  {transcriptEditorOpen && <TranscriptEditor
+    segments={data.speaker_data}
+    duration={data.views.transcript.duration}
+    chunked={Boolean(chunkManifest?.chunking_enabled)}
+    onSave={handleSaveTranscript}
+    onClose={() => setTranscriptEditorOpen(false)}
+  />}
   <Dialog
     open={pendingChunkIndex !== null}
     onClose={() => !confirmingChunkSwitch && setPendingChunkIndex(null)}
@@ -719,6 +739,10 @@ const Annotator = ({
               waveformPath: data.waveform_image_path,
               views: data.views,
               transcript: data.audio_transcript,
+              onEditTranscript: editRef && !processingPending ? () => {
+                setIsPlaying(false);
+                setTranscriptEditorOpen(true);
+              } : undefined,
               played,
               isPlaying,
               onProgress: setPlayed,

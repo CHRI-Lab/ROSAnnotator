@@ -3,6 +3,7 @@ from .chunk_views import create_chunks, get_chunks, process_chunk_view
 from .views import inspect_input, process_rosbag, list_filenames, transcribe_audio, update_booklist, save_annotation, get_annotation, gpt_chat, clear_gpt_history, complete_ai_record
 from .autosave import save_autosave, check_autosave, load_autosave, discard_autosave
 from .views import view_catalog
+from .transcript_views import transcript_detail
 
 urlpatterns = [
     path('views/', view_catalog, name='view_catalog'),
@@ -14,6 +15,7 @@ urlpatterns = [
     path('process_rosbag/', process_rosbag, name='process_rosbag'),
     path('list_filenames/', list_filenames, name='list_filenames'),
     path('transcribe_audio/', transcribe_audio, name='transcribe_audio'),
+    path('transcripts/<str:scope>/<str:cache_key>/', transcript_detail, name='transcript_detail'),
     path('update_booklist/', update_booklist, name='update_booklist'),
     path('save_annotation/', save_annotation, name='save_annotation'),
     path('get_annotation/', get_annotation, name='get_annotation'),

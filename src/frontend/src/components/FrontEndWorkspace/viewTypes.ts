@@ -7,6 +7,7 @@ export type ViewPanelContext = {
   waveformPath?: string | null;
   views?: Record<string, BackendDataView>;
   transcript: string;
+  onEditTranscript?: () => void;
   played: number;
   isPlaying: boolean;
   onProgress: (time: number) => void;
