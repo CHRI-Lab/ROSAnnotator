@@ -27,7 +27,7 @@ existing file already follows them.
 
 An ordinary TypeScript `const` still uses `camelCase`. Components and styled
 components use `PascalCase` even when declared with `const`, as in
-`AxisContainer`. Existing registry names such as `dataViewDefinitions` stay as
+`AxisContainer`. Existing registry names such as `availableViews` stay as
 they are. Python class attributes such as `view_id` and `cache_version` retain
 their existing lowercase convention.
 
@@ -146,7 +146,6 @@ The frontend has [ESLint configuration](../src/frontend/.eslintrc.cjs) and
 Vite build. These checks do not enforce every naming or formatting decision in
 this guide. No shared Prettier, Black, Ruff, or EditorConfig configuration was
 found when this guide was written; the defaults above are review conventions.
-For backend behavior changes, follow the [backend test guide](../src/backend/tests/README.md).
 
 ## Existing examples
 

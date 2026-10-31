@@ -86,6 +86,8 @@ set that was complete a moment earlier.
 | `confirm_overwrite` | Proceed despite a reported conflict |
 | `manifest_id` | Chunk scope; required with `chunk_index` |
 | `chunk_index` | Chunk scope; required with `manifest_id` |
+| `bag_filename` | Optional source ROSBag filename recorded in the CSV |
+| `source_duration` | Optional whole-recording duration recorded in the CSV |
 
 Chunk bounds are read from the manifest rather than sent by the client, so a
 save cannot disagree with the range the loader used.
@@ -95,8 +97,8 @@ Responses:
 | Status | Meaning |
 | --- | --- |
 | 200 | Written |
-| 400 | Validation failed; body carries per-field messages |
-| 404 | Named manifest or chunk does not exist |
+| 400 | Validation failed, including an invalid or out-of-range chunk index |
+| 404 | Named manifest file does not exist |
 | 409 | Would change an existing file; body describes what |
 | 500 | Write failed |
 
@@ -168,10 +170,10 @@ Processed media is not affected either way: `ViewCache` is content-addressed, so
 a different manifest ID already reuses the same processed views.
 
 `MANIFEST_NAMESPACE` in `chunks.py` is fixed for the life of the project.
-Changing it orphans every existing cache entry and recovery file.
-
-This supersedes the note in the data-view contracts that manifest generation
-remains UUID4.
+Changing it makes newly generated manifests use different IDs, so new sessions
+will not automatically rediscover status summaries or recovery files associated
+with the old IDs. Existing manifests remain addressable by their old IDs while
+their files remain present, and the content-addressed `ViewCache` is unaffected.
 
 ## Recovery interaction
 
@@ -182,8 +184,12 @@ JSON rather than CSV because recovery must restore the editor exactly, including
 axes with no blocks and shortcut keys, both of which the CSV format drops.
 
 A successful save clears the autosave for the scope it saved, and only that
-scope. A chunk save merges one chunk's range, so other chunks' unexported work
-exists nowhere but their own recovery files.
+scope. During the current browser session, `MainPage` also keeps each visited
+chunk's edits in memory and silently restores them when that chunk is revisited.
+Before switching chunks, the latest state is flushed to the chunk-scoped
+autosave. That file remains crash-recovery data: an existing autosave for a
+chunk that has not been visited in the current session is applied only after
+the user chooses to restore it.
 
 ## Limitations
 
@@ -193,9 +199,9 @@ exists nowhere but their own recovery files.
   CSV, which has one row per block. Recovery files do preserve it.
 - Deleting a boundary-spanning block from one chunk removes it entirely,
   including the portion the adjacent chunk displayed.
-- Switching chunks currently relies on autosave to preserve the rest of the
-  annotation, so autosave is serving both as an in-session state carrier and as
-  crash recovery. These should be separated.
+- In-memory carried edits last only for the current page session. Recovery after
+  a crash, reload, or later session depends on the chunk-scoped autosave and the
+  user's choice to restore it.
 
 ## Verification
 

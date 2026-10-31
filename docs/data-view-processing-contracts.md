@@ -1,13 +1,12 @@
 # Data-view processing contracts
 
 See [the implementation design diagram](design-diagram.md).
-See [Force / Torque](spatial-views.md) for the sensor processors,
-sample contract, demo bag and validation commands.
 
 ## Extension points
 
 Add a `DataViewProcessor` child, register it in `view_registry.PROCESSORS`, and
-add a frontend `BaseDataView` component to `dataViewDefinitions`. No changes to
+add a frontend `BaseDataView` component to `availableViews` in
+`viewRegistry.ts`. No changes to
 `process_views`, the HTTP workflow, the loader, or the tab renderer are required.
 
 The backend parent defines `supported_message_types`, `check_availability`,
@@ -17,8 +16,9 @@ the workflow resolves their order. A processor may treat a dependency as optiona
 fields without adding view-specific branches to the workflow.
 
 Registered views are audio, video, transcript, waveform, annotations,
-statistics-annotations, statistics-tiers, and wrench. Existing five frontend registry IDs,
-named component exports, and the shared playback/seek context remain supported.
+statistics-annotations, statistics-tiers, and wrench. All eight frontend
+registry IDs, the existing named component exports, and the shared playback/seek
+context remain supported.
 The annotation/statistics processors describe an editable timeline; its live data
 continues to come from `AxesProvider`. Imported annotations are attached after
 processing, and the existing annotation/speaker/recovery initialization is retained.
@@ -100,10 +100,11 @@ a global data error dialog is used only if no usable views are returned.
 
 One media player drives shared playback time and seek callbacks. Video includes
 usable audio; if muxing fails, a companion audio player follows the same clock.
-An audio player supplies the clock for audio-only inputs. The
-annotation editor waits for initial data and recovery to finish, preventing a
-late transcript response from replacing edits. Chunk switching still waits for
-autosave to flush and retains the current editor on failure.
+An audio player supplies the clock for audio-only inputs. The annotation editor
+waits for initial data loading to finish. If recovery data exists, a modal blocks
+editing and autosave remains disabled until the user restores or discards it.
+Chunk switching still waits for autosave to flush and retains the current editor
+on failure.
 
 ## Cache and migration
 
@@ -129,10 +130,14 @@ data views are written exclusively to UUID6 directories. Older caches that lack
 source/topic/options identity are left on disk and are not reused automatically.
 Existing annotation exports and autosave files retain their layouts and scopes.
 
-Chat frames/history are keyed by a returned `chat_context_id` in Django's cache,
-not request-specific module globals. Deployments with multiple workers should
-configure a shared Django cache backend; the default local-memory cache only
-shares context within one process.
+Whole-bag video responses return a `chat_context_id`; their selected frames and
+conversation history are stored under that token in Django's cache. Chunk video
+responses currently create a token with an empty frame list, so visual prompts
+in chunked sessions do not receive extracted frames through this path. Requests
+without a context token retain the legacy fallback to module-level frames and
+history. Deployments with multiple workers should configure a shared Django
+cache backend for token-scoped conversations; the default local-memory cache and
+the legacy fallback are both process-local.
 
 ## Verification
 
@@ -156,18 +161,3 @@ node tests/dataViewLoading.test.cjs
 node tests/autosave.test.cjs
 npm run build
 ```
-
-Tests cover partial/total failure, generic extension, source/topic/options/chunk
-cache invalidation, concurrent requests, safe closing, time fallbacks and chunk
-boundaries, frame rejection, API contracts, incremental frontend loading, and
-existing autosave/navigation behavior. ROS decoding, FFmpeg playback, model
-inference, and browser visual validation still require the actual runtime.
-
-Initial validation on 2026-09-19: backend 165 passed and 4 pre-existing skips;
-frontend 12 passed; TypeScript and Vite production build passed. After integrating
-origin/main at 88d5eea, backend 231 passed and the production build passed. The
-12 view/loading/autosave frontend tests passed. AI instructions now receive the
-input duration from both callers and reject times outside 0 <= start <= end <=
-duration; all 9 AI time-validation tests and the production build passed after
-this fix. Browser validation was
-blocked by the browser runtime's startup error. No real ROS/ML run was performed.
