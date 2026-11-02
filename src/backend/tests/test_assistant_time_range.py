@@ -33,7 +33,13 @@ class AssistantTimeRangeTests(SimpleTestCase):
         )
 
     def test_valid_range_filters_transcript_frames_and_timeline(self):
-        with patch.object(views, 'frames_for_video', return_value=['range-frame']) as sample, \
+        with patch.object(views, 'frames_for_video', return_value=(
+                 ['range-frame'], [{
+                     'frame_index': 3,
+                     'chunk_relative_seconds': 12.0,
+                     'sha256': 'frame-hash',
+                 }],
+             )) as sample, \
              patch.object(views, 'openai_api_key', 'test-key'), \
              patch.object(views, 'RemoteAPI') as remote_api:
             remote_api.return_value.respond.return_value = 'done'
@@ -50,6 +56,15 @@ class AssistantTimeRangeTests(SimpleTestCase):
         self.assertEqual(context['timelineContext'][0]['blocks'], [
             {'start': 12, 'end': 14, 'text': 'selected', 'blockIndex': 1},
         ])
+
+    def test_video_sampling_uses_half_open_presentation_time_range(self):
+        timestamps = [0.0, 8.0, 14.999, 15.0, 15.08, 20.0]
+
+        selected = views.select_video_frame_indices(
+            timestamps, start_seconds=0, end_seconds=15,
+        )
+
+        self.assertEqual(selected, [0, 1, 2])
 
     def test_filtered_timeline_keeps_full_annotation_block_index(self):
         timeline = [{

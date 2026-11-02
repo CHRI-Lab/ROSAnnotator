@@ -51,9 +51,16 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
                 "transcript", "video", "annotations", "codebook",
             ],
             "data_view_contexts": {
-                "transcript": {"visible": "selected transcript panel"},
-                "video": {"visible": "selected video panel"},
-                "annotations": {"visible": "selected annotation panel"},
+                "transcript": {
+                    "transcript": "OUTSIDE_RANGE_SECRET",
+                    "speaker_data": [{"text": "OUTSIDE_RANGE_SECRET"}],
+                },
+                "video": {
+                    "frames": [{"seconds": 29, "private": "OUTSIDE_RANGE_SECRET"}],
+                },
+                "annotations": {
+                    "axes": [{"blocks": [{"text": "OUTSIDE_RANGE_SECRET"}]}],
+                },
                 "statistics-tiers": {"private": "not selected"},
             },
             "timeline_scope": {"axis_ids": [1], "allow_new": False},
@@ -105,7 +112,14 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
     def test_valid_time_range_filters_context_and_records_both_references_in_both_modes(self):
         for mode in ("local", "remote"):
             with self.subTest(mode=mode), patch.object(
-                views, "frames_for_video", return_value=["range-frame"]
+                views, "frames_for_video", return_value=(
+                    ["range-frame"],
+                    [{
+                        "frame_index": 42,
+                        "chunk_relative_seconds": 12.5,
+                        "sha256": "frame-hash",
+                    }],
+                )
             ) as frames:
                 response, provider_call, _, unused_called = self.invoke(
                     mode, self.make_request(mode)
@@ -123,6 +137,8 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
             self.assertNotIn("Before", context["transcriptContext"])
             self.assertNotIn("After", context["transcriptContext"])
             self.assertEqual(context["frameContext"], ["range-frame"])
+            self.assertEqual(context["dataViewContexts"], {})
+            self.assertNotIn("OUTSIDE_RANGE_SECRET", json.dumps(context))
             self.assertEqual(context["timelineContext"], [{
                 "id": 1,
                 "axisName": "Selected timeline",
@@ -162,6 +178,15 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
             self.assertEqual(options["selected_time_range"], {
                 "chunk_relative_seconds": {"start": 10.0, "end": 20.0},
                 "whole_video_seconds": {"start": 610.0, "end": 620.0},
+            })
+            self.assertEqual(options["video_frames"], {
+                "count": 1,
+                "samples": [{
+                    "frame_index": 42,
+                    "chunk_relative_seconds": 12.5,
+                    "whole_video_seconds": 612.5,
+                    "sha256": "frame-hash",
+                }],
             })
 
     def test_invalid_time_ranges_are_rejected_before_either_provider_runs(self):
@@ -214,9 +239,33 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
             self.assertEqual(context["codebookContext"], {})
             self.assertEqual(context["timelineContext"], [])
             self.assertEqual(context["selectedDataViews"], ["transcript"])
-            self.assertEqual(context["dataViewContexts"], {
-                "transcript": {"visible": "yes"},
-            })
+            self.assertEqual(context["dataViewContexts"], {})
+
+    def test_unscoped_media_metadata_never_reaches_either_provider(self):
+        for mode in ("local", "remote"):
+            with self.subTest(mode=mode):
+                response, provider_call, _, unused_called = self.invoke(
+                    mode,
+                    self.make_request(
+                        mode,
+                        selected_data_views=["audio", "waveform"],
+                        data_view_contexts={
+                            "audio": {"path": "FULL_CHUNK_AUDIO_SECRET"},
+                            "waveform": {"path": "FULL_CHUNK_WAVEFORM_SECRET"},
+                        },
+                        audio_transcript=None,
+                        video_path=None,
+                        Axeinfo=None,
+                        Codebook=None,
+                        timeline_scope={"axis_ids": [], "allow_new": False},
+                        time_range=None,
+                    ),
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(unused_called)
+            self.assertEqual(provider_call.kwargs["dataViewContexts"], {})
+            self.assertNotIn("FULL_CHUNK", json.dumps(provider_call.kwargs))
 
     def test_confirmed_empty_selection_is_prompt_only_in_both_modes(self):
         for mode in ("local", "remote"):

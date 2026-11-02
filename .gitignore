@@ -11,3 +11,4 @@ processed*/
 datas/
 models/
 *.sh text eol=lf
+src/frontend/src/pages/Annotator/Annotator.tsx

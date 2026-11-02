@@ -50,6 +50,15 @@ export type AIRecord = {
       chunk_relative_seconds: { start: number; end: number };
       whole_video_seconds: { start: number; end: number };
     };
+    video_frames: {
+      count: number;
+      samples: Array<{
+        frame_index: number;
+        chunk_relative_seconds: number;
+        whole_video_seconds: number;
+        sha256: string;
+      }>;
+    };
     current_chunk: {
       index: number;
       start_seconds: number;
