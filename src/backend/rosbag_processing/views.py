@@ -154,6 +154,113 @@ def validate_context_time_range(value, duration):
     return float(start), float(end)
 
 
+_CLOCK_TOKEN = r'\d{1,3}:\d{2}(?::\d{2})?'
+_CLOCK_RANGE = re.compile(
+    rf'(?P<start>{_CLOCK_TOKEN})\s*(?:-|–|—|to)\s*(?P<end>{_CLOCK_TOKEN})',
+    re.IGNORECASE,
+)
+_CLOCK_POINT = re.compile(_CLOCK_TOKEN)
+_NUMBER_RANGE = re.compile(
+    r'(?:(?:from|between)\s+)?(?P<start>\d+(?:\.\d+)?)\s*'
+    r'(?P<start_unit>hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)?\s*'
+    r'(?:-|–|—|to|and)\s*(?P<end>\d+(?:\.\d+)?)\s*'
+    r'(?P<end_unit>hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b',
+    re.IGNORECASE,
+)
+_NUMBER_POINT = re.compile(
+    r'(?P<value>\d+(?:\.\d+)?)\s*'
+    r'(?P<unit>hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b',
+    re.IGNORECASE,
+)
+
+
+def _clock_seconds(value):
+    parts = [int(part) for part in value.split(':')]
+    if len(parts) == 2:
+        minutes, seconds = parts
+        if seconds >= 60:
+            return None
+        return minutes * 60 + seconds
+    hours, minutes, seconds = parts
+    if minutes >= 60 or seconds >= 60:
+        return None
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _unit_seconds(value, unit):
+    normalized = unit.casefold()
+    multiplier = 3600 if normalized.startswith('h') else 60 if normalized.startswith('m') else 1
+    return float(value) * multiplier
+
+
+def prompt_time_references(message):
+    """Return explicit chunk-local time points/ranges mentioned in a prompt."""
+    text = str(message or '')
+    references = []
+    consumed = []
+
+    for match in _CLOCK_RANGE.finditer(text):
+        start = _clock_seconds(match.group('start'))
+        end = _clock_seconds(match.group('end'))
+        if start is not None and end is not None:
+            references.append(('range', float(min(start, end)), float(max(start, end))))
+            consumed.append(match.span())
+
+    for match in _NUMBER_RANGE.finditer(text):
+        end_unit = match.group('end_unit')
+        start_unit = match.group('start_unit') or end_unit
+        start = _unit_seconds(match.group('start'), start_unit)
+        end = _unit_seconds(match.group('end'), end_unit)
+        references.append(('range', min(start, end), max(start, end)))
+        consumed.append(match.span())
+
+    def already_consumed(span):
+        return any(span[0] >= start and span[1] <= end for start, end in consumed)
+
+    for match in _CLOCK_POINT.finditer(text):
+        if already_consumed(match.span()):
+            continue
+        seconds = _clock_seconds(match.group(0))
+        if seconds is not None:
+            references.append(('point', float(seconds), float(seconds)))
+
+    for match in _NUMBER_POINT.finditer(text):
+        if already_consumed(match.span()):
+            continue
+        seconds = _unit_seconds(match.group('value'), match.group('unit'))
+        references.append(('point', seconds, seconds))
+    return references
+
+
+def _format_context_time(seconds):
+    whole = int(seconds)
+    hours, remainder = divmod(whole, 3600)
+    minutes, value = divmod(remainder, 60)
+    return f'{hours:02}:{minutes:02}:{value:02}' if hours else f'{minutes:02}:{value:02}'
+
+
+def prompt_time_range_error(message, selected_range):
+    """Explain explicit prompt times that escape the selected half-open range."""
+    if selected_range is None:
+        return None
+    selected_start, selected_end = selected_range
+    outside = []
+    for kind, start, end in prompt_time_references(message):
+        if kind == 'range':
+            if start < selected_start or end > selected_end:
+                outside.append(f'{_format_context_time(start)}–{_format_context_time(end)}')
+        elif start < selected_start or start >= selected_end:
+            outside.append(_format_context_time(start))
+    if not outside:
+        return None
+    requested = ', '.join(dict.fromkeys(outside))
+    selected = f'{_format_context_time(selected_start)}–{_format_context_time(selected_end)}'
+    return (
+        f'Your prompt references {requested}, outside the selected time range {selected}. '
+        'Update Range start and Range end to include the requested time, then try again.'
+    )
+
+
 def transcript_for_time_range(transcript, start, end):
     """Keep timestamped transcript entries overlapping a chunk-relative range."""
     entries = []
@@ -582,6 +689,9 @@ def gpt_chat(request):
             )
         except ValueError as error:
             return JsonResponse({'error': str(error)}, status=400)
+        prompt_range_error = prompt_time_range_error(message, selected_range)
+        if prompt_range_error:
+            return JsonResponse({'error': prompt_range_error}, status=400)
         raw_current_chunk = data.get("current_chunk")
         current_chunk = None
         if raw_current_chunk is not None:

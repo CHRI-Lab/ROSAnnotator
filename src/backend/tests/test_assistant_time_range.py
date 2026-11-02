@@ -10,11 +10,11 @@ class AssistantTimeRangeTests(SimpleTestCase):
     def setUp(self):
         self.factory = RequestFactory()
 
-    def request(self, selected_range):
+    def request(self, selected_range, message='Annotate this range'):
         return self.factory.post(
             '/api/gpt_chat/',
             data=json.dumps({
-                'message': 'Annotate this range',
+                'message': message,
                 'audio_transcript': (
                     '[00:00] Speaker A: Before\n'
                     '[00:10] Speaker A: Selected\n'
@@ -94,3 +94,55 @@ class AssistantTimeRangeTests(SimpleTestCase):
                 response = views.gpt_chat(self.request(selected_range))
                 self.assertEqual(response.status_code, 400)
                 remote_api.assert_not_called()
+
+    def test_prompt_timestamp_outside_selection_is_rejected_before_sampling(self):
+        for message in (
+            'Describe what happens at 00:25',
+            'Annotate from 25 to 28 seconds',
+            'Review between 0.5 and 1 minutes',
+        ):
+            with self.subTest(message=message), \
+                 patch.object(views, 'frames_for_video') as sample, \
+                 patch.object(views, 'RemoteAPI') as remote_api:
+                response = views.gpt_chat(
+                    self.request({'start': 10, 'end': 20}, message=message)
+                )
+
+            self.assertEqual(response.status_code, 400)
+            error = json.loads(response.content)['error']
+            self.assertIn('outside the selected time range 00:10–00:20', error)
+            self.assertIn('Update Range start and Range end', error)
+            sample.assert_not_called()
+            remote_api.assert_not_called()
+
+    def test_prompt_range_equal_to_selection_is_allowed(self):
+        with patch.object(views, 'frames_for_video', return_value=(
+                 ['range-frame'], [{
+                     'frame_index': 3,
+                     'chunk_relative_seconds': 12.0,
+                     'sha256': 'frame-hash',
+                 }],
+             )), \
+             patch.object(views, 'openai_api_key', 'test-key'), \
+             patch.object(views, 'RemoteAPI') as remote_api:
+            remote_api.return_value.respond.return_value = 'done'
+            response = views.gpt_chat(self.request(
+                {'start': 10, 'end': 20},
+                message='Describe 00:10–00:20',
+            ))
+
+        self.assertEqual(response.status_code, 200)
+        remote_api.assert_called_once()
+
+    def test_point_at_selected_end_is_outside_half_open_range(self):
+        with patch.object(views, 'frames_for_video') as sample, \
+             patch.object(views, 'RemoteAPI') as remote_api:
+            response = views.gpt_chat(self.request(
+                {'start': 10, 'end': 20},
+                message='Describe the frame at 20 seconds',
+            ))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('00:20', json.loads(response.content)['error'])
+        sample.assert_not_called()
+        remote_api.assert_not_called()
