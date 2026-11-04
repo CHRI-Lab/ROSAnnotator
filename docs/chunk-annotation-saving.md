@@ -37,8 +37,16 @@ the file parses, and the annotations sit at the wrong point in the recording.
 
 ## Chunk boundaries
 
-A chunk displays every block that **overlaps** its range, clipped to it. A block
-from 290 s to 310 s appears in a 300 to 600 chunk as 0 s to 10 s.
+When chunk configuration is confirmed with an imported annotation file, the
+backend immediately rewrites every boundary-crossing block into independent
+blocks aligned to the confirmed chunk boundaries, before the first chunk is
+processed.
+
+For example, a 50–70 s block with 60-second chunks becomes two CSV rows:
+50–60 s and 60–70 s.
+
+The normal loader still displays every block that **overlaps** its range,
+clipped to it.
 
 `view_metadata.clip_to_chunk` defines this, and `annotations_for_chunk` is
 implemented in terms of it so the two cannot diverge.
@@ -54,8 +62,7 @@ chunk. The merge resolves it by identity rather than position:
 - an existing block the chunk displayed but the request no longer contains was
   **deleted by the user**, and does not return
 
-A load and save with no edits is therefore exact. Editing a boundary-spanning
-block makes it chunk-local, which reflects what the user could see and change.
+A load and save with no edits is therefore exact.
 
 ## Merge
 
@@ -191,8 +198,9 @@ exists nowhere but their own recovery files.
   They are wrong and are not repaired automatically. Test against fresh saves.
 - An axis with no blocks anywhere in the recording is not represented in the
   CSV, which has one row per block. Recovery files do preserve it.
-- Deleting a boundary-spanning block from one chunk removes it entirely,
-  including the portion the adjacent chunk displayed.
+- Legacy or otherwise unconfirmed annotation data can still contain a
+  boundary-spanning block. Confirming a chunked session with an imported file
+  permanently splits those blocks before they can be edited.
 - Switching chunks currently relies on autosave to preserve the rest of the
   annotation, so autosave is serving both as an in-session state carrier and as
   crash recovery. These should be separated.
@@ -202,17 +210,22 @@ exists nowhere but their own recovery files.
 From `src/backend`:
 
 ```sh
-python manage.py test rosbag_processing.tests tests.test_chunks tests.test_autosave tests.test_chunk_autosave
+python manage.py test rosbag_processing.tests tests.test_annotation_chunking tests.test_chunks tests.test_autosave tests.test_chunk_autosave
 ```
 
-`ChunkAnnotationTests` covers the clipping contract on load. Manual checks that
-the automated tests do not cover:
+`ChunkAnnotationTests` covers the clipping contract on load, and
+`test_annotation_chunking` covers permanent boundary splitting. Use this manual
+acceptance scenario as well:
 
-- save in chunk 0, then chunk 2 under the same name, and confirm both sets of
-  blocks are present with chunk 2's at whole-recording time
-- create a block spanning a chunk boundary, save the adjacent chunk without
-  editing, and confirm the file is unchanged
-- save over an existing file from a chunk and confirm the prompt reports the
-  count within that chunk, not the file total
-- save from both the header button and "Save and Send Data" and confirm
-  identical behaviour
+1. Load the recording without chunking, create one block from 50–70 s, and save
+   it as an annotation file.
+2. Reload that annotation file with 60-second chunks.
+3. Delete 50–60 s in chunk 1, use "Save and Send Data", then load the annotation
+   without chunking. The 60–70 s block must still exist.
+4. Repeat from the original file, edit 50–60 s in chunk 1, and save/send. A full
+   load must show two separate blocks with different content.
+5. Repeat the edit, then navigate directly to chunk 2. Its local 0–10 s block
+   (whole-recording 60–70 s) must still exist unchanged.
+
+These checks use the existing autosave flow as-is; permanent splitting does not
+change autosave behavior.
