@@ -14,7 +14,8 @@ from rest_framework.response import Response
 
 from .ai_records import build_ai_record_annotation_name
 from .chunk_processing import process_chunk
-from .chunks import load_manifest, save_manifest
+from .chunks import build_chunks, load_manifest, save_manifest
+from .data_utils import load_annotation, read_annotation_metadata
 from .serializers import InputInspectionSerializer
 from .view_metadata import attach_metadata
 
@@ -63,6 +64,35 @@ def read_duration(path):
     return get_rosbag_duration(str(path))
 
 
+def split_loaded_annotation(annotation_filename, chunks, directory):
+    annotations = load_annotation(annotation_filename, directory)
+    boundaries = [chunk['end_seconds'] for chunk in chunks[:-1]]
+    changed = False
+    for axis in annotations:
+        split_blocks = []
+        for block in axis.get('annotationBlocks', []):
+            points = [
+                block['start'],
+                *(boundary for boundary in boundaries
+                  if block['start'] < boundary < block['end']),
+                block['end'],
+            ]
+            changed = changed or len(points) > 2
+            split_blocks.extend(
+                {**block, 'start': start, 'end': end}
+                for start, end in zip(points, points[1:])
+            )
+        axis['annotationBlocks'] = split_blocks
+    if changed:
+        metadata = read_annotation_metadata(annotation_filename, directory)
+        from .views import write_annotation_csv
+        write_annotation_csv(
+            str(Path(directory) / annotation_filename), annotations,
+            bag_filename=metadata.get('bag_filename', ''),
+            source_duration=metadata.get('source_duration'),
+        )
+
+
 def with_processing_status(manifest):
     manifest = {**manifest, 'chunks': [dict(chunk) for chunk in manifest['chunks']]}
     root = Path(manifest_directory()) / manifest['id']
@@ -84,9 +114,10 @@ def create_chunks(request):
     bag_path = (root / values['bag_filename']).resolve()
     if bag_path.parent != root or not bag_path.is_file():
         return Response({'error': 'ROSBag file not found.'}, status=404)
+    annotation_directory = getattr(settings, 'ANNOTATION_PATH', '/app/datas/annotation')
     for field, directory, label in (
         ('booklist_filename', '/app/datas/booklist', 'Booklist'),
-        ('annotation_filename', '/app/datas/annotation', 'Annotation'),
+        ('annotation_filename', annotation_directory, 'Annotation'),
     ):
         filename = values.get(field)
         if filename and not (Path(directory) / filename).is_file():
@@ -102,6 +133,13 @@ def create_chunks(request):
             return Response(
                 {'error': 'Chunk duration must be shorter than the input duration.'},
                 status=400,
+            )
+        annotation_filename = values.get('annotation_filename')
+        if chunking_enabled and annotation_filename:
+            split_loaded_annotation(
+                annotation_filename,
+                build_chunks(duration, chunk_seconds),
+                annotation_directory,
             )
         manifest = save_manifest(
             manifest_directory(), values['bag_filename'], duration, chunk_seconds,

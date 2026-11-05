@@ -1051,14 +1051,24 @@ class GPTChatEndpointTests(SimpleTestCase):
             }),
             content_type="application/json",
         )
-        with patch.object(views, "frames_for_video", return_value=["selected-frame"]) as sample, \
+        with patch.object(views, "frames_for_video", return_value=(
+                 ["selected-frame"], [{
+                     "frame_index": 1,
+                     "chunk_relative_seconds": 0.5,
+                     "sha256": "frame-hash",
+                 }],
+             )) as sample, \
              patch.object(views, "openai_api_key", "test-key"), \
              patch.object(views, "RemoteAPI") as remote_api:
             remote_api.return_value.respond.return_value = "description"
             response = views.gpt_chat(request)
 
         self.assertEqual(response.status_code, 200)
-        sample.assert_called_once_with("chunks/selected/0000/output.mp4")
+        sample.assert_called_once_with(
+            "chunks/selected/0000/output.mp4",
+            start_seconds=None,
+            end_seconds=None,
+        )
         self.assertEqual(remote_api.call_args.kwargs["frameContext"], ["selected-frame"])
 
     def test_video_path_cannot_escape_processed_directory(self):

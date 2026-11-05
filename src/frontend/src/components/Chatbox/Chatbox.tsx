@@ -542,7 +542,7 @@ const Chatbox = ({
         />
       </Box>
       <Box color={timeSelection.error ? "error.main" : "text.secondary"} fontSize="0.75rem" mb={1}>
-        {timeSelection.error || `range · 00:00–${formatChunkTime(duration)}`}
+        {timeSelection.error || `Range select between 00:00–${formatChunkTime(duration)}`}
       </Box>
 
       <TextField

@@ -58,7 +58,56 @@ class AIAssistant(ABC):
 
     def respond(self, message, chatHistory=""):
         """Return raw assistant text using the shared provider contract."""
+        diagnostic = self._context_diagnostic_response(message)
+        if diagnostic is not None:
+            return diagnostic
+        missing = self._missing_required_data_views(message)
+        if missing:
+            missing_text = ", ".join(missing)
+            return (
+                "INSUFFICIENT_DATA\n"
+                f"Missing data views: {missing_text}\n"
+                "Reason: The requested analysis requires data that was not supplied.\n"
+                f"Request: Please select or provide {missing_text} and try again."
+            )
         return self._respond(message, chatHistory)
+
+    def _context_diagnostic_response(self, message):
+        """Answer context-audit questions from validated data, never model guesses."""
+        normalized = " ".join(str(message or "").casefold().split())
+        available = self._available_data_views()
+        asks_for_received_transcript = (
+            "transcript" in normalized
+            and any(word in normalized for word in ("send", "show", "display", "give", "return"))
+            and any(word in normalized for word in ("received", "sent", "available", "access"))
+        )
+        if asks_for_received_transcript:
+            if "transcript" in available:
+                return str(self.transcriptContext)
+            return (
+                "INSUFFICIENT_DATA\n"
+                "Missing data views: transcript\n"
+                "Reason: No transcript content was supplied in this request.\n"
+                "Request: Please select or provide transcript and try again."
+            )
+
+        asks_for_available_views = (
+            ("data view" in normalized or "views" in normalized)
+            and any(word in normalized for word in ("access", "available", "received", "sent"))
+            and any(word in normalized for word in ("what", "which", "list"))
+        )
+        if asks_for_available_views:
+            labels = {
+                "video": "video frames",
+                "transcript": "transcript",
+                "annotations": "annotations",
+                "statistics-annotations": "annotation statistics",
+                "statistics-tiers": "tier statistics",
+                "codebook": "codebook",
+            }
+            visible = [labels.get(view, view) for view in available]
+            return "Available data views: " + (", ".join(visible) if visible else "none") + "."
+        return None
 
     def get_run_metadata(self):
         """Return safe provider metadata for the most recent response."""
@@ -163,29 +212,48 @@ class AIAssistant(ABC):
         """Return obvious evidence prerequisites omitted by the user."""
         normalized = str(message or "").casefold()
         missing = []
-        selected = set(self.selectedDataViews)
+        available = set(self._available_data_views())
         if any(word in normalized for word in (
             "gesture", "body language", "facial expression", "visible", "video",
-        )) and "video" not in selected:
+        )) and "video" not in available:
             missing.append("video")
         if any(word in normalized for word in (
             "transcript", "utterance", "speech", "said", "speaker attitude",
-        )) and "transcript" not in selected:
+        )) and "transcript" not in available:
             missing.append("transcript")
         if any(phrase in normalized for phrase in (
             "codebook", "according to the codebook", "use the codes",
-        )) and "codebook" not in selected:
+        )) and "codebook" not in available:
             missing.append("codebook")
         if any(word in normalized for word in (
             "delete", "remove", "rename", "modify existing", "existing axis",
         )) and not (
             isinstance(self.timelineScope, dict)
             and self.timelineScope.get("axis_ids")
-        ) and not selected.intersection({
+        ) and not available.intersection({
             "annotations", "statistics-annotations", "statistics-tiers"
         }):
             missing.append("annotations")
         return list(dict.fromkeys(missing))
+
+    def _available_data_views(self):
+        """Return selected views that contain inspectable model evidence."""
+        selected = set(self.selectedDataViews)
+        available = []
+        if "transcript" in selected and bool(str(self.transcriptContext or "").strip()):
+            available.append("transcript")
+        if "video" in selected and bool(self.frameContext):
+            available.append("video")
+        if "codebook" in selected and bool(self.codebookContext):
+            available.append("codebook")
+        if bool(self.timelineContext):
+            available.extend(
+                view for view in (
+                    "annotations", "statistics-annotations", "statistics-tiers",
+                )
+                if view in selected
+            )
+        return available
 
     def _data_view_policy_prompt(self):
         labels = {
@@ -198,9 +266,18 @@ class AIAssistant(ABC):
             "statistics-tiers": "tier statistics",
             "codebook": "codebook",
         }
-        selected = [labels[view] for view in ALL_DATA_VIEWS if view in self.selectedDataViews]
+        available_views = set(self._available_data_views())
+        selected = [labels[view] for view in ALL_DATA_VIEWS if view in available_views]
+        selected_without_evidence = [
+            labels[view] for view in ALL_DATA_VIEWS
+            if view in self.selectedDataViews and view not in available_views
+        ]
         omitted = [labels[view] for view in ALL_DATA_VIEWS if view not in self.selectedDataViews]
         available_text = ", ".join(selected) if selected else "none"
+        unavailable_text = (
+            ", ".join(selected_without_evidence)
+            if selected_without_evidence else "none"
+        )
         omitted_text = ", ".join(omitted) if omitted else "none"
         scoped_axis_ids = (
             self.timelineScope.get("axis_ids", [])
@@ -216,22 +293,17 @@ class AIAssistant(ABC):
         )
         return f"""AVAILABLE DATA POLICY
 Available selected data views: {available_text}.
+Selected views without inspectable model evidence: {unavailable_text}.
 Unavailable or unselected data views: {omitted_text}.
 {axis_scope_text}
 
 Use only the selected data views and any separately selected axes described
 above. Do not assume access to omitted data and do not infer, fabricate, or
-guess missing evidence. Before answering or producing annotation actions,
-decide whether the available context is sufficient.
+guess missing evidence. The backend has already validated the available views.
+Never claim that a view listed as available above is missing, and never invent
+additional required views for an ordinary conversational or diagnostic request.
 A selected view is usable only to the extent that its supplied context contains
 inspectable evidence. A file path or availability flag alone is not evidence.
-
-If it is insufficient, do not return timeline or annotation actions. Reply in
-plain text using exactly this structure:
-INSUFFICIENT_DATA
-Missing data views: <comma-separated data views>
-Reason: <why the missing views are required>
-Request: Please select or provide <required data views> and try again.
 
 Absence of evidence in selected data is not evidence that an event did not occur."""
 

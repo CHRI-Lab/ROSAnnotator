@@ -224,7 +224,7 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
         })
 
     @patch("rosbag_processing.ai_assistant.OpenAI")
-    def test_missing_video_policy_uses_plain_text_and_sends_no_frames(
+    def test_missing_video_is_rejected_deterministically_without_model_call(
         self, openai_class
     ):
         openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
@@ -240,12 +240,49 @@ class LMPipelineAcceptanceTests(SimpleTestCase):
             selectedDataViews=["transcript"],
         )
 
-        assistant.respond("Annotate visible gestures")
+        response = assistant.respond("Annotate visible gestures")
 
-        request = openai_class.return_value.chat.completions.create.call_args.kwargs
-        self.assertNotIn("response_format", request)
-        self.assertIn("Missing data views", request["messages"][0]["content"])
-        self.assertNotIn("private-frame", str(request["messages"]))
+        self.assertIn("Missing data views: video", response)
+        openai_class.return_value.chat.completions.create.assert_not_called()
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_received_transcript_diagnostic_is_backend_generated(self, openai_class):
+        openai_class.return_value.chat.completions.create.return_value = SimpleNamespace(
+            model="gpt-4o",
+            choices=[SimpleNamespace(message=SimpleNamespace(content="received"))],
+        )
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="[00:07] Speaker A: selected transcript",
+            frameContext=[],
+            codebookContext={},
+            timelineContext=[],
+            selectedDataViews=["transcript"],
+        )
+
+        response = assistant.respond("Send the transcript you received")
+
+        self.assertEqual(response, "[00:07] Speaker A: selected transcript")
+        openai_class.return_value.chat.completions.create.assert_not_called()
+
+    @patch("rosbag_processing.ai_assistant.OpenAI")
+    def test_available_view_diagnostic_is_backend_generated(self, openai_class):
+        assistant = RemoteAPI(
+            APIKey="test-key",
+            transcriptContext="selected transcript",
+            frameContext=["selected-frame"],
+            codebookContext={"Speech": ["Greeting"]},
+            timelineContext=[],
+            selectedDataViews=["transcript", "video", "codebook"],
+        )
+
+        response = assistant.respond("What data views can you access?")
+
+        self.assertEqual(
+            response,
+            "Available data views: transcript, video frames, codebook.",
+        )
+        openai_class.return_value.chat.completions.create.assert_not_called()
 
     def test_local_failure_preserves_history_and_does_not_call_remote(self):
         '''local mode fails when remote fall back is available: failure message shown, with remote fallback. fallback does not start automatically'''
