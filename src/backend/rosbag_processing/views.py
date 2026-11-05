@@ -168,9 +168,10 @@ _NUMBER_RANGE = re.compile(
     re.IGNORECASE,
 )
 _NUMBER_POINT = re.compile(
-    r'(?P<value>\d+(?:\.\d+)?)\s*'
-    r'(?P<unit>hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b',
-    re.IGNORECASE,
+r'\b(?:at\s+(?:time\s+)?|timestamp\s*[:=]?\s*|t\s*=\s*)'
+r'(?P\d+(?:.\d+)?)\s*'
+r'(?Phours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b',
+re.IGNORECASE,
 )
 
 
