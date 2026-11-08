@@ -38,49 +38,59 @@ the file parses, and the annotations sit at the wrong point in the recording.
 ## Chunk boundaries
 
 When chunk configuration is confirmed with an imported annotation file, the
-backend immediately rewrites every boundary-crossing block into independent
-blocks aligned to the confirmed chunk boundaries, before the first chunk is
-processed.
+backend loads the annotation CSV and permanently splits every block that crosses
+a confirmed chunk boundary.
 
-For example, a 50–70 s block with 60-second chunks becomes two CSV rows:
-50–60 s and 60–70 s.
+The split annotation file is saved before the chunk manifest is created and
+before the first chunk is processed or loaded into the workspace.
 
-The normal loader still displays every block that **overlaps** its range,
-clipped to it.
+For example, with 60-second chunks, a block from 50–70 s becomes two independent
+CSV records:
 
-`view_metadata.clip_to_chunk` defines this, and `annotations_for_chunk` is
-implemented in terms of it so the two cannot diverge.
+- 50–60 s
+- 60–70 s
 
-Clipping creates a problem on the way back. Writing the clipped block to the
-file naively either duplicates the original or discards the part outside the
-chunk. The merge resolves it by identity rather than position:
+A block crossing multiple chunk boundaries is split at every boundary. Blocks
+that already start or end at a boundary are not split again.
 
-- an incoming block still matching an existing block's clipped form is
-  **unedited**, and the original absolute block is restored
-- anything else is new or edited, and is written at chunk offset plus its
-  chunk-local time
-- an existing block the chunk displayed but the request no longer contains was
-  **deleted by the user**, and does not return
+Each resulting record is independent. Editing or deleting the 50–60 (60-70) s record
+does not modify or delete the 60–70 (50-60) s record.
 
-A load and save with no edits is therefore exact.
+This operation updates the imported annotation CSV directly. It does not use or
+depend on chunk autosaves.
+
+When a chunk is loaded, its annotation records are converted from
+whole-recording timestamps to chunk-local timestamps. For example, the absolute
+60–70 s record is displayed as 0–10 s in the second 60-second chunk.
 
 ## Merge
 
-`views.merge_chunk_annotations(existing, incoming, chunk)`:
+`views.merge_chunk_annotations(existing, incoming, chunk)` replaces the saved
+annotation records belonging to the current chunk:
 
-1. Carry through every existing block the chunk did not display.
-2. Re-add the chunk's current blocks, restoring originals where unedited.
-3. Sort each axis by start time and renumber axis IDs from 1.
+1. Keep every existing record outside the current chunk unchanged.
+2. Remove the existing records displayed in the current chunk.
+3. Convert the current editor records from chunk-local time to whole-recording
+   time by adding the chunk start offset.
+4. Add the converted records back to the complete annotation set.
+5. Sort each axis by start time and renumber axis IDs from 1.
 
-Axes are matched on `(axisName, axisType)`. Numeric IDs are reassigned by the
-editor on every load and are not stable across sessions or chunks, so they
-cannot be used for identity. IDs are renumbered on write because
-`data_utils.load_annotation` groups rows by ID, and a collision would merge two
-distinct axes into one.
+If a displayed record is absent from the incoming editor data, it is treated as
+deleted. Because boundary-crossing annotations were already split into separate
+records, this deletion affects only the record in the current chunk.
 
-The CSV is written through a temporary file and `os.replace`. The merge reads
-the file before writing it, so a failure part-way through must not truncate a
-set that was complete a moment earlier.
+Axes are matched using `(axisName, axisType)`. Numeric axis IDs are not used as
+stable identity because the editor may reassign them between loads, sessions,
+or chunks.
+
+IDs are renumbered when writing because `data_utils.load_annotation` groups CSV
+rows by ID. Reusing the same ID for different axes could incorrectly combine
+them.
+
+The complete annotation CSV is written through a temporary file followed by
+`os.replace`. The existing file is replaced only after the new file has been
+written successfully, preventing a partial write from truncating the saved
+annotations.
 
 ## Save request
 
@@ -93,6 +103,8 @@ set that was complete a moment earlier.
 | `confirm_overwrite` | Proceed despite a reported conflict |
 | `manifest_id` | Chunk scope; required with `chunk_index` |
 | `chunk_index` | Chunk scope; required with `manifest_id` |
+| `bag_filename` | Optional source ROSBag filename recorded in the CSV |
+| `source_duration` | Optional whole-recording duration recorded in the CSV |
 
 Chunk bounds are read from the manifest rather than sent by the client, so a
 save cannot disagree with the range the loader used.
@@ -102,8 +114,8 @@ Responses:
 | Status | Meaning |
 | --- | --- |
 | 200 | Written |
-| 400 | Validation failed; body carries per-field messages |
-| 404 | Named manifest or chunk does not exist |
+| 400 | Validation failed, including an invalid or out-of-range chunk index |
+| 404 | Named manifest file does not exist |
 | 409 | Would change an existing file; body describes what |
 | 500 | Write failed |
 
@@ -175,10 +187,10 @@ Processed media is not affected either way: `ViewCache` is content-addressed, so
 a different manifest ID already reuses the same processed views.
 
 `MANIFEST_NAMESPACE` in `chunks.py` is fixed for the life of the project.
-Changing it orphans every existing cache entry and recovery file.
-
-This supersedes the note in the data-view contracts that manifest generation
-remains UUID4.
+Changing it makes newly generated manifests use different IDs, so new sessions
+will not automatically rediscover status summaries or recovery files associated
+with the old IDs. Existing manifests remain addressable by their old IDs while
+their files remain present, and the content-addressed `ViewCache` is unaffected.
 
 ## Recovery interaction
 
@@ -189,8 +201,12 @@ JSON rather than CSV because recovery must restore the editor exactly, including
 axes with no blocks and shortcut keys, both of which the CSV format drops.
 
 A successful save clears the autosave for the scope it saved, and only that
-scope. A chunk save merges one chunk's range, so other chunks' unexported work
-exists nowhere but their own recovery files.
+scope. During the current browser session, `MainPage` also keeps each visited
+chunk's edits in memory and silently restores them when that chunk is revisited.
+Before switching chunks, the latest state is flushed to the chunk-scoped
+autosave. That file remains crash-recovery data: an existing autosave for a
+chunk that has not been visited in the current session is applied only after
+the user chooses to restore it.
 
 ## Limitations
 
@@ -198,12 +214,9 @@ exists nowhere but their own recovery files.
   They are wrong and are not repaired automatically. Test against fresh saves.
 - An axis with no blocks anywhere in the recording is not represented in the
   CSV, which has one row per block. Recovery files do preserve it.
-- Legacy or otherwise unconfirmed annotation data can still contain a
-  boundary-spanning block. Confirming a chunked session with an imported file
-  permanently splits those blocks before they can be edited.
-- Switching chunks currently relies on autosave to preserve the rest of the
-  annotation, so autosave is serving both as an in-session state carrier and as
-  crash recovery. These should be separated.
+- In-memory carried edits last only for the current page session. Recovery after
+  a crash, reload, or later session depends on the chunk-scoped autosave and the
+  user's choice to restore it.
 
 ## Verification
 
@@ -213,19 +226,14 @@ From `src/backend`:
 python manage.py test rosbag_processing.tests tests.test_annotation_chunking tests.test_chunks tests.test_autosave tests.test_chunk_autosave
 ```
 
-`ChunkAnnotationTests` covers the clipping contract on load, and
-`test_annotation_chunking` covers permanent boundary splitting. Use this manual
-acceptance scenario as well:
+`ChunkAnnotationTests` covers the clipping contract on load. Manual checks that
+the automated tests do not cover:
 
-1. Load the recording without chunking, create one block from 50–70 s, and save
-   it as an annotation file.
-2. Reload that annotation file with 60-second chunks.
-3. Delete 50–60 s in chunk 1, use "Save and Send Data", then load the annotation
-   without chunking. The 60–70 s block must still exist.
-4. Repeat from the original file, edit 50–60 s in chunk 1, and save/send. A full
-   load must show two separate blocks with different content.
-5. Repeat the edit, then navigate directly to chunk 2. Its local 0–10 s block
-   (whole-recording 60–70 s) must still exist unchanged.
-
-These checks use the existing autosave flow as-is; permanent splitting does not
-change autosave behavior.
+- save in chunk 0, then chunk 2 under the same name, and confirm both sets of
+  blocks are present with chunk 2's at whole-recording time
+- create a block spanning a chunk boundary, save the adjacent chunk without
+  editing, and confirm the file is unchanged
+- save over an existing file from a chunk and confirm the prompt reports the
+  count within that chunk, not the file total
+- save from both the header button and "Save and Send Data" and confirm
+  identical behaviour

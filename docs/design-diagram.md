@@ -32,7 +32,7 @@ flowchart TD
     Loader --> Annotator[Annotator: shared playback state and seek callback]
     Annotator --> Panels[Frontend registry and isolated ViewPanel boundaries]
     Annotator --> Clock[Shared Play/Pause and seek slider; sensor-only clock]
-    Annotator --> Timeline[Timeline: mount after initial data and recovery are complete]
+    Annotator --> Timeline[Timeline: mount after initial data completes; editing blocked during recovery decision]
     Timeline --> Recovery[Autosave API: bag or manifest/chunk scope]
 ```
 
@@ -65,5 +65,7 @@ sequenceDiagram
 ```
 
 The cache lock is released by the OS if a worker exits. A manifest is navigation
-and recovery identity, not processing-cache identity. Optional chat context is
-stored under a returned context token in Django's cache instead of module globals.
+and recovery identity, not processing-cache identity. Whole-bag video chat
+context is stored under a returned token in Django's cache. Chunk video contexts
+currently contain no extracted frames, and requests without a token retain the
+legacy process-local module-global fallback.
