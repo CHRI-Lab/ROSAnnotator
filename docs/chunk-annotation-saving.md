@@ -37,43 +37,60 @@ the file parses, and the annotations sit at the wrong point in the recording.
 
 ## Chunk boundaries
 
-A chunk displays every block that **overlaps** its range, clipped to it. A block
-from 290 s to 310 s appears in a 300 to 600 chunk as 0 s to 10 s.
+When chunk configuration is confirmed with an imported annotation file, the
+backend loads the annotation CSV and permanently splits every block that crosses
+a confirmed chunk boundary.
 
-`view_metadata.clip_to_chunk` defines this, and `annotations_for_chunk` is
-implemented in terms of it so the two cannot diverge.
+The split annotation file is saved before the chunk manifest is created and
+before the first chunk is processed or loaded into the workspace.
 
-Clipping creates a problem on the way back. Writing the clipped block to the
-file naively either duplicates the original or discards the part outside the
-chunk. The merge resolves it by identity rather than position:
+For example, with 60-second chunks, a block from 50–70 s becomes two independent
+CSV records:
 
-- an incoming block still matching an existing block's clipped form is
-  **unedited**, and the original absolute block is restored
-- anything else is new or edited, and is written at chunk offset plus its
-  chunk-local time
-- an existing block the chunk displayed but the request no longer contains was
-  **deleted by the user**, and does not return
+- 50–60 s
+- 60–70 s
 
-A load and save with no edits is therefore exact. Editing a boundary-spanning
-block makes it chunk-local, which reflects what the user could see and change.
+A block crossing multiple chunk boundaries is split at every boundary. Blocks
+that already start or end at a boundary are not split again.
+
+Each resulting record is independent. Editing or deleting the 50–60 (60-70) s record
+does not modify or delete the 60–70 (50-60) s record.
+
+This operation updates the imported annotation CSV directly. It does not use or
+depend on chunk autosaves.
+
+When a chunk is loaded, its annotation records are converted from
+whole-recording timestamps to chunk-local timestamps. For example, the absolute
+60–70 s record is displayed as 0–10 s in the second 60-second chunk.
 
 ## Merge
 
-`views.merge_chunk_annotations(existing, incoming, chunk)`:
+`views.merge_chunk_annotations(existing, incoming, chunk)` replaces the saved
+annotation records belonging to the current chunk:
 
-1. Carry through every existing block the chunk did not display.
-2. Re-add the chunk's current blocks, restoring originals where unedited.
-3. Sort each axis by start time and renumber axis IDs from 1.
+1. Keep every existing record outside the current chunk unchanged.
+2. Remove the existing records displayed in the current chunk.
+3. Convert the current editor records from chunk-local time to whole-recording
+   time by adding the chunk start offset.
+4. Add the converted records back to the complete annotation set.
+5. Sort each axis by start time and renumber axis IDs from 1.
 
-Axes are matched on `(axisName, axisType)`. Numeric IDs are reassigned by the
-editor on every load and are not stable across sessions or chunks, so they
-cannot be used for identity. IDs are renumbered on write because
-`data_utils.load_annotation` groups rows by ID, and a collision would merge two
-distinct axes into one.
+If a displayed record is absent from the incoming editor data, it is treated as
+deleted. Because boundary-crossing annotations were already split into separate
+records, this deletion affects only the record in the current chunk.
 
-The CSV is written through a temporary file and `os.replace`. The merge reads
-the file before writing it, so a failure part-way through must not truncate a
-set that was complete a moment earlier.
+Axes are matched using `(axisName, axisType)`. Numeric axis IDs are not used as
+stable identity because the editor may reassign them between loads, sessions,
+or chunks.
+
+IDs are renumbered when writing because `data_utils.load_annotation` groups CSV
+rows by ID. Reusing the same ID for different axes could incorrectly combine
+them.
+
+The complete annotation CSV is written through a temporary file followed by
+`os.replace`. The existing file is replaced only after the new file has been
+written successfully, preventing a partial write from truncating the saved
+annotations.
 
 ## Save request
 

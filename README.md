@@ -1,5 +1,6 @@
 # ROSAnnotator
 ## Project Overview
+
 ROSAnnotator is a web-based application that incorporates remote and local language-model assistants, including vision-capable models, to support both manual and automated annotation of ROSBag data. Researchers can select one ROSBag per session from the available files and inspect its synchronized data views in an interactive dashboard. ROSAnnotator currently supports video, audio, waveform, transcript, annotation, statistics, and force/torque views and provides processor interfaces for adding support for further ROS message types.
 
 ## Architecture
@@ -38,13 +39,13 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
 
 ```
 
-## Installation and Set up
+## Installation and Setup
 
 1. **General System Requirements**
 
-   Minimum requirement: A laptop with at least a dual-core processor, 4GB of RAM, a 64-bit operating system, 25GB of available storage, and the capability to run Docker and a modern web browser.
+   The minimum requirement is a laptop with at least a dual-core processor, 4 GB of RAM, a 64-bit operating system, 25 GB of available storage, and the capability to run Docker and a modern web browser.
 
-   The code has been tested by this combination: Ubuntu 20.04 LTS, ROS Noetic, Python 3.9, Chrome version:130.0.6723.117.
+   The code has been tested with this combination: Ubuntu 20.04 LTS, ROS Noetic, Python 3.9, and Chrome version 130.0.6723.117.
    
 2. **Clone the Repository**
 
@@ -68,17 +69,18 @@ The ROSAnnotator project integrates ROS (Robot Operating System) with Django to 
    cp .env.example .env
    ```
 
-   Do not commit this file. For gated Pyannote models, the Hugging Face account
+   Do not commit this file. For gated pyannote models, the Hugging Face account
    associated with the token must have accepted the model terms.
 
-5. **Setting remote AI**
-The application requires OpenAI API Key (ChatGPT) and Hugging Face Access Token. Before running it in docker, please set the corresponding .env variable:
+5. **Setting Up Remote AI**
 
-* **OPENAI_API_KEY** and **HUGGINGFACE_AUTH_TOKEN**.
+   The application requires an OpenAI API key (ChatGPT) and a Hugging Face access token. Before running it in Docker, please set the corresponding `.env` variables:
 
-Please restart the container after changing the .env file.
+   * **OPENAI_API_KEY** and **HUGGINGFACE_AUTH_TOKEN**.
 
-6. **Download a example Local AI Model**
+   Please restart the container after changing the `.env` file.
+
+6. **Download an Example Local AI Model**
 
    Before starting Docker, create the local model directory and download **one**
    of the following model options. Model files are intentionally excluded from
@@ -86,7 +88,7 @@ Please restart the container after changing the .env file.
 
    **Example A — Qwen (text only)**
 
-   Use Qwen based on text files (e.g. request-utterance and speech-attitude annotation based on transcript). It does not
+   Use Qwen for tasks based on text files (e.g., request-utterance and speech-attitude annotations based on transcripts). It does not
    accept video frames and therefore cannot perform actions such as gesture annotation.
 
    ```bash
@@ -118,6 +120,7 @@ Please restart the container after changing the .env file.
    ```
 
 7. **Select the Local AI Model**
+
    Set `LOCAL_AI_MODEL` in the root `.env` file to the downloaded model's
    filename **without** the `.gguf` suffix. This is the single configuration
    point used by both llama.cpp and the backend.
@@ -143,7 +146,7 @@ Please restart the container after changing the .env file.
    LOCAL_AI_MODEL=SmolVLM2-500M-Video-Instruct-Q8_0 docker compose up --build
    ```
 
-   **additional steps on windows**:
+   **Additional Steps on Windows**:
    ```powershell
    $path = Resolve-Path .\scripts\start-local-llm.sh
    $content = [IO.File]::ReadAllText($path).Replace("`r`n", "`n")
@@ -166,7 +169,7 @@ Please restart the container after changing the .env file.
    instead. That workflow rebuilds the dependency base locally, overrides the
    default pin, and starts the resulting images without publishing anything._
 
-   > _Note: The total image size is about 20 GB, so it may take a while for the first time to download and build the image. The speed depends on your computational resources and internet connection._
+   > _Note: The total image size is about 20 GB, so it may take a while to download and build the image for the first time. The speed depends on your computational resources and internet connection._
 
    Open <http://localhost:5173/> after all services report `Up`. To follow the
    application logs:
@@ -196,13 +199,14 @@ Please restart the container after changing the .env file.
 
 9. **Access the Application**
 
-   Both the front end and the back end are hosted locally in a Docker container. Once the server is up and running, you can access the [web app](http://localhost:5173/) at `http://localhost:5173/`.
+   Both the front end and the back end are hosted locally in Docker containers. Once the server is up and running, you can access the [web app](http://localhost:5173/) at `http://localhost:5173/`.
 
 10. **Sample Data**
 
-   We provided a sample ROSBag and a sample codebook in the folder `/data-samples`. The codebook needs to be in JSON format and put in the `/datas/booklist` folder. Please put the .bag file in the `/datas/rosbag-data` folder.
+   We provide a sample ROSBag and a sample codebook in the `/data-samples` folder. The codebook needs to be in JSON format and placed in the `/datas/booklist` folder. Please put the `.bag` file in the `/datas/rosbag-data` folder.
 
-11. **Adding your own data**
+11. **Adding Your Own Data**
+
     Put files in the correct folder.
 
     ```
@@ -210,16 +214,16 @@ Please restart the container after changing the .env file.
         ├── rosbag-data/ # Place your ROSBag data here
         ├── booklist/    # Place your predefined codebook here
         ├── annotation/  # Retrieve your annotation output here
-        └── processed/   # Store all the processed data, e.g. extracted videos and transcriptions
+        └── processed/   # Store all the processed data, e.g., extracted videos and transcriptions
     ```
 
     Select your bag files, codebook (optional), and annotation file (if you need to retrieve your work) on the import page.
-
-   **Customised Data**
-
-   The topics for video and audio data must be configured to match the corresponding topics in the ROSBag. In the sample ROSBag, the topic for video is `/xtion/rgb/image_raw_throttled`, and the topic for audio is `/audio`. Topic names can be modified in the `/src/backend/rosbag_processing/data_utils.py` file. If additional message types need to be extracted, they should also be defined within this file.
-
-   For any custom tools, users should add the necessary functions in the `/src/backend/rosbag_processing/views.py` file. If users wish to customize prompts for the vision language model (VLM), they can modify them in the same file.
+    
+    **Customised Data**
+    
+    The topics for video and audio data must be configured to match the corresponding topics in the ROSBag. In the sample ROSBag, the topic for video is `/xtion/rgb/image_raw_throttled`, and the topic for audio is `/audio`. Topic names can be modified in the `/src/backend/rosbag_processing/data_utils.py` file. If additional message types need to be extracted, they should also be defined within this file.
+    
+    For any custom tools, users should add the necessary functions in the `/src/backend/rosbag_processing/views.py` file. If users wish to customize prompts for the vision language model (VLM), they can modify them in the same file.
 
 ---
 
@@ -228,8 +232,9 @@ Please restart the container after changing the .env file.
 [Overview Video](https://www.youtube.com/watch?v=cCD-JclDxLM)
 
 0. **Import Data**
-    all rosbag data, booklist and annotations added to the datas/ folder will be available for selection in the data loading page.
-    **Note**: reload might be needed when opening localhost the first time after the service is up. 
+
+    All ROSBag data, booklists, and annotations added to the `datas/` folder will be available for selection on the data-loading page.
+    **Note**: A reload might be needed when opening the app on localhost for the first time after the service is up.
 
     Select your bag files, codebook (optional), and annotation file (if you need to retrieve your work) on the import page.
 
@@ -243,40 +248,44 @@ Please restart the container after changing the .env file.
    ```
 
 1. **Unsaved work recovery**
-   User's working history is automatically saved in autosave files at the background. RosAnnotator detect unsaved work history when trying to load a particular piece of data, and prompt user if they want to resume previous work, or start fresh.
 
-   > _Note: the tempary autosave file is NOT intended to be equivalent to the manually saved annotation files. They are only temparary, and can't be selected as a loaded annotation file.
+   The user's work history is automatically saved to autosave files in the background. ROSAnnotator detects unsaved work when attempting to load a particular piece of data and prompts the user to resume their previous work or start fresh.
 
-   > _Note: if user choose to resume previous work, then their selected annotation file will NOT be imported for the relevant section, to avoid conflict between resumed work and imported annotations.
+   > _Note: The temporary autosave files are NOT intended to be equivalent to manually saved annotation files. They are only temporary and cannot be selected as loaded annotation files._
+
+   > _Note: If the user chooses to resume previous work, their selected annotation file will NOT be imported for the relevant section, avoiding conflicts between resumed work and imported annotations._
    
-   **whole-input working history**
-   When a RosBag file is loaded as-a-whole, it carries a single file-based autosave file. Unsaved work will be detected at the data-import page, with a notification that shows up when the corresponding RosBag file is clicked:
+   **Whole-input work history**
+
+   When a ROSBag file is loaded as a whole, it has a single file-based autosave file. Unsaved work will be detected on the data-import page, with a notification that appears when the corresponding ROSBag file is clicked:
 
    ![](instruction_imgs/autosave_notice.png)  
 
-   After user click the [load me] button, a prompt will show up to ask the user if they want to resume the unsaved work or start fresh. the prompt will provide information about the amound of annotation exist in the unsaved work.
+   After the user clicks the [Load Me] button, a prompt will ask whether they want to resume the unsaved work or start fresh. The prompt will provide information about the number of annotations present in the unsaved work.
 
    ![](instruction_imgs/autosave_whole_prompt.png)
 
-   From this point, if user select resume work, they will entering their unsaved working session (without loading any new annotation to avoid conflict, even if an annotation file is selected). If user select to discard, they will enter the chunk-selection prompt in step 2. Note that discarding autosave content is an one-off action that can't be undone.
+   From this point, if the user chooses to resume work, they will enter their unsaved work session (without loading any new annotations to avoid conflicts, even if an annotation file is selected). If the user chooses to discard the autosave, they will enter the chunk-selection prompt in step 2. Note that discarding autosave content is a one-off action that cannot be undone.
 
-   **single-chunk working history**
-   When a RosBag file is loaded in chunks, each chunk has their individual autosave file. Unsaved work will be detected, upon loading an input with the same chunking setting as a previous session, and entering a chunk with unsaved work:
+   **Single-chunk work history**
+
+   When a ROSBag file is loaded in chunks, each chunk has its own autosave file. Unsaved work will be detected when loading an input with the same chunking settings as a previous session and entering a chunk with unsaved work:
 
    ![](instruction_imgs/autosave_chunk_prompt.png)
 
-   Work is resumed or discarded by chunk, rather by entire input. Thus, a 5-chunk input might only have it's first 3 chunks carrying unsaved work. Users are free to resume work from certain particular chunk, while start fresh from other chunks. 
+   Work is resumed or discarded by chunk rather than by the entire input. Thus, a five-chunk input might have unsaved work in only its first three chunks. Users are free to resume work from particular chunks while starting fresh in other chunks.
    
-   When resuming work for a chunk, the selected annotation file will not be imported for that chunk, but can still be used for the rest of the chunk where user decide to discard autosaved work.
+   When resuming work for a chunk, the selected annotation file will not be imported for that chunk, but it can still be used for the other chunks where the user decides to discard autosaved work.
    
-   >_Note: for more technical details about chunk & annotation saving, refer to the documentation at ![](docs/chunk-annotation-saving.md)
+   > _Note: For more technical details about chunk and annotation saving, refer to the documentation at ![](docs/chunk-annotation-saving.md)_
 
 2. **Chunk selection**
-   For scalability, RosAnnotator allows user to select between importing the selected RosBag file as a whole, or devided by chunks with a selected length. After clicking "Load Me" at the loading page, a chunk setting selection prompt will come up for user selection:
+
+   For scalability, ROSAnnotator allows the user to choose between importing the selected ROSBag file as a whole or dividing it into chunks of a selected length. After clicking "Load Me" on the loading page, a chunk-setting selection prompt will appear:
 
    ![](instruction_imgs/chunking.png)
 
-   Before actually starting to load and preprocess the data, user selects between split input in to chunks devided by their specified chunk, or treat it as a whole unified input. After a selection is confirmed, RosAnnotator will start to pre-process the input RosBag file. This may take several minutes, depending on the length and existing datatypes of the input.
+   Before loading and preprocessing the data, the user chooses whether to split the input into chunks of their specified length or treat it as a single unified input. After a selection is confirmed, ROSAnnotator will start to preprocess the input ROSBag file. This may take several minutes, depending on the length and existing data types of the input.
 
    ![](instruction_imgs/transcripting.png)
 
@@ -287,44 +296,44 @@ Please restart the container after changing the .env file.
    docker compose restart frontend
    ```
 
-   After processing finishes (for the first chunk, if user select to import by chunk), user enters the working page of RosAnnotator.
+   After processing finishes (for the first chunk, if the user chooses to import by chunk), the user enters the ROSAnnotator work page.
 
    ![](instruction_imgs/main_page.png)
 
-   If user select to import by chunk, a drop-down menu will be available for user to switch between chunks. Annotation work will survive chunk switch even if it's not saved to an annotation file, however, user should still eventually save their work manually.
+   If the user chooses to import by chunk, a drop-down menu will be available for switching between chunks. Annotation work will survive chunk switches even if it is not saved to an annotation file; however, the user should still eventually save their work manually.
    
-   RosAnnotator preprocess each chunk upon the user entering that chunk for the first time. Afterward, upon second or later visit, it uses the cached preprocessing result to save time and computational power.
+   ROSAnnotator preprocesses each chunk when the user enters that chunk for the first time. On the second or a subsequent visit, it uses the cached preprocessing result to save time and computational power.
 
-   >_Note: When splitting an input into chunks, speaker labels may refer to different people across chunks, as the transcript generation LM can only receive information from the current chunk during each processing session. Check speaker identities before combining annotations.   
+   > _Note: When splitting an input into chunks, speaker labels may refer to different people across chunks, as the transcript-generation LM can only receive information from the current chunk during each processing session. Check speaker identities before combining annotations._
 
 3. **Manual Annotation**
 
    In the annotation area, users can double-click to create a block for annotation. By clicking the block, users can edit the annotation text or change the time interval.
 
-   There are two blue dots on the top of the time axis, which users can drag to mark a specific time, then click the `create` button on the left side of one of the time axis to create an annotation.
+   There are two blue dots at the top of the time axis, which users can drag to mark a specific time. They can then click the `create` button on the left side of one of the time axes to create an annotation.
 
    ![](instruction_imgs/annotation_creation.png)
 
    ![](instruction_imgs/annotation_edit.png)
 
-   >_Note: A single timeline axis cannot contain annotation with overlaping time range. For annotations with overlaping time, use multiple timeline axis.
+   > _Note: A single timeline axis cannot contain annotations with overlapping time ranges. For annotations with overlapping time ranges, use multiple timeline axes._
 
-   **Managing annotation axis**
+   **Managing annotation axes**
 
-   Click `Add new axis` to create a new annotation tier. In `Manage Axes`, users can change the name and type of the time axis. There are two types: `type-in` allows users to type any codes as annotation; `select` allows users to choose one code from the codebook via a drop-down list.
+   Click `Add new axis` to create a new annotation tier. In `Manage Axes`, users can change the name and type of the time axis. There are two types: `type-in` allows users to enter any code as an annotation; `select` allows users to choose one code from the codebook via a drop-down list.
 
    **Transcript to annotation**
    The transcription and codebook will appear at the top of the annotation page. Loading a transcript does not automatically create annotation axes or blocks. 
 
    Click `Convert Transcript to Annotations` to create one axis per speaker with the transcript text as annotation blocks. Empty type-in axes with matching names are reused, including speaker axes saved in another chunk. 
    
-   Axes with matching name to a speaker that already contain annotations, have another type, or have duplicate names are skipped to preserve existing work. A message will appear to report any skipped speakers or invalid timestamps. The button is available once transcript speaker segments have loaded.
+   Axes with names matching a speaker are skipped to preserve existing work if they already contain annotations, have another type, or have duplicate names. A message will appear to report any skipped speakers or invalid timestamps. The button is available once the transcript speaker segments have loaded.
 
    ![](instruction_imgs/transcription_to_annotation.png)
 
 4. **AI-assisted Auto Annotation**
 
-   User can select between a Remote and Local LM for Auto Annotation. User can specify what datatype is being send to the LM, and the timerange of the data type send. User can further specify which timeline axis that the LM are authorised to change.
+   The user can select between a remote LM and a local LM for auto annotation. The user can specify which data type is sent to the LM and the time range of the data sent. The user can further specify which timeline axes the LM is authorised to change.
 
    Users can provide instructions in the chatbox, and the VLM can provide help after several minutes of processing. Instruction examples are:
    
@@ -336,27 +345,22 @@ Please restart the container after changing the .env file.
 
    The VLM's annotation is not always correct. Users can edit the annotation manually.
 
-   Completed AI run records are saved in `/datas/annotation` as
-   `ai_records_<rosbag-file-name>+<booklist-file-name>_<manifest-id>.json`
-   (using `noBookList` when no booklist is selected). Each run is added to the
-   existing file for that manifest, so processing the same input and chunk
-   again preserves earlier runs. Records for different chunks in the same
-   manifest are distinguished by `chunk_index`. Runs without a manifest keep
-   the older filename format without the manifest ID.
+   Completed AI run records are saved in `/datas/annotation` as `ai_records_<rosbag-file-name>+<booklist-file-name>_<manifest-id>.json` (using `noBookList` when no booklist is selected). Each run is added to the existing file for that manifest, so processing the same input and chunk again preserves earlier runs. Records for different chunks in the same manifest are distinguished by `chunk_index`. 
 
    ![](instruction_imgs/auto_annotation.png) 
 
-   **Using and Editing a codebook**
-   During import, user can optionally select a codebook of json format. If a codebook is selected, it can be viewed at the codebook section. This codebook can be edited, and by clicking 'save', any changes will be updated to the loaded JSON file.
+   **Using and Editing a Codebook**
+   During import, the user can optionally select a JSON-formatted codebook. If a codebook is selected, it can be viewed in the codebook section. This codebook can be edited, and clicking 'Save' will update the loaded JSON file with any changes.
 
-   If a codebook is not selected, user can also create codebook inside RosAnnotator by editing on top of an empty codebook and click 'save'. It will generate a json codebook file with automatically generated file name.
+   If a codebook is not selected, the user can also create a codebook inside ROSAnnotator by editing an empty codebook and clicking 'Save'. It will generate a JSON codebook with an automatically generated file name.
 
    ![](instruction_imgs/codebook.png)   
 
 5. **Transcript Editing**
-   In the Transcript viewing panel, click `Edit transcript` to correct speaker labels, text, and start/end times, or add and remove segments. `Rename all matching segments` allows user to changes a speaker label throughout the current transcript. 
+
+   In the Transcript viewing panel, click `Edit transcript` to correct speaker labels, text, and start/end times or to add and remove segments. `Rename all matching segments` allows the user to change a speaker label throughout the current transcript.
    
-   Click `Save transcript` to persist corrections for the current input and chunk; they are restored when the same processed transcript is loaded again. Corrections are stored separately from the generated transcript in `transcript.edits.json` in its corresponding sub-directioy of it's processed-view directory to be preserved. Saved corrections update the transcript display, AI context, and future annotation conversion. Existing annotation blocks are not rewritten. Cancel discards unsaved edits; a failed save keeps the draft open for retry.
+   Click `Save transcript` to persist corrections for the current input and chunk; they are restored when the same processed transcript is loaded again. Corrections are stored separately from the generated transcript in `transcript.edits.json` in the corresponding subdirectory of its processed-view directory for preservation. Saved corrections update the transcript display, AI context, and future annotation conversion. Existing annotation blocks are not rewritten. Cancelling discards unsaved edits; a failed save keeps the draft open for retry.
 
    ![](instruction_imgs/entering_edit.png)  
 
@@ -364,11 +368,11 @@ Please restart the container after changing the .env file.
 
 6. **Save Data**
 
-    **It is very important to click "Save and Send Data" before exiting ROSAnnotator.** The saved file will be in the `/datas/annotation` folder in CSV format so that users can retrieve their process by loading that file next time.
+    **It is very important to click "Save and Send Data" before exiting ROSAnnotator.** The saved file will be in the `/datas/annotation` folder in CSV format so that users can retrieve their progress by loading that file next time.
 
-    When working on an input by chunk, "Save and Send Data" saves annotations at the current chunk only, by adding/replacing the annotation records in the timerange relevant to the current chunk in the annotation file specified by user's entered file name. It does not save works for other chunks, or effect records outside of the current chunk's time range in any other way. (for more technical details about chunk & annotation saving, refer to the documentation at ![](docs/chunk-annotation-saving.md))
+    When working on an input by chunk, "Save and Send Data" saves annotations for the current chunk only by adding or replacing the annotation records in the time range relevant to the current chunk in the annotation file specified by the file name entered by the user. It does not save work for other chunks or affect records outside the current chunk's time range in any other way. (For more technical details about chunk and annotation saving, refer to the documentation at ![](docs/chunk-annotation-saving.md).)
 
-    > _**Autosave Note**: progress are auto-saved locally, in response for unexpected webapp quit. Autosave does not write to the exported annotation file, and will be automatically detected upon entering the webapp with unsaved. Those are temporary files that are NOT intended to replace manually saved work
+    > _**Autosave Note**: Progress is automatically saved locally in response to an unexpected web app exit. Autosave does not write to the exported annotation file, and unsaved work will be automatically detected upon entering the web app. These temporary files are NOT intended to replace manually saved work._
 
 ---
 
@@ -388,7 +392,7 @@ configured or validated as a production or Spartan HPC deployment.
 
 The backend runtime is split into a reusable dependency base and a smaller
 application layer so local machines and the GitHub-hosted CI runner do not
-rebuild the large ROS, CUDA, PyTorch, Whisper, and Pyannote dependency set for
+rebuild the large ROS, CUDA, PyTorch, Whisper, and pyannote dependency set for
 every change:
 
 - `src/backend/Dockerfile.base` builds the GPU/ROS dependency image.
@@ -489,9 +493,9 @@ torchvision==0.20.1
 pyannote.audio==3.4.0
 ```
 
-The base package must remain public so pull request workflows can read it
-without exposing registry credentials. Pull requests build validation images
-without publishing them; the backend pull-request build uses a lightweight
+The base package must remain public so pull-request workflows can read it
+without exposing registry credentials. For pull requests, the workflow builds
+validation images without publishing them; the backend pull-request build uses a lightweight
 Python base rather than the published GPU/ROS base. On every push to `main`,
 the workflow publishes the frontend image and assembles the backend application
 code onto the pinned GPU/ROS base, producing commit-SHA-tagged images in GHCR.
@@ -503,9 +507,9 @@ We are dedicated to maintaining this project by addressing bugs, refining functi
 
 ## Citation
 
-ROSAnnotator has been used in the following papers: https://arxiv.org/abs/2501.07051
+ROSAnnotator has been used in the following paper: https://arxiv.org/abs/2501.07051
 
-If you use our code or paper in your work, please cite the following:
+If you use our code or the paper in your work, please cite the following:
 
 ```
 @misc{zhang2025rosannotatorwebapplicationrosbag,
@@ -540,6 +544,6 @@ the ROSAnnotator licence and remain subject to their respective terms.
 
 The model files are downloaded separately and are not distributed as part
 of this source repository. Users are responsible for complying with each
-model's licence and access conditions. In particular, use of the Pyannote
+model's licence and access conditions. In particular, use of the pyannote
 pipeline requires accepting the Hugging Face conditions for both
 `speaker-diarization-3.1` and `segmentation-3.0`.
