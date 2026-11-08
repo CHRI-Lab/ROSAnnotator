@@ -78,13 +78,14 @@ test('empty data-view selection requires confirmation before any request', () =>
 });
 
 test('selected data views are the only contexts serialized for the backend', () => {
-  assert.match(annotatorSource, /selectedDataViews\.has\("transcript"\) \? data\.audio_transcript : undefined/);
+  assert.match(annotatorSource, /transcriptForTimeRange\(/);
   assert.match(annotatorSource, /selectedDataViews\.has\("video"\) \? data\.video_path : undefined/);
   assert.match(annotatorSource, /const scopedAxesData = axesData\.filter\(\(axis\) => selectedAxisIds\.has\(axis\.id\)\)/);
   assert.match(annotatorSource, /Axeinfo: timelineContext/);
   assert.match(annotatorSource, /selectedDataViews\.has\("codebook"\) \? bookList : undefined/);
   assert.match(annotatorSource, /selected_data_views: options\?\.selectedDataViews \?\? \[\]/);
   assert.match(annotatorSource, /\.\.\.availableViews/);
+  assert.match(annotatorSource, /DEDICATED_ASSISTANT_CONTEXT_VIEWS\.has\(viewId\)/);
   assert.match(annotatorSource, /data_view_contexts: selectedDataViewContexts/);
   assert.match(annotatorSource, /current_chunk: \{/);
   assert.match(annotatorSource, /start_seconds: currentChunk\?\.start_seconds \?\? 0/);

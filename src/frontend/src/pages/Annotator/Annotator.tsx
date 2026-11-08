@@ -58,6 +58,7 @@ import {
 
 import type { BackendDataView } from "../../components/FrontEndWorkspace/viewTypes";
 import type { AxisData, BookList, SpeakerSegment } from "../../types/annotations";
+import { transcriptForTimeRange } from "./assistantContext";
 
 interface AnnotatorProps {
   rosBagFileName?: string;
@@ -76,6 +77,20 @@ interface AnnotatorProps {
   savedAnnotationName?: string;
   onAnnotationSaved?: (name: string) => void;
 }
+
+// These views either use dedicated, range-filtered request fields or do not yet
+// have a supported model-content route (audio/waveform). Never send their raw
+// processed_data as a generic full-chunk context.
+const DEDICATED_ASSISTANT_CONTEXT_VIEWS = new Set<AssistantDataViewId>([
+  "audio",
+  "video",
+  "transcript",
+  "waveform",
+  "annotations",
+  "statistics-annotations",
+  "statistics-tiers",
+  "codebook",
+]);
 
 const Annotator = ({
   rosBagFileName = "",
@@ -273,12 +288,10 @@ const Annotator = ({
         : undefined;
     const selectedDataViewContexts = Object.fromEntries(
       (options?.selectedDataViews ?? [])
-        .filter((viewId) => viewId !== "codebook")
+        .filter((viewId) => !DEDICATED_ASSISTANT_CONTEXT_VIEWS.has(viewId))
         .map((viewId) => [
           viewId,
-          viewId === "annotations"
-            ? { axes: axesData }
-            : data.views?.[viewId]?.processed_data ?? {},
+          data.views?.[viewId]?.processed_data ?? {},
         ]),
     );
     return fetch("http://localhost:8000/api/gpt_chat/", {
@@ -288,7 +301,13 @@ const Annotator = ({
       },
       body: JSON.stringify({
         message: message, 
-        audio_transcript: selectedDataViews.has("transcript") ? data.audio_transcript : undefined,
+        audio_transcript: selectedDataViews.has("transcript")
+          ? transcriptForTimeRange(
+              data.audio_transcript,
+              data.speaker_data,
+              options?.timeRange,
+            )
+          : undefined,
         video_path: selectedDataViews.has("video") ? data.video_path : undefined,
         // Axis selection is an independent, narrow action context. This lets
         // the model edit selected axes without disclosing the whole timeline.

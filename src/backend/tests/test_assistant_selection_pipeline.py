@@ -1,6 +1,7 @@
 """Acceptance coverage for fine-grained AI request selections in both modes."""
 
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.cache import cache
@@ -51,9 +52,16 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
                 "transcript", "video", "annotations", "codebook",
             ],
             "data_view_contexts": {
-                "transcript": {"visible": "selected transcript panel"},
-                "video": {"visible": "selected video panel"},
-                "annotations": {"visible": "selected annotation panel"},
+                "transcript": {
+                    "transcript": "OUTSIDE_RANGE_SECRET",
+                    "speaker_data": [{"text": "OUTSIDE_RANGE_SECRET"}],
+                },
+                "video": {
+                    "frames": [{"seconds": 29, "private": "OUTSIDE_RANGE_SECRET"}],
+                },
+                "annotations": {
+                    "axes": [{"blocks": [{"text": "OUTSIDE_RANGE_SECRET"}]}],
+                },
                 "statistics-tiers": {"private": "not selected"},
             },
             "timeline_scope": {"axis_ids": [1], "allow_new": False},
@@ -105,7 +113,14 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
     def test_valid_time_range_filters_context_and_records_both_references_in_both_modes(self):
         for mode in ("local", "remote"):
             with self.subTest(mode=mode), patch.object(
-                views, "frames_for_video", return_value=["range-frame"]
+                views, "frames_for_video", return_value=(
+                    ["range-frame"],
+                    [{
+                        "frame_index": 42,
+                        "chunk_relative_seconds": 12.5,
+                        "sha256": "frame-hash",
+                    }],
+                )
             ) as frames:
                 response, provider_call, _, unused_called = self.invoke(
                     mode, self.make_request(mode)
@@ -123,6 +138,8 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
             self.assertNotIn("Before", context["transcriptContext"])
             self.assertNotIn("After", context["transcriptContext"])
             self.assertEqual(context["frameContext"], ["range-frame"])
+            self.assertEqual(context["dataViewContexts"], {})
+            self.assertNotIn("OUTSIDE_RANGE_SECRET", json.dumps(context))
             self.assertEqual(context["timelineContext"], [{
                 "id": 1,
                 "axisName": "Selected timeline",
@@ -163,6 +180,87 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
                 "chunk_relative_seconds": {"start": 10.0, "end": 20.0},
                 "whole_video_seconds": {"start": 610.0, "end": 620.0},
             })
+            self.assertEqual(options["video_frames"], {
+                "count": 1,
+                "samples": [{
+                    "frame_index": 42,
+                    "chunk_relative_seconds": 12.5,
+                    "whole_video_seconds": 612.5,
+                    "sha256": "frame-hash",
+                }],
+            })
+
+    def test_time_range_excludes_full_range_duplicates_from_actual_lm_payload(self):
+        """Only range-filtered evidence reaches either provider's final request."""
+        audio_transcript = (
+            "[00:00] OUTSIDE_TRANSCRIPT_BEFORE\n"
+            "[00:10] INSIDE_TRANSCRIPT\n"
+            "[00:20] OUTSIDE_TRANSCRIPT_AFTER"
+        )
+        timeline = [{
+            "id": 1,
+            "axisName": "Range audit",
+            "blocks": [
+                {"start": 2, "end": 4, "text": "OUTSIDE_TIMELINE_BEFORE"},
+                {"start": 12, "end": 14, "text": "INSIDE_TIMELINE"},
+                {"start": 22, "end": 24, "text": "OUTSIDE_TIMELINE_AFTER"},
+            ],
+        }]
+        duplicate_contexts = {
+            "transcript": {"transcript": "DUPLICATE_FULL_RANGE_SECRET"},
+            "annotations": {
+                "axes": [{"blocks": [{"text": "DUPLICATE_FULL_RANGE_SECRET"}]}],
+            },
+        }
+
+        for mode in ("local", "remote"):
+            with self.subTest(mode=mode), patch(
+                "rosbag_processing.ai_assistant.OpenAI"
+            ) as openai_class, patch.object(
+                views, "openai_api_key", "test-key"
+            ):
+                openai_class.return_value.chat.completions.create.return_value = (
+                    SimpleNamespace(
+                        model=f"test-{mode}-model",
+                        choices=[SimpleNamespace(
+                            message=SimpleNamespace(content=json.dumps({
+                                "type": "instruction",
+                                "steps": [{
+                                    "action": "deleteBlock",
+                                    "parameters": {"axisId": 1, "blockIndex": 1},
+                                }],
+                            }))
+                        )],
+                    )
+                )
+                response = views.gpt_chat(self.make_request(
+                    mode,
+                    message="Delete annotations in the selected range",
+                    audio_transcript=audio_transcript,
+                    Axeinfo=timeline,
+                    video_path=None,
+                    selected_data_views=["transcript", "annotations"],
+                    data_view_contexts=duplicate_contexts,
+                    timeline_scope={"axis_ids": [1], "allow_new": False},
+                ))
+
+            self.assertEqual(response.status_code, 200)
+            lm_request = (
+                openai_class.return_value.chat.completions.create.call_args.kwargs
+            )
+            serialized_messages = json.dumps(
+                lm_request["messages"], ensure_ascii=False
+            )
+            self.assertIn("INSIDE_TRANSCRIPT", serialized_messages)
+            self.assertIn("INSIDE_TIMELINE", serialized_messages)
+            for excluded_marker in (
+                "OUTSIDE_TRANSCRIPT_BEFORE",
+                "OUTSIDE_TRANSCRIPT_AFTER",
+                "OUTSIDE_TIMELINE_BEFORE",
+                "OUTSIDE_TIMELINE_AFTER",
+                "DUPLICATE_FULL_RANGE_SECRET",
+            ):
+                self.assertNotIn(excluded_marker, serialized_messages)
 
     def test_invalid_time_ranges_are_rejected_before_either_provider_runs(self):
         invalid_ranges = (
@@ -214,9 +312,33 @@ class AssistantSelectionPipelineTests(SimpleTestCase):
             self.assertEqual(context["codebookContext"], {})
             self.assertEqual(context["timelineContext"], [])
             self.assertEqual(context["selectedDataViews"], ["transcript"])
-            self.assertEqual(context["dataViewContexts"], {
-                "transcript": {"visible": "yes"},
-            })
+            self.assertEqual(context["dataViewContexts"], {})
+
+    def test_unscoped_media_metadata_never_reaches_either_provider(self):
+        for mode in ("local", "remote"):
+            with self.subTest(mode=mode):
+                response, provider_call, _, unused_called = self.invoke(
+                    mode,
+                    self.make_request(
+                        mode,
+                        selected_data_views=["audio", "waveform"],
+                        data_view_contexts={
+                            "audio": {"path": "FULL_CHUNK_AUDIO_SECRET"},
+                            "waveform": {"path": "FULL_CHUNK_WAVEFORM_SECRET"},
+                        },
+                        audio_transcript=None,
+                        video_path=None,
+                        Axeinfo=None,
+                        Codebook=None,
+                        timeline_scope={"axis_ids": [], "allow_new": False},
+                        time_range=None,
+                    ),
+                )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(unused_called)
+            self.assertEqual(provider_call.kwargs["dataViewContexts"], {})
+            self.assertNotIn("FULL_CHUNK", json.dumps(provider_call.kwargs))
 
     def test_confirmed_empty_selection_is_prompt_only_in_both_modes(self):
         for mode in ("local", "remote"):

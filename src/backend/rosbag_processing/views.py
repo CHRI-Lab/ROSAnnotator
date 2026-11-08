@@ -3,11 +3,13 @@ from django.core.cache import cache
 from django.conf import settings
 from uuid import UUID, uuid4
 import json
+import hashlib
 import math
 import os
 import re
 import base64
 import math
+import subprocess
 from pathlib import Path
 import cv2
 from django.http import JsonResponse
@@ -45,9 +47,56 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 ROSBAG_DATA_DIR = '/app/datas/rosbag-data/'
 PROCESSED_DATA_DIR = '/app/processed_data'
 
+# These views either use dedicated, server-controlled contexts below or do not
+# yet have a supported model-content route (audio/waveform). Never accept a raw
+# client-provided full-chunk copy through the generic context channel.
+DEDICATED_ASSISTANT_CONTEXT_VIEWS = {
+    "audio", "video", "transcript", "waveform", "annotations",
+    "statistics-annotations", "statistics-tiers", "codebook",
+}
+
+
+def select_video_frame_indices(timestamps, max_frames=50,
+                               start_seconds=None, end_seconds=None):
+    """Choose at most max_frames by actual presentation timestamp."""
+    candidates = [
+        index for index, seconds in enumerate(timestamps)
+        if (start_seconds is None or seconds >= start_seconds)
+        and (end_seconds is None or seconds < end_seconds)
+    ]
+    if not candidates:
+        return []
+    count = min(len(candidates), max_frames)
+    offsets = sorted({
+        round(index * (len(candidates) - 1) / max(count - 1, 1))
+        for index in range(count)
+    })
+    return [candidates[offset] for offset in offsets]
+
+
+def video_frame_timestamps(path):
+    """Read each decoded frame's presentation timestamp without estimating FPS."""
+    try:
+        result = subprocess.run(
+            [
+                'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+                '-show_entries', 'frame=best_effort_timestamp_time',
+                '-of', 'json', str(path),
+            ],
+            check=True, capture_output=True, text=True,
+        )
+        frames = json.loads(result.stdout).get('frames', [])
+        timestamps = [float(frame['best_effort_timestamp_time']) for frame in frames]
+    except (OSError, subprocess.CalledProcessError, ValueError, KeyError,
+            TypeError, json.JSONDecodeError) as error:
+        raise ValueError('Selected video frame timestamps could not be read.') from error
+    if not timestamps or any(not math.isfinite(value) or value < 0 for value in timestamps):
+        raise ValueError('Selected video has no valid frame timestamps.')
+    return timestamps
+
 
 def frames_for_video(video_path, max_frames=50, start_seconds=None, end_seconds=None):
-    """Sample the selected processed MP4, never a different request's global frames."""
+    """Return JPEG data and an audit trail for frames inside the selected range."""
     if not isinstance(video_path, str) or not video_path or Path(video_path).is_absolute():
         raise ValueError('Invalid video path.')
     root = Path(PROCESSED_DATA_DIR).resolve()
@@ -59,23 +108,15 @@ def frames_for_video(video_path, max_frames=50, start_seconds=None, end_seconds=
     try:
         if not capture.isOpened():
             raise ValueError('Selected video could not be opened.')
-        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
-        if frame_count <= 0:
-            raise ValueError('Selected video has no readable frames.')
-        fps = capture.get(cv2.CAP_PROP_FPS)
-        if start_seconds is not None and end_seconds is not None and fps > 0:
-            first_frame = max(0, math.floor(start_seconds * fps))
-            last_frame = min(frame_count - 1, math.ceil(end_seconds * fps) - 1)
-        else:
-            first_frame, last_frame = 0, frame_count - 1
-        if last_frame < first_frame:
+        timestamps = video_frame_timestamps(path)
+        positions = select_video_frame_indices(
+            timestamps, max_frames=max_frames,
+            start_seconds=start_seconds, end_seconds=end_seconds,
+        )
+        if not positions:
             raise ValueError('Selected time range has no readable video frames.')
-        available_count = last_frame - first_frame + 1
-        count = min(available_count, max_frames)
-        positions = sorted({round(first_frame + index * (last_frame - first_frame) /
-                                  max(count - 1, 1))
-                            for index in range(count)})
         frames = []
+        audit = []
         for position in positions:
             capture.set(cv2.CAP_PROP_POS_FRAMES, position)
             success, frame = capture.read()
@@ -83,10 +124,16 @@ def frames_for_video(video_path, max_frames=50, start_seconds=None, end_seconds=
                 continue
             encoded, buffer = cv2.imencode('.jpg', frame)
             if encoded:
-                frames.append(base64.b64encode(buffer).decode('ascii'))
+                jpeg = buffer.tobytes()
+                frames.append(base64.b64encode(jpeg).decode('ascii'))
+                audit.append({
+                    'frame_index': position,
+                    'chunk_relative_seconds': timestamps[position],
+                    'sha256': hashlib.sha256(jpeg).hexdigest(),
+                })
         if not frames:
             raise ValueError('Selected video has no readable frames.')
-        return frames
+        return frames, audit
     finally:
         capture.release()
 
@@ -105,6 +152,114 @@ def validate_context_time_range(value, duration):
     if start < 0 or start >= end or end > duration:
         raise ValueError('Select a time range within the current chunk.')
     return float(start), float(end)
+
+
+_CLOCK_TOKEN = r'\d{1,3}:\d{2}(?::\d{2})?'
+_CLOCK_RANGE = re.compile(
+    rf'(?P<start>{_CLOCK_TOKEN})\s*(?:-|–|—|to)\s*(?P<end>{_CLOCK_TOKEN})',
+    re.IGNORECASE,
+)
+_CLOCK_POINT = re.compile(_CLOCK_TOKEN)
+_NUMBER_RANGE = re.compile(
+    r'(?:(?:from|between)\s+)?(?P<start>\d+(?:\.\d+)?)\s*'
+    r'(?P<start_unit>hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)?\s*'
+    r'(?:-|–|—|to|and)\s*(?P<end>\d+(?:\.\d+)?)\s*'
+    r'(?P<end_unit>hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b',
+    re.IGNORECASE,
+)
+_NUMBER_POINT = re.compile(
+r'\b(?:at\s+(?:time\s+)?|timestamp\s*[:=]?\s*|t\s*=\s*)'
+r'(?P\d+(?:.\d+)?)\s*'
+r'(?Phours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b',
+re.IGNORECASE,
+)
+
+
+def _clock_seconds(value):
+    parts = [int(part) for part in value.split(':')]
+    if len(parts) == 2:
+        minutes, seconds = parts
+        if seconds >= 60:
+            return None
+        return minutes * 60 + seconds
+    hours, minutes, seconds = parts
+    if minutes >= 60 or seconds >= 60:
+        return None
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _unit_seconds(value, unit):
+    normalized = unit.casefold()
+    multiplier = 3600 if normalized.startswith('h') else 60 if normalized.startswith('m') else 1
+    return float(value) * multiplier
+
+
+def prompt_time_references(message):
+    """Return explicit chunk-local time points/ranges mentioned in a prompt."""
+    text = str(message or '')
+    references = []
+    consumed = []
+
+    for match in _CLOCK_RANGE.finditer(text):
+        start = _clock_seconds(match.group('start'))
+        end = _clock_seconds(match.group('end'))
+        if start is not None and end is not None:
+            references.append(('range', float(min(start, end)), float(max(start, end))))
+            consumed.append(match.span())
+
+    for match in _NUMBER_RANGE.finditer(text):
+        end_unit = match.group('end_unit')
+        start_unit = match.group('start_unit') or end_unit
+        start = _unit_seconds(match.group('start'), start_unit)
+        end = _unit_seconds(match.group('end'), end_unit)
+        references.append(('range', min(start, end), max(start, end)))
+        consumed.append(match.span())
+
+    def already_consumed(span):
+        return any(span[0] >= start and span[1] <= end for start, end in consumed)
+
+    for match in _CLOCK_POINT.finditer(text):
+        if already_consumed(match.span()):
+            continue
+        seconds = _clock_seconds(match.group(0))
+        if seconds is not None:
+            references.append(('point', float(seconds), float(seconds)))
+
+    for match in _NUMBER_POINT.finditer(text):
+        if already_consumed(match.span()):
+            continue
+        seconds = _unit_seconds(match.group('value'), match.group('unit'))
+        references.append(('point', seconds, seconds))
+    return references
+
+
+def _format_context_time(seconds):
+    whole = int(seconds)
+    hours, remainder = divmod(whole, 3600)
+    minutes, value = divmod(remainder, 60)
+    return f'{hours:02}:{minutes:02}:{value:02}' if hours else f'{minutes:02}:{value:02}'
+
+
+def prompt_time_range_error(message, selected_range):
+    """Explain explicit prompt times that escape the selected half-open range."""
+    if selected_range is None:
+        return None
+    selected_start, selected_end = selected_range
+    outside = []
+    for kind, start, end in prompt_time_references(message):
+        if kind == 'range':
+            if start < selected_start or end > selected_end:
+                outside.append(f'{_format_context_time(start)}–{_format_context_time(end)}')
+        elif start < selected_start or start >= selected_end:
+            outside.append(_format_context_time(start))
+    if not outside:
+        return None
+    requested = ', '.join(dict.fromkeys(outside))
+    selected = f'{_format_context_time(selected_start)}–{_format_context_time(selected_end)}'
+    return (
+        f'Your prompt references {requested}, outside the selected time range {selected}. '
+        'Update Range start and Range end to include the requested time, then try again.'
+    )
 
 
 def transcript_for_time_range(transcript, start, end):
@@ -193,6 +348,7 @@ def build_ai_record(
     timeline_context=None,
     selected_range=None,
     current_chunk=None,
+    video_frame_samples=None,
 ):
     """Build a secret-free record of one successful model interaction."""
     provider_metadata = assistant.get_run_metadata()
@@ -232,6 +388,13 @@ def build_ai_record(
                 "end": offset + end,
             },
         }
+    frame_samples = []
+    for sample in video_frame_samples or []:
+        seconds = sample['chunk_relative_seconds']
+        frame_samples.append({
+            **sample,
+            'whole_video_seconds': chunk['start_seconds'] + seconds,
+        })
 
     return {
         "schema_version": 1,
@@ -257,6 +420,10 @@ def build_ai_record(
                 isinstance(timeline_scope, dict) and timeline_scope.get("allow_new")
             ),
             "selected_time_range": recorded_range,
+            "video_frames": {
+                "count": len(frame_samples),
+                "samples": frame_samples,
+            },
             "current_chunk": chunk,
         },
     }
@@ -476,7 +643,10 @@ def gpt_chat(request):
         data_view_contexts = {
             view_id: safe_view_payload(payload)
             for view_id, payload in raw_data_view_contexts.items()
-            if view_id in selected_data_view_set and view_id != "codebook"
+            if (
+                view_id in selected_data_view_set
+                and view_id not in DEDICATED_ASSISTANT_CONTEXT_VIEWS
+            )
         }
         timeline_view_ids = {
             "annotations", "statistics-annotations", "statistics-tiers"
@@ -520,6 +690,9 @@ def gpt_chat(request):
             )
         except ValueError as error:
             return JsonResponse({'error': str(error)}, status=400)
+        prompt_range_error = prompt_time_range_error(message, selected_range)
+        if prompt_range_error:
+            return JsonResponse({'error': prompt_range_error}, status=400)
         raw_current_chunk = data.get("current_chunk")
         current_chunk = None
         if raw_current_chunk is not None:
@@ -576,14 +749,16 @@ def gpt_chat(request):
         selected_video_path = (
             data.get('video_path') if "video" in selected_data_view_set else None
         )
+        request_frame_samples = []
         try:
-            request_frames = (
-                frames_for_video(selected_video_path, start_seconds=selected_range[0],
-                                 end_seconds=selected_range[1])
-                if selected_video_path is not None and selected_range is not None
-                else frames_for_video(selected_video_path)
-                if selected_video_path is not None else context_frames
-            )
+            if selected_video_path is not None:
+                request_frames, request_frame_samples = frames_for_video(
+                    selected_video_path,
+                    start_seconds=selected_range[0] if selected_range is not None else None,
+                    end_seconds=selected_range[1] if selected_range is not None else None,
+                )
+            else:
+                request_frames = context_frames
         except ValueError as error:
             return JsonResponse({'error': str(error)}, status=400)
 
@@ -707,6 +882,7 @@ def gpt_chat(request):
             timeline_context=Axiinfo,
             selected_range=selected_range,
             current_chunk=current_chunk,
+            video_frame_samples=request_frame_samples,
         )
         return JsonResponse(
             {

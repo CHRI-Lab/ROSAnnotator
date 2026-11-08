@@ -214,8 +214,6 @@ the user chooses to restore it.
   They are wrong and are not repaired automatically. Test against fresh saves.
 - An axis with no blocks anywhere in the recording is not represented in the
   CSV, which has one row per block. Recovery files do preserve it.
-- Deleting a boundary-spanning block from one chunk removes it entirely,
-  including the portion the adjacent chunk displayed.
 - In-memory carried edits last only for the current page session. Recovery after
   a crash, reload, or later session depends on the chunk-scoped autosave and the
   user's choice to restore it.
@@ -225,7 +223,7 @@ the user chooses to restore it.
 From `src/backend`:
 
 ```sh
-python manage.py test rosbag_processing.tests tests.test_chunks tests.test_autosave tests.test_chunk_autosave
+python manage.py test rosbag_processing.tests tests.test_annotation_chunking tests.test_chunks tests.test_autosave tests.test_chunk_autosave
 ```
 
 `ChunkAnnotationTests` covers the clipping contract on load. Manual checks that
