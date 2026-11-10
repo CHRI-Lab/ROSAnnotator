@@ -1,2 +1,10 @@
-*/venv
-rosbag-data/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.py[cod]
+*.sqlite3
+.git/
+.venv/
+datas/
+processed_data/

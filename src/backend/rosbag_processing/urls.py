@@ -1,12 +1,29 @@
 from django.urls import path
-from .views import process_rosbag, list_filenames, transcribe_audio, update_booklist, save_annotation, get_annotation,gpt_chat
+from .chunk_views import create_chunks, get_chunks, process_chunk_view
+from .views import inspect_input, process_rosbag, list_filenames, transcribe_audio, update_booklist, save_annotation, get_annotation, gpt_chat, clear_gpt_history, complete_ai_record
+from .autosave import save_autosave, check_autosave, load_autosave, discard_autosave
+from .views import view_catalog
+from .transcript_views import transcript_detail
 
 urlpatterns = [
+    path('views/', view_catalog, name='view_catalog'),
+    path('chunks/', create_chunks, name='create_chunks'),
+    path('chunks/<uuid:manifest_id>/', get_chunks, name='get_chunks'),
+    path('chunks/<uuid:manifest_id>/<int:chunk_index>/', get_chunks, name='get_chunk'),
+    path('chunks/<uuid:manifest_id>/<int:chunk_index>/process/', process_chunk_view, name='process_chunk'),
+    path('inputs/inspect/', inspect_input, name='inspect_input'),
     path('process_rosbag/', process_rosbag, name='process_rosbag'),
     path('list_filenames/', list_filenames, name='list_filenames'),
     path('transcribe_audio/', transcribe_audio, name='transcribe_audio'),
+    path('transcripts/<str:scope>/<str:cache_key>/', transcript_detail, name='transcript_detail'),
     path('update_booklist/', update_booklist, name='update_booklist'),
     path('save_annotation/', save_annotation, name='save_annotation'),
     path('get_annotation/', get_annotation, name='get_annotation'),
     path('gpt_chat/', gpt_chat, name='gpt_chat'),
+    path('gpt_chat/clear/', clear_gpt_history, name='clear_gpt_history'),
+    path('ai_records/complete/', complete_ai_record, name='complete_ai_record'),
+    path('autosave/save/', save_autosave, name='save_autosave'),
+    path('autosave/check/', check_autosave, name='check_autosave'),
+    path('autosave/load/', load_autosave, name='load_autosave'),
+    path('autosave/delete/', discard_autosave, name='discard_autosave'),
 ]

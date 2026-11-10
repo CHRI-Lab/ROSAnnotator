@@ -1,76 +1,22 @@
 import base64
 import csv
-import json
 import os
-import subprocess
-import cv2
-from django.http import JsonResponse
-import yaml
-import numpy as np
-from rosbag.bag import Bag
-from cv_bridge import CvBridge
-from google.cloud import speech_v1p1beta1 as speech
+import math
 from datetime import datetime, timedelta
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-from rest_framework import status
-import matplotlib.pyplot as plt
-from .serializers import BooklistSerializer, TranscriptionRequestSerializer
-from pydub import AudioSegment
-import whisper
-from pyannote.audio import Pipeline
 from dotenv import load_dotenv
 
 load_dotenv()
 
-huggingface_auth_token = os.getenv("HUGGINGFACE_AUTH_TOKEN")
 
-def extract_images_from_rosbag(bag_filename, output_folder):
-    bag = Bag(bag_filename, 'r')
-    bridge = CvBridge()
-
-    for i, (_, message, t) in enumerate(bag.read_messages(topics='/xtion/rgb/image_raw_throttled')):
-        cv2_image = bridge.imgmsg_to_cv2(message, desired_encoding='passthrough')
-        cv2_image = cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB)
-        cv2.imwrite(f'{output_folder}/images/frame{i:04d}.jpg', cv2_image)
-        
-def extract_video(bag_filename, output_folder):
-
-    def get_fps():
-        bag = Bag(bag_filename, 'r')
-        bag_info = yaml.load(bag._get_yaml_info(), Loader=yaml.Loader)
-        for topic in bag_info['topics']:
-            if topic['type'] == 'sensor_msgs/Image':
-                return topic['frequency']
-        return None
-    
-    fps = str(get_fps())
-
-    input_images_path = os.path.join(output_folder, 'images/frame%04d.jpg')
-    output_video_path = os.path.join(output_folder, 'video.avi')
-    subprocess.run(['ffmpeg', '-r', str(fps), '-i', input_images_path, output_video_path])
-
-
-def extract_audio(bag_filename, output_folder):
-
-    bag = Bag(bag_filename, 'r')
-    
-
-    output_path = os.path.join(output_folder, 'audio.mp3')
-    
-
-    with open(output_path, 'wb') as f:
-
-        for i, (_, message, t) in enumerate(bag.read_messages(topics='/audio')):
-
-            f.write(message.data)
-    
-
-    bag.close()
-    
-    return output_path
+def get_rosbag_duration(bag_filename):
+    from .rosbag_reader import RosbagReader
+    with RosbagReader(bag_filename) as reader:
+        return reader.duration
 
 def plot_waveform(audio_path, output_filename, start_sec=None, end_sec=None):
+    import numpy as np
+    from matplotlib.figure import Figure
+    from pydub import AudioSegment
     audio = AudioSegment.from_file(audio_path)
     if start_sec is not None and end_sec is not None:
         start_ms = start_sec * 1000 
@@ -79,44 +25,37 @@ def plot_waveform(audio_path, output_filename, start_sec=None, end_sec=None):
     if audio.channels > 1:
         audio = audio.set_channels(1)
     samples = np.array(audio.get_array_of_samples())
-    plt.figure(figsize=(14, 5))
-    plt.plot(samples, color='black', linewidth=0.5)
-    plt.axis('off')
-    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0)
-    plt.close()
-
-def combine_video_audio(output_folder):
-
-    video_path = os.path.join(output_folder, 'video.avi')
-    audio_path = os.path.join(output_folder, 'audio.mp3')
-    output_path = os.path.join(output_folder, 'output.mp4')
-
-    command = [
-        'ffmpeg',
-        '-i', video_path,
-        '-i', audio_path,
-        '-c:v', 'libx264',
-        '-preset', 'fast',
-        '-c:a', 'aac',
-        '-map', '0:v',
-        '-map', '1:a',
-        '-y', output_path
-    ]
-
-    subprocess.run(command)
-
+    figure = Figure(figsize=(14, 5))
+    axes = figure.subplots()
+    axes.plot(samples, color='black', linewidth=0.5)
+    axes.axis('off')
+    figure.savefig(output_filename, bbox_inches='tight', pad_inches=0)
 
 def transcribe_audio_to_srt(audio_file_path, output_folder_path):
+    import whisper
+    from pydub import AudioSegment
+    from pyannote.audio import Pipeline
+
+    huggingface_auth_token = os.getenv("HUGGINGFACE_AUTH_TOKEN")
+    if huggingface_auth_token is None:
+        raise ValueError("Huggingface token not found in environment variables.")
 
     if audio_file_path.endswith(".mp3"):
         audio = AudioSegment.from_mp3(audio_file_path)
         wav_file_path = os.path.join(output_folder_path, "converted_audio.wav")
-        audio.export(wav_file_path, format="wav")
+        # AudioSegment.export returns an open file handle. Close it before the
+        # next consumer opens the WAV; otherwise Docker Desktop bind mounts can
+        # expose a race (most noticeably on Windows) where pyannote cannot see
+        # the newly-created file yet.
+        exported_audio = audio.export(wav_file_path, format="wav")
+        exported_audio.close()
+        if not os.path.isfile(wav_file_path):
+            raise RuntimeError(f"Audio conversion did not create {wav_file_path}.")
         audio_file_path = wav_file_path
 
 
     model = whisper.load_model("base")
-    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization", use_auth_token=huggingface_auth_token)
+    pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=huggingface_auth_token)
     if huggingface_auth_token is None:
         raise ValueError("Huggingface token not found in environment variables.")
     if model is None or pipeline is None:
@@ -191,8 +130,7 @@ def get_relative_path(path):
     relative_path = os.path.relpath(path, base_path)
     return relative_path
 
-def load_annotation(annotation_filename):
-    annotation_path = '/app/datas/annotation/'
+def load_annotation(annotation_filename, annotation_path='/app/datas/annotation/'):
     file_path = os.path.join(annotation_path, f'{annotation_filename}')
 
     if not os.path.exists(file_path):
@@ -224,3 +162,42 @@ def load_annotation(annotation_filename):
         return annotations
     except Exception as e:
         raise IOError(f'Error loading annotation data: {str(e)}')
+
+def read_annotation_metadata(annotation_filename, annotation_path='/app/datas/annotation/'):
+    """Return the source recording an annotation file records, if any.
+
+    Both keys are optional: files written before this column existed carry
+    neither, which means "provenance unknown", not "mismatch". Only the first
+    data row is read, since the values repeat on every row.
+    """
+    file_path = os.path.join(annotation_path, f'{annotation_filename}')
+
+    if not os.path.exists(file_path):
+        raise FileNotFoundError('File not found')
+
+    try:
+        with open(file_path, 'r') as csvfile:
+            row = next(csv.DictReader(csvfile), None)
+    except Exception as e:
+        raise IOError(f'Error reading annotation metadata: {str(e)}')
+
+    if row is None:
+        return {}
+
+    metadata = {}
+
+    bag_filename = (row.get('bagFilename') or '').strip()
+    if bag_filename:
+        metadata['bag_filename'] = bag_filename
+
+    raw_duration = (row.get('sourceDuration') or '').strip()
+    if raw_duration:
+        try:
+            duration = float(raw_duration)
+        except ValueError:
+            pass
+        else:
+            if math.isfinite(duration) and duration > 0:
+                metadata['source_duration'] = duration
+
+    return metadata

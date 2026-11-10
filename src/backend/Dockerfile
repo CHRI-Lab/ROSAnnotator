@@ -1,42 +1,38 @@
-# ubuntu 20.04
-FROM ubuntu:focal
+# syntax=docker/dockerfile:1
 
-# Install dependencies
+# The large ROS/CUDA/PyTorch dependency layers are built separately and
+# published only when the base dependencies change.
+ARG BACKEND_BASE_IMAGE=ghcr.io/kihara001/hri-sim-group6-backend-base:gpu-v2@sha256:d3f12b214ef323eddc24f86a3e2c65148572c0ea45b47e453f14d23cda750c10
+FROM ${BACKEND_BASE_IMAGE}
+
+# Video extraction, audio decoding through pydub, and video/audio muxing invoke
+# the ffmpeg command-line tools at runtime. Install them in the application
+# image so local and tester builds do not depend on the host machine.
 RUN apt-get update \
-    && apt-get install -y wget dos2unix python3-pip \
+    && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC \
+       apt-get install -y --no-install-recommends ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy files for env setup and set the permission
-COPY env_config/ /env_config/
-RUN chmod -R +x /env_config/
-RUN dos2unix /env_config/forge-ros.sh
-RUN dos2unix /env_config/entrypoint.sh
-RUN dos2unix /env_config/backend.sh
+# Keep the existing published base image compatible with the versions tested
+# with ROSAnnotator. These pins should also be included in the next base image.
+ARG INSTALL_RUNTIME_PINS=1
+RUN if [ "${INSTALL_RUNTIME_PINS}" = "1" ]; then \
+      /root/conda/envs/ros_env/bin/python -m pip install \
+        --no-cache-dir \
+        "huggingface_hub==0.24.6" \
+        "speechbrain==1.0.0" \
+        "torch==2.5.1" \
+        "torchvision==0.20.1" \
+        "torchaudio==2.5.1"; \
+    fi
 
-RUN ls -l /env_config/
-RUN cat /env_config/entrypoint.sh
-
-# Install ROS
-RUN bash /env_config/forge-ros.sh
-
-#Force ban LD_PRELOAD
-ENV LD_PRELOAD=
-
-
-# Install python dependencies
-ENV PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY requirements.txt requirements.txt
 
-# Install python dependencies
-RUN pip3 install -r requirements.txt
+# COPY --link keeps the application layer independent from the large base
+# layers, allowing BuildKit to rebase without downloading the full base image.
+COPY --link manage.py ./
+COPY --link ros_annotator/ ./ros_annotator/
+COPY --link rosbag_processing/ ./rosbag_processing/
+COPY --link public/ ./public/
 
-# Set the environment variables
-RUN /env_config/backend.sh
-
-# Add the bashrc file
-RUN cat /env_config/bashrc >> ${HOME}/.bashrc
-
-# Start the backend & ROS server
-ENTRYPOINT ["/bin/bash", "/env_config/entrypoint.sh"]
-CMD ["python3", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]

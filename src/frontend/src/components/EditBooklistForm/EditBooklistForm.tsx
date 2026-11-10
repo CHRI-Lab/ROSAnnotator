@@ -1,11 +1,20 @@
 // EditBooklistForm.tsx
 import React, { useState } from "react";
 import { Button, TextareaAutosize } from "@mui/material";
+import type { BookList } from "../../types/annotations";
 
 interface EditBooklistFormProps {
-  bookListData: Record<string, string[]>;
-  onSave: (data: any) => void;
+  bookListData: BookList;
+  onSave: (data: BookList) => void;
 }
+
+const isBookList = (value: unknown): value is BookList =>
+  typeof value === "object" &&
+  value !== null &&
+  Object.values(value).every(
+    (words) =>
+      Array.isArray(words) && words.every((word) => typeof word === "string")
+  );
 
 const EditBooklistForm: React.FC<EditBooklistFormProps> = ({
   bookListData,
@@ -17,7 +26,10 @@ const EditBooklistForm: React.FC<EditBooklistFormProps> = ({
 
   const handleSave = () => {
     try {
-      const data = JSON.parse(bookListDataText);
+      const data: unknown = JSON.parse(bookListDataText);
+      if (!isBookList(data)) {
+        throw new Error("Booklist values must be arrays of strings.");
+      }
       onSave(data);
     } catch (error) {
       alert("Invalid JSON data.");
