@@ -507,19 +507,18 @@ We are dedicated to maintaining this project by addressing bugs, refining functi
 
 ## Citation
 
-ROSAnnotator has been used in the following paper: https://arxiv.org/abs/2501.07051
+ROSAnnotator has been used in the following paper: https://dlnext.acm.org/doi/abs/10.5555/3721488.3721629
 
 If you use our code or the paper in your work, please cite the following:
 
 ```
-@misc{zhang2025rosannotatorwebapplicationrosbag,
-      title={ROSAnnotator: A Web Application for ROSBag Data Analysis in Human-Robot Interaction}, 
-      author={Yan Zhang and Haoqi Li and Ramtin Tabatabaei and Wafa Johal},
-      year={2025},
-      eprint={2501.07051},
-      archivePrefix={arXiv},
-      primaryClass={cs.RO},
-      url={https://arxiv.org/abs/2501.07051}, 
+@inproceedings{zhang2025rosannotator,
+    title={Rosannotator: A web application for rosbag data analysis in human-robot interaction},
+    author={Zhang, Yan and Li, Haoqi and Tabatabaei, Ramtin and Johal, Wafa},
+    booktitle={2025 20th ACM/IEEE International Conference on Human-Robot Interaction (HRI)},
+    pages={1099--1103},
+    year={2025},
+    organization={IEEE}
 }
 ```
 
